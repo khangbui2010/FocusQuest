@@ -133,8 +133,8 @@ Các action được hỗ trợ:
 - Profiles: `GET_PROFILES`, `GET_ACTIVE_PROFILE`, `SWITCH_PROFILE`, `CREATE_PROFILE`, `RENAME_PROFILE`, `DELETE_PROFILE`, `ADD_DOMAIN`, `REMOVE_DOMAIN`.
 - Economy & Stats: `GET_ECONOMY`, `GET_DAILY_STATS`.
 - Civilization (`CURRENT_SCHEMA_VERSION = 2`, lưới `8×8` / chunk `4×4` mở rộng theo tọa độ `origin` và điều kiện `Level >= k + 2`): `GET_CIVILIZATION_STATE`, `PLACE_BUILDING`, `REMOVE_BUILDING`, `EXPAND_LAND`.
-- Preferences: `SET_LANGUAGE`, `SET_CHIME_ENABLED`.
-- Focus Music Player: `MUSIC_GET_STATE`, `MUSIC_GET_CATALOG`, `MUSIC_REFRESH_CATALOG`, `MUSIC_PLAY_TRACK`, `MUSIC_PAUSE`, `MUSIC_RESUME`, `MUSIC_STOP`, `MUSIC_NEXT`, `MUSIC_PREVIOUS`, `MUSIC_SEEK`, `MUSIC_SET_VOLUME`, `MUSIC_SET_SHUFFLE`, `MUSIC_SET_REPEAT`, `MUSIC_SET_SYNC`, `MUSIC_SET_PLAY_DURING_BREAK`.
+- Preferences: `SET_LANGUAGE`, `SET_CHIME_ENABLED`, `SET_MUSIC_PLAYER_EXPANDED`.
+- Focus Music Player: `MUSIC_GET_STATE`, `MUSIC_GET_CATALOG`, `MUSIC_REFRESH_CATALOG`, `MUSIC_PLAY_TRACK`, `MUSIC_PAUSE`, `MUSIC_RESUME`, `MUSIC_STOP`, `MUSIC_NEXT`, `MUSIC_PREVIOUS`, `MUSIC_SEEK`, `MUSIC_SET_VOLUME`, `MUSIC_SET_SHUFFLE`, `MUSIC_SET_REPEAT`.
 - SW ↔ Offscreen Document (lọc bằng `target: 'offscreen' | 'background'`): `MUSIC_PLAY`, `MUSIC_PAUSE`, `MUSIC_STOP`, `MUSIC_SEEK`, `MUSIC_SET_VOLUME`, `MUSIC_GET_STATUS` ↔ `MUSIC_POSITION`, `MUSIC_ENDED`, `MUSIC_ERROR`.
 - UI hiển thị lỗi qua `src/i18n/errorTranslator.ts` để giữ nguyên thông điệp chuẩn khi dùng EN và dịch tự nhiên khi dùng VI.
 
@@ -185,17 +185,26 @@ Các action được hỗ trợ:
 
 ---
 
-## 7. Milestone LOFI — Kiến trúc Offscreen Streaming & Đồng bộ Phiên (LOFI-1 / LOFI-1b)
+## 7. Milestone LOFI — Kiến trúc Offscreen Streaming & Quy tắc Đồng bộ Phiên (LOFI-1 / LOFI-2)
 
 ### 7.1. Kiến trúc Offscreen & Quy tắc 30 giây của Chrome
 - `ChromeOffscreenAdapter` quản lý single-flight (`creatingPromise`) cho `chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] })` (Chrome >= 116) và `chrome.offscreen.createDocument({ url: 'offscreen.html', reasons: ['AUDIO_PLAYBACK'] })`.
 - `public/offscreen.html` + `src/offscreen/offscreen.ts` chạy `<audio id="lofi-audio" preload="metadata">` ngoài vòng đời Popup, tuân thủ CSP MV3 (không inline script).
-- **Xử lý tự đóng sau 30 giây im lặng (`AUDIO_PLAYBACK`):** Hệ thống **không** dùng âm thanh im lặng giả hay mẹo keepalive. Trong khi phát, Offscreen gửi `MUSIC_POSITION` mỗi `5s` và khi pause/seek/ended về `MusicCoordinator` lưu bền vững vào `STORAGE_KEYS.MUSIC_STATE`. Nếu Chrome đóng Offscreen Document khi pause quá 30 giây, lần `Resume` hoặc `Sync` tiếp theo tự kiểm tra `hasDocument()`, tái tạo document qua `ensureDocument()` và gửi `MUSIC_PLAY { startAtSec: savedPosition }` (được áp dụng ngay khi `<audio>` bắn `loadedmetadata`).
+- **Xử lý tự đóng sau 30 giây im lặng (`AUDIO_PLAYBACK`):** Hệ thống **không** dùng âm thanh im lặng giả hay mẹo keepalive. Trong khi phát, Offscreen gửi `MUSIC_POSITION` mỗi `5s` và khi pause/seek/ended về `MusicCoordinator` lưu bền vững vào `STORAGE_KEYS.MUSIC_STATE`. Nếu Chrome đóng Offscreen Document khi không hoạt động quá 30 giây trong lúc còn phiên đang chạy/tạm dừng, lần đồng bộ hoặc điều khiển tiếp theo tự kiểm tra `hasDocument()` và tái tạo document qua `ensureDocument()` với `MUSIC_PLAY { startAtSec: savedPosition }`.
 
-### 7.2. Catalog Online Động, Kiểm tra An toàn & Đồng bộ `SessionCoordinator`
+### 7.2. Quy tắc Hiển thị & Phát/Dừng Nhạc (LOFI-2)
+- **Hiển thị theo phiên tập trung (`App.tsx`, `MusicPlayerSheet.tsx`):** Mini-player (`56px`, thanh tiến độ `3px` ở mép trên) và Bottom Sheet mở rộng (`rounded-t-[22px]`, backdrop mờ) **chỉ render ở đáy màn Tập trung khi phiên đang ở trạng thái `RUNNING` hoặc `PAUSED`** (bao gồm focus, `SHORT_BREAK`, `LONG_BREAK`). Không hiển thị ở ngoài phiên (`null`/`IDLE`), không hiển thị ở các tab khác, và không hiển thị ở màn kết quả sau khi phiên đã kết thúc (`COMPLETED`/`ABANDONED`/`INTERRUPTED`).
+- **Quy tắc Phát/Dừng (`deriveMusicIntent` & `MusicCoordinator.syncInternal`):**
+  - `deriveMusicIntent(snapshot)` trả về `'keep'` khi `snapshot.status` là `'RUNNING'` hoặc `'PAUSED'`, và `'stop'` cho mọi trạng thái còn lại (`null`, `'IDLE'`, `'COMPLETED'`, `'ABANDONED'`, `'INTERRUPTED'`).
+  - **Pause phiên, Resume phiên, nghỉ ngắn, nghỉ dài không làm thay đổi trạng thái phát nhạc** (nhạc đang phát tiếp tục phát, nhạc đang tạm dừng thủ công giữ nguyên tạm dừng).
+  - **Không tự động phát** khi bắt đầu phiên (`START_SESSION`); người dùng tự bấm phát, giữ nguyên `currentTrackId`, `volume`, `muted`, `shuffle`, `repeatMode`.
+  - **Dừng hẳn (`STOPPED`, đóng Offscreen Document, `positionSec = 0`, giữ nguyên bài & tùy chọn đã chọn)** ngay khi phiên kết thúc vì bất cứ lý do gì (hoàn thành, `Give Up`, `INTERRUPTED`, `RESET_SESSION`, recovery không còn phiên hoạt động) hoặc khi `MUSIC_GET_STATE` / sự kiện từ offscreen phát hiện nhạc còn phát mà không có phiên hoạt động.
+  - Gỡ bỏ các message/tùy chọn cũ `MUSIC_SET_SYNC_WITH_SESSION`, `MUSIC_SET_PLAY_DURING_BREAK`, `stopMusicOnSessionEnd`, `musicPlayDuringBreak`, `pausedBySession`; dữ liệu cũ trong storage được bỏ qua an toàn khi chuẩn hóa state.
+
+### 7.3. Catalog Online Động, Kiểm tra An toàn & Cô lập Mutex
 - **Không đóng gói audio trong repo/extension:** `LOFI_CATALOG_URL` (`https://khangbui2010.github.io/FocusQuest-LOFI-archive/tracks.json`) được `MusicCoordinator` fetch từ Background Service Worker (cache TTL `6` giờ ở `STORAGE_KEYS.MUSIC_CATALOG_CACHE`), dựng URL HTTPS từ `LOFI_BASE_URL`, và fallback cache cũ nếu mạng lỗi hoặc JSON hỏng.
-- **Phòng vệ Catalog không đáng tin cậy:** `parseRemoteCatalog` từ chối payload không phải object, `schemaVersion !== 1`, mảng `tracks > 200`, chuỗi/URL quá dài; bỏ qua và đếm (`skippedCount`) các bài thiếu `title`/`artist`/`license`/`licenseUrl`/`sourceUrl`, sai định dạng/trùng `id` (`^[a-z0-9-]+$`), URL không phải `https://`, `file` chứa `..`/`/`/`\`, hoặc giấy phép ngoài danh sách SPDX cho phép (`CC0-1.0`, `CC-BY-4.0`, `CC-BY-3.0`, `CC-BY-SA-3.0`, `CC-BY-SA-4.0`). Nếu bài đang chọn biến mất khi refresh, tự động chuyển về bài đầu tiên (`positionSec: 0`). Nếu lần đầu mở offline chưa có cache, UI hiển thị thông báo song ngữ EN/VI + nút Retry (`music-retry-catalog-btn`) mà không crash.
-- **Đồng bộ `SessionCoordinator` & Cô lập Mutex:** Mọi điểm chuyển trạng thái phiên (`startSession`, `pauseSession`, `resumeSession`, `advancePomodoroStage`, `SKIP_POMODORO_BREAK`, `completeCountdown`, `finishStopwatch`, `giveUpCountdown`, `handleExtensionDisabledRecovery`, `handleBrowserStartupRecovery`, `executeLifecycleRecovery`, `resetSession`) gọi `onSessionSyncHook` / `onSessionEndedHook` **sau khi giải phóng `StorageMutex`** và bọc `try/catch` để không bao giờ giữ lock khi gọi Offscreen IPC hay làm sai lệch Coin/XP/commit thưởng.
+- **Phòng vệ Catalog không đáng tin cậy:** `parseRemoteCatalog` từ chối payload không phải object, `schemaVersion !== 1`, mảng `tracks > 200`, chuỗi/URL quá dài; bỏ qua và đếm (`skippedCount`) các bài thiếu `title`/`artist`/`license`/`licenseUrl`/`sourceUrl`, sai định dạng/trùng `id` (`^[a-z0-9-]+$`), URL không phải `https://`, `file` chứa `..`/`/`/`\`, hoặc giấy phép ngoài danh sách SPDX cho phép (`CC0-1.0`, `CC-BY-4.0`, `CC-BY-3.0`, `CC-BY-SA-3.0`, `CC-BY-SA-4.0`). Nếu bài đang chọn biến mất khi refresh, tự động chuyển về bài đầu tiên (`positionSec: 0`). Nếu lần đầu mở offline chưa có cache, UI hiển thị hàng gọn `"Chưa tải được nhạc"` + nút Thử lại (`music-mini-retry-btn` / `music-retry-catalog-btn`) mà không crash.
+- **Đồng bộ `SessionCoordinator` & Cô lập Mutex:** Các điểm chuyển trạng thái phiên gọi `onSessionSyncHook` / `onSessionEndedHook` **sau khi giải phóng `StorageMutex`** và bọc `try/catch` để không bao giờ giữ lock khi gọi Offscreen IPC hay làm sai lệch Coin/XP/commit thưởng.
 
-### 7.3. Ghi chú Quyền riêng tư (Privacy Note)
+### 7.4. Ghi chú Quyền riêng tư (Privacy Note)
 - Khi fetch `tracks.json` hoặc stream file `.mp3` từ `https://khangbui2010.github.io/FocusQuest-LOFI-archive/`, kết nối HTTPS trực tiếp từ trình duyệt người dùng tới GitHub Pages CDN sẽ để lộ **địa chỉ IP và HTTP headers chuẩn (như `User-Agent`)** cho máy chủ host tĩnh (`github.io`). Extension không gửi cookie theo dõi, không gửi telemetry và không gửi bất kỳ dữ liệu phiên tập trung nào ra ngoài.

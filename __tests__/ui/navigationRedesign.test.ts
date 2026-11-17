@@ -41,7 +41,7 @@ test('Navigation Redesign (Stage D): App defaults to Your Civilization Map with 
   assert.ok(html.includes('data-testid="nav-tab-awards"'), 'Awards tab must be present');
   assert.ok(html.includes('data-testid="nav-tab-stats"'), 'Stats tab must be present');
   assert.ok(html.includes('Stone Age'), 'Header must default to Stone Age era badge');
-  assert.ok(html.includes('data-testid="music-mini-player"'), 'Persistent mini-player must be rendered above bottom navbar');
+  assert.ok(!html.includes('data-testid="music-mini-player"'), 'Mini-player must not render outside active focus sessions');
   assert.ok(!html.includes('data-testid="music-player-open-btn"'), 'Legacy Header music toggle button must be removed');
   assert.ok(!html.includes('Daily Stats'), 'Legacy top-nav label Daily Stats must be removed');
   assert.ok(!html.includes('Allowlist'), 'Legacy top-nav label Allowlist must not appear on Map');

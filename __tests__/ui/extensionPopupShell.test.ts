@@ -36,7 +36,7 @@ test('Extension popup: live extension renders only the functional popup UI', () 
     assert.ok(html.includes('Awards'), 'Awards bottom tab must remain');
     assert.ok(html.includes('Stats'), 'Stats bottom tab must remain');
     assert.ok(html.includes('data-testid="help-btn"'), 'reward help button must remain');
-    assert.ok(html.includes('data-testid="music-mini-player"'), 'persistent music mini-player must render');
+    assert.ok(!html.includes('data-testid="music-mini-player"'), 'music mini-player must stay hidden when outside focus session');
     assert.ok(!html.includes('data-testid="music-player-open-btn"'), 'Header music toggle button must not exist');
   } finally {
     if (previousChrome === undefined) {

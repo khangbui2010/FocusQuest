@@ -421,60 +421,31 @@ test('deriveMusicIntent: pure intent truth table covers Running, Paused, Break, 
     },
   };
 
-  assert.equal(
-    deriveMusicIntent(null, { musicEnabled: true, playDuringBreak: false, stopMusicOnSessionEnd: true }),
-    'play'
-  );
-  assert.equal(
-    deriveMusicIntent(null, { musicEnabled: false, playDuringBreak: false, stopMusicOnSessionEnd: true }),
-    'stop'
-  );
-  assert.equal(
-    deriveMusicIntent(baseSession, { musicEnabled: true, playDuringBreak: false, stopMusicOnSessionEnd: true }),
-    'play'
-  );
-  assert.equal(
-    deriveMusicIntent(baseSession, { musicEnabled: false, playDuringBreak: false, stopMusicOnSessionEnd: true }),
-    'pause'
-  );
-  assert.equal(
-    deriveMusicIntent(
-      { ...baseSession, status: 'PAUSED' },
-      { musicEnabled: true, playDuringBreak: false, stopMusicOnSessionEnd: true }
-    ),
-    'pause'
-  );
+  assert.equal(deriveMusicIntent(null), 'stop');
+  assert.equal(deriveMusicIntent({ ...baseSession, status: 'IDLE' }), 'stop');
 
-  const breakSession: SessionSnapshot = {
+  assert.equal(deriveMusicIntent(baseSession), 'keep');
+  assert.equal(deriveMusicIntent({ ...baseSession, status: 'PAUSED' }), 'keep');
+
+  const shortBreakRunning: SessionSnapshot = {
     ...baseSession,
     pomodoroState: { ...baseSession.pomodoroState!, currentPhase: 'SHORT_BREAK' },
   };
-  assert.equal(
-    deriveMusicIntent(breakSession, { musicEnabled: true, playDuringBreak: false, stopMusicOnSessionEnd: true }),
-    'pause'
-  );
-  assert.equal(
-    deriveMusicIntent(breakSession, { musicEnabled: true, playDuringBreak: true, stopMusicOnSessionEnd: true }),
-    'play'
-  );
+  assert.equal(deriveMusicIntent(shortBreakRunning), 'keep');
 
-  assert.equal(
-    deriveMusicIntent(
-      { ...baseSession, status: 'COMPLETED' },
-      { musicEnabled: true, playDuringBreak: false, stopMusicOnSessionEnd: true }
-    ),
-    'stop'
-  );
-  assert.equal(
-    deriveMusicIntent(
-      { ...baseSession, status: 'COMPLETED' },
-      { musicEnabled: true, playDuringBreak: false, stopMusicOnSessionEnd: false }
-    ),
-    'play'
-  );
+  const longBreakPaused: SessionSnapshot = {
+    ...baseSession,
+    status: 'PAUSED',
+    pomodoroState: { ...baseSession.pomodoroState!, currentPhase: 'LONG_BREAK' },
+  };
+  assert.equal(deriveMusicIntent(longBreakPaused), 'keep');
+
+  assert.equal(deriveMusicIntent({ ...baseSession, status: 'COMPLETED' }), 'stop');
+  assert.equal(deriveMusicIntent({ ...baseSession, status: 'ABANDONED' }), 'stop');
+  assert.equal(deriveMusicIntent({ ...baseSession, status: 'INTERRUPTED' }), 'stop');
 });
 
-test('Session + Music Sync: Focus Pause/Resume survives 30s Offscreen closure & respects manual pause', async () => {
+test('LOFI-2 Session + Music Sync: Pause/Resume and Pomodoro Break never alter manual music playback state', async () => {
   const tracks = getFixtureTracks();
   const adapter = new MemoryStorageAdapter();
   const storage = new StorageManager(adapter);
@@ -502,67 +473,47 @@ test('Session + Music Sync: Focus Pause/Resume survives 30s Offscreen closure & 
 
   const profile = await profileManager.createProfile('MusicSyncProfile', ['example.com']);
 
-  // Start Countdown session and play music at 38s
+  // 1. Pre-configured track/volume/shuffle/repeat are preserved across session start and NEVER auto-play
+  await musicCoordinator.playTrack(tracks[1].id);
+  await musicCoordinator.setVolume(0.45, false);
+  await musicCoordinator.setShuffle(true);
+  await musicCoordinator.setRepeatMode('one');
+  await musicCoordinator.stop();
   await sessionCoordinator.startSession('COUNTDOWN', 25, profile.id);
+  let mState = await musicCoordinator.getState();
+  assert.equal(mState.status, 'STOPPED');
+  assert.equal(mState.currentTrackId, tracks[1].id);
+  assert.equal(mState.volume, 0.45);
+  assert.equal(mState.shuffle, true);
+  assert.equal(mState.repeatMode, 'one');
+  assert.equal(offscreen.documentOpen, false);
+
+  // 2. User manually starts music; Pause / Resume Focus session leaves PLAYING music playing
   await musicCoordinator.playTrack(tracks[0].id);
   offscreen.audioStatus = { ...offscreen.audioStatus, currentTime: 38 };
   await musicCoordinator.seek(38);
 
-  // 1. Pausing Focus session pauses music
   await sessionCoordinator.pauseSession();
-  let mState = await musicCoordinator.getState();
-  assert.equal(mState.status, 'PAUSED');
-  assert.equal(mState.pausedBySession, true);
+  mState = await musicCoordinator.getState();
+  assert.equal(mState.status, 'PLAYING');
   assert.equal(mState.positionSec, 38);
 
-  // 2. Simulate Chrome closing Offscreen Document after 30s idle while paused
-  offscreen.documentOpen = false;
-
-  // 3. Resuming Focus session recreates Offscreen Document & sends MUSIC_PLAY at saved 38s
   await sessionCoordinator.resumeSession();
   mState = await musicCoordinator.getState();
   assert.equal(mState.status, 'PLAYING');
-  assert.equal(mState.pausedBySession, false);
-  assert.equal(mState.positionSec, 38);
-  assert.equal(offscreen.documentOpen, true);
 
-  // 4. Manual music pause -> session pause -> session resume must NOT auto-start manually paused music
+  // 3. Manual music pause -> session pause -> session resume keeps music PAUSED
   await musicCoordinator.pause();
-  assert.equal((await musicCoordinator.getState()).musicEnabled, false);
+  assert.equal((await musicCoordinator.getState()).status, 'PAUSED');
   await sessionCoordinator.pauseSession();
   await sessionCoordinator.resumeSession();
   assert.equal((await musicCoordinator.getState()).status, 'PAUSED');
-  assert.equal((await musicCoordinator.getState()).musicEnabled, false);
-});
 
-test('Session + Music Sync: Pomodoro Break pauses music and playDuringBreak toggle reacts immediately', async () => {
-  const tracks = getFixtureTracks();
-  const adapter = new MemoryStorageAdapter();
-  const storage = new StorageManager(adapter);
-  const profileManager = new ProfileManager(storage);
-  const alarms = new MockAlarmsAdapter();
-  const notifications = new MockNotificationsAdapter();
-  const badge = new MockBadgeAdapter();
-  const blocking = new BlockingCoordinator(new MockDNRAdapter(), new MockTabsAdapter());
-  const offscreen = new MockOffscreenAdapter();
-  const musicCoordinator = new MusicCoordinator(storage, offscreen, tracks);
+  await sessionCoordinator.giveUpCountdown();
+  await sessionCoordinator.resetSession();
 
-  const sessionCoordinator = new SessionCoordinator(
-    storage,
-    profileManager,
-    alarms,
-    notifications,
-    badge,
-    blocking,
-    () => [],
-    (event) => musicCoordinator.handleFocusSessionEnded(event),
-    async (session, reason) => {
-      await musicCoordinator.sync(session, reason);
-    }
-  );
-
-  const profile = await profileManager.createProfile('PomoMusicProfile', ['example.com']);
-  const session = await sessionCoordinator.startSession('POMODORO_COUNTDOWN', 25, profile.id, {
+  // 4. Pomodoro Focus <-> Break transitions neither pause playing music nor resume paused music
+  const pomo = await sessionCoordinator.startSession('POMODORO_COUNTDOWN', 25, profile.id, {
     focusDurationMinutes: 25,
     focusIntervalDurationMinutes: 25,
     shortBreakDurationMinutes: 5,
@@ -571,40 +522,31 @@ test('Session + Music Sync: Pomodoro Break pauses music and playDuringBreak togg
     targetFocusSessions: 2,
     numberOfCycles: 1,
   });
-
   await musicCoordinator.playTrack(tracks[0].id);
   await musicCoordinator.seek(51);
 
-  // Transition FOCUS -> SHORT_BREAK with default playDuringBreak = false
   const alarmFocusEnd = buildPomodoroStageAlarmName(
-    session.id,
+    pomo.id,
     1,
     'FOCUS',
-    session.pomodoroState!.phaseStartedAt
+    pomo.pomodoroState!.phaseStartedAt
   );
   const breakSession = await sessionCoordinator.advancePomodoroStage(alarmFocusEnd);
   assert.equal(breakSession?.pomodoroState?.currentPhase, 'SHORT_BREAK');
-  assert.equal((await musicCoordinator.getState()).status, 'PAUSED');
-  assert.equal((await musicCoordinator.getState()).pausedBySession, true);
-
-  // Toggling playDuringBreak = true during break resumes music immediately
-  await musicCoordinator.setPlayDuringBreak(true);
   assert.equal((await musicCoordinator.getState()).status, 'PLAYING');
 
-  // Toggling playDuringBreak = false again pauses cleanly
-  await musicCoordinator.setPlayDuringBreak(false);
+  // Manual pause during break stays paused after transitioning back to FOCUS
+  await musicCoordinator.pause();
   assert.equal((await musicCoordinator.getState()).status, 'PAUSED');
 
-  // Transition SHORT_BREAK -> FOCUS resumes automatically
   const alarmBreakEnd = buildPomodoroStageAlarmName(
-    session.id,
+    pomo.id,
     1,
     'SHORT_BREAK',
     breakSession!.pomodoroState!.phaseStartedAt
   );
   await sessionCoordinator.advancePomodoroStage(alarmBreakEnd);
-  assert.equal((await musicCoordinator.getState()).status, 'PLAYING');
-  assert.equal((await musicCoordinator.getState()).positionSec, 51);
+  assert.equal((await musicCoordinator.getState()).status, 'PAUSED');
 });
 
 test('MusicCoordinator: dynamic online catalog cache TTL (6h), new-track auto-discovery, and offline fallback', async () => {
@@ -843,7 +785,7 @@ test('MusicCoordinator: preserves cache on malformed JSON / invalid schema, hand
   }
 });
 
-test('Session + Music Sync: full SessionCoordinator transition matrix honors stopMusicOnSessionEnd and missing recovery/reset hooks', async () => {
+test('LOFI-2 Session + Music Sync: always stops music cleanly on session end, preserves preferences, safely ignores legacy fields, and stops orphaned playback', async () => {
   const tracks = getFixtureTracks();
 
   const createHarness = async () => {
@@ -879,6 +821,7 @@ test('Session + Music Sync: full SessionCoordinator transition matrix honors sto
     );
     const profile = await profileManager.createProfile('MatrixProfile', ['example.com']);
     return {
+      adapter,
       storage,
       sessionCoordinator,
       musicCoordinator,
@@ -888,54 +831,59 @@ test('Session + Music Sync: full SessionCoordinator transition matrix honors sto
     };
   };
 
-  // Scenario A: Countdown Start -> Auto-Resume -> Complete Countdown (stopMusicOnSessionEnd = true vs false)
+  // Scenario A: Countdown Start -> Pause -> Resume -> Complete stops music & preserves selected track/volume/shuffle/repeat
   {
     const h = await createHarness();
     await h.sessionCoordinator.startSession('COUNTDOWN', 25, h.profile.id);
-    await h.musicCoordinator.playTrack(tracks[0].id);
-    await h.sessionCoordinator.pauseSession();
-    assert.equal((await h.musicCoordinator.getState()).status, 'PAUSED');
+    await h.musicCoordinator.playTrack(tracks[1].id);
+    await h.musicCoordinator.setVolume(0.35, true);
+    await h.musicCoordinator.setShuffle(true);
+    await h.musicCoordinator.setRepeatMode('all');
+    await h.musicCoordinator.seek(42);
 
-    // Auto-resume resumes music
+    await h.sessionCoordinator.pauseSession();
+    assert.equal((await h.musicCoordinator.getState()).status, 'PLAYING');
+
     await h.sessionCoordinator.resumeSession(true);
     assert.equal((await h.musicCoordinator.getState()).status, 'PLAYING');
 
-    // Complete countdown stops music when stopMusicOnSessionEnd = true
     await h.sessionCoordinator.completeCountdown();
-    assert.equal((await h.musicCoordinator.getState()).status, 'STOPPED');
+    const afterComplete = await h.musicCoordinator.getState();
+    assert.equal(afterComplete.status, 'STOPPED');
+    assert.equal(afterComplete.positionSec, 0);
+    assert.equal(afterComplete.currentTrackId, tracks[1].id);
+    assert.equal(afterComplete.volume, 0.35);
+    assert.equal(afterComplete.muted, true);
+    assert.equal(afterComplete.shuffle, true);
+    assert.equal(afterComplete.repeatMode, 'all');
     assert.equal(h.offscreen.documentOpen, false);
 
-    // Reset back to IDLE preserves STOPPED
     await h.sessionCoordinator.resetSession();
     assert.equal((await h.musicCoordinator.getState()).status, 'STOPPED');
 
-    // Repeat with stopMusicOnSessionEnd = false -> stays PLAYING across completion and resetSession
-    await h.musicCoordinator.setSyncWithSession(false);
+    // Starting next session must NOT auto-play
     await h.sessionCoordinator.startSession('COUNTDOWN', 25, h.profile.id);
-    await h.musicCoordinator.playTrack(tracks[0].id);
-    await h.sessionCoordinator.completeCountdown();
-    assert.equal((await h.musicCoordinator.getState()).status, 'PLAYING');
-    await h.sessionCoordinator.resetSession();
-    assert.equal((await h.musicCoordinator.getState()).status, 'PLAYING');
+    assert.equal((await h.musicCoordinator.getState()).status, 'STOPPED');
+    assert.equal(h.offscreen.documentOpen, false);
   }
 
-  // Scenario B: Stopwatch Finish & GiveUp (Countdown) & SKIP_POMODORO_BREAK
+  // Scenario B: Stopwatch Finish, Give Up, Pomodoro completion & SKIP_POMODORO_BREAK
   {
     const h = await createHarness();
     await h.sessionCoordinator.startSession('STOPWATCH', 0, h.profile.id);
     await h.musicCoordinator.playTrack(tracks[0].id);
     await h.sessionCoordinator.finishStopwatch();
     assert.equal((await h.musicCoordinator.getState()).status, 'STOPPED');
+    assert.equal((await h.musicCoordinator.getState()).positionSec, 0);
     await h.sessionCoordinator.resetSession();
 
-    // Countdown Give Up stops music when stopMusicOnSessionEnd = true
     await h.sessionCoordinator.startSession('COUNTDOWN', 25, h.profile.id);
     await h.musicCoordinator.playTrack(tracks[0].id);
     await h.sessionCoordinator.giveUpCountdown();
     assert.equal((await h.musicCoordinator.getState()).status, 'STOPPED');
     await h.sessionCoordinator.resetSession();
 
-    // Pomodoro Break -> SKIP_POMODORO_BREAK via MessageHandler -> immediately resumes music
+    // Pomodoro Break -> SKIP_POMODORO_BREAK preserves current playing state without pausing/resuming
     const pomo = await h.sessionCoordinator.startSession('POMODORO_COUNTDOWN', 25, h.profile.id, {
       focusDurationMinutes: 25,
       focusIntervalDurationMinutes: 25,
@@ -953,7 +901,7 @@ test('Session + Music Sync: full SessionCoordinator transition matrix honors sto
       pomo.pomodoroState!.phaseStartedAt
     );
     await h.sessionCoordinator.advancePomodoroStage(alarmFocusEnd);
-    assert.equal((await h.musicCoordinator.getState()).status, 'PAUSED');
+    assert.equal((await h.musicCoordinator.getState()).status, 'PLAYING');
 
     const skipResp = await h.messageHandler.handleMessage({ action: 'SKIP_POMODORO_BREAK' });
     assert.equal(skipResp.success, true);
@@ -976,23 +924,30 @@ test('Session + Music Sync: full SessionCoordinator transition matrix honors sto
     assert.equal((await h.musicCoordinator.getState()).status, 'STOPPED');
   }
 
-  // Scenario C: Extension Disabled, Browser Startup (<1s active & >=1s interrupted), Non-startup terminal recovery
+  // Scenario C: Extension Disabled, Browser Startup, Non-startup recovery, MUSIC_GET_STATE orphaned stop, & Legacy storage data
   {
     const h = await createHarness();
-    // 1. Extension disabled interrupts & stops music
     const s1 = await h.sessionCoordinator.startSession('COUNTDOWN', 25, h.profile.id);
     await h.musicCoordinator.playTrack(tracks[0].id);
     await h.sessionCoordinator.handleExtensionDisabledRecovery(s1, 'EXTENSION_DISABLED');
     assert.equal((await h.musicCoordinator.getState()).status, 'STOPPED');
 
-    // Non-startup recovery on terminal session when stale music somehow active also stops it
+    // Orphaned PLAYING state when session is terminal/absent stops on lifecycle wake AND on MUSIC_GET_STATE
     await h.musicCoordinator.playTrack(tracks[0].id);
     assert.equal((await h.musicCoordinator.getState()).status, 'PLAYING');
     await h.sessionCoordinator.handleLifecycleEvent({ reason: 'SERVICE_WORKER_WAKE' });
     assert.equal((await h.musicCoordinator.getState()).status, 'STOPPED');
     await h.sessionCoordinator.resetSession();
 
-    // 2. Browser startup with active COUNTDOWN (< 1s downtime) invokes BROWSER_STARTUP_ACTIVE sync
+    await h.musicCoordinator.playTrack(tracks[0].id);
+    assert.equal((await h.musicCoordinator.getState()).status, 'PLAYING');
+    const getStateRes = await h.messageHandler.handleMessage({ action: 'MUSIC_GET_STATE' });
+    assert.equal(getStateRes.success, true);
+    assert.equal((getStateRes.data as { state: { status: string; positionSec: number } }).state.status, 'STOPPED');
+    assert.equal((getStateRes.data as { state: { positionSec: number } }).state.positionSec, 0);
+    assert.equal(h.offscreen.documentOpen, false);
+
+    // Browser startup with active COUNTDOWN (< 1s downtime) preserves PLAYING music
     const now = Date.now();
     const s2 = await h.sessionCoordinator.startSession('COUNTDOWN', 25, h.profile.id);
     await h.musicCoordinator.playTrack(tracks[0].id);
@@ -1005,7 +960,7 @@ test('Session + Music Sync: full SessionCoordinator transition matrix honors sto
     await h.sessionCoordinator.handleBrowserStartupRecovery(s2);
     assert.equal((await h.musicCoordinator.getState()).status, 'PLAYING');
 
-    // 3. Browser startup with >= 10s downtime interrupts Countdown & stops music
+    // Browser startup with >= 10s downtime interrupts Countdown & stops music
     await h.storage.setCurrentSession({
       ...s2,
       startedAt: now - 120_000,
@@ -1014,6 +969,57 @@ test('Session + Music Sync: full SessionCoordinator transition matrix honors sto
     });
     await h.sessionCoordinator.handleBrowserStartupRecovery(s2);
     assert.equal((await h.musicCoordinator.getState()).status, 'STOPPED');
+    await h.sessionCoordinator.resetSession();
+
+    // Removed legacy messages are rejected cleanly
+    const removedSyncRes = await h.messageHandler.handleMessage({
+      action: 'MUSIC_SET_SYNC_WITH_SESSION' as never,
+      payload: { syncWithSession: false } as never,
+    });
+    assert.equal(removedSyncRes.success, false);
+    const removedBreakRes = await h.messageHandler.handleMessage({
+      action: 'MUSIC_SET_PLAY_DURING_BREAK' as never,
+      payload: { playDuringBreak: true } as never,
+    });
+    assert.equal(removedBreakRes.success, false);
+
+    // Legacy storage fields in MUSIC_STATE and USER_SETTINGS are safely ignored without migration or crash
+    await h.adapter.set(STORAGE_KEYS.MUSIC_STATE, {
+      status: 'PLAYING',
+      currentTrackId: tracks[2].id,
+      positionSec: 15,
+      durationSec: 130,
+      volume: 0.6,
+      muted: false,
+      shuffle: false,
+      repeatMode: 'off',
+      shuffledOrder: tracks.map((t) => t.id),
+      musicEnabled: true,
+      syncWithSession: false,
+      playDuringBreak: true,
+      pausedBySession: true,
+      catalogUpdatedAt: '2026-11-17',
+      lastUpdatedAt: Date.now(),
+      lastError: null,
+      lastErrorCode: null,
+    });
+    const currentSettings = await h.storage.getSettings();
+    await h.adapter.set(STORAGE_KEYS.SETTINGS, {
+      ...currentSettings,
+      stopMusicOnSessionEnd: false,
+      musicPlayDuringBreak: true,
+    });
+
+    const mcLegacy = new MusicCoordinator(h.storage, h.offscreen, tracks);
+    const loadedLegacy = await mcLegacy.ensureInitialized();
+    assert.equal(loadedLegacy.currentTrackId, tracks[2].id);
+    assert.equal('syncWithSession' in (loadedLegacy as unknown as Record<string, unknown>), false);
+    assert.equal('playDuringBreak' in (loadedLegacy as unknown as Record<string, unknown>), false);
+    assert.equal('pausedBySession' in (loadedLegacy as unknown as Record<string, unknown>), false);
+    // Even with legacy flags saying false, sync(null) forces STOP
+    await mcLegacy.sync(null, 'LEGACY_CHECK');
+    assert.equal((await mcLegacy.getState()).status, 'STOPPED');
+    assert.equal((await mcLegacy.getState()).currentTrackId, tracks[2].id);
   }
 });
 

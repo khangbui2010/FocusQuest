@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ScrollText, Trophy } from 'lucide-react';
 import { Header } from './ui/components/Header.tsx';
 import { Navbar, ActiveTab } from './ui/components/Navbar.tsx';
@@ -17,6 +17,11 @@ import {
   getMusicStateClient,
 } from './ui/services/extensionClient.ts';
 import { skipPomodoroBreakAction } from './ui/services/sessionActions.ts';
+import {
+  isInFocusSession,
+  resolveEffectiveTab,
+  executeExitSessionAction,
+} from './ui/utils/sessionNavigation.ts';
 import { FullSessionStateResponse, MusicStateResponseData } from './types/messages.ts';
 import { SessionSnapshot, SessionMode, PomodoroConfig } from './types/session.ts';
 import { FocusProfile } from './types/profiles.ts';
@@ -59,10 +64,7 @@ const DEFAULT_MUSIC_STATE: MusicPlayerState = {
   shuffle: false,
   repeatMode: 'off',
   shuffledOrder: [],
-  syncWithSession: true,
   musicEnabled: false,
-  playDuringBreak: false,
-  pausedBySession: false,
   catalogUpdatedAt: null,
   lastUpdatedAt: 0,
   lastError: null,
@@ -121,12 +123,10 @@ interface PopupShellProps {
   handleSetMusicVolume: (volume: number, muted?: boolean) => Promise<void>;
   handleToggleMusicShuffle: (enabled: boolean) => Promise<void>;
   handleCycleMusicRepeat: (mode: RepeatMode) => Promise<void>;
-  handleToggleMusicSyncWithSession: (enabled: boolean) => Promise<void>;
-  handleToggleMusicPlayDuringBreak: (enabled: boolean) => Promise<void>;
   handleRefreshMusicCatalog: () => Promise<void>;
 }
 
-const PopupShell: React.FC<PopupShellProps> = ({
+export const PopupShell: React.FC<PopupShellProps> = ({
   onToggleLanguage,
   session,
   economy,
@@ -174,11 +174,21 @@ const PopupShell: React.FC<PopupShellProps> = ({
   handleSetMusicVolume,
   handleToggleMusicShuffle,
   handleCycleMusicRepeat,
-  handleToggleMusicSyncWithSession,
-  handleToggleMusicPlayDuringBreak,
   handleRefreshMusicCatalog,
 }) => {
   const { t } = useTranslation();
+  const inFocusSession = isInFocusSession(session);
+  const effectiveTab = resolveEffectiveTab(activeTab, session);
+  const showMusicPlayer = Boolean(
+    session &&
+      (session.status === 'RUNNING' || session.status === 'PAUSED') &&
+      effectiveTab === 'focus'
+  );
+
+  const handleChangeTab = (nextTab: ActiveTab) => {
+    if (inFocusSession && nextTab !== 'focus') return;
+    setActiveTab(nextTab);
+  };
 
   return (
     <div className="relative w-[400px] min-h-[580px] max-h-[600px] flex flex-col bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 overflow-hidden shadow-xl rounded-none">
@@ -190,17 +200,17 @@ const PopupShell: React.FC<PopupShellProps> = ({
         isBlockingActive={isBlockingActive}
         isSessionActive={isSessionActive}
         era={civEra}
-        activeView={activeTab}
-        onNavigateHome={() => setActiveTab('map')}
+        activeView={effectiveTab}
+        onNavigateHome={inFocusSession ? undefined : () => handleChangeTab('map')}
         onToggleLanguage={onToggleLanguage}
       />
 
       <main
         className={`flex-1 min-h-0 flex flex-col ${
-          activeTab === 'map' ? 'overflow-hidden' : 'overflow-y-auto'
+          effectiveTab === 'map' ? 'overflow-hidden' : 'overflow-y-auto'
         }`}
       >
-        {activeTab === 'map' && (
+        {effectiveTab === 'map' && (
           <div className="flex-1 min-h-0 flex flex-col">
             <div className="px-3 py-1.5 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
               <h1 className="text-xs font-bold tracking-tight text-slate-900 dark:text-slate-100">
@@ -214,7 +224,7 @@ const PopupShell: React.FC<PopupShellProps> = ({
           </div>
         )}
 
-        {activeTab === 'quests' && (
+        {effectiveTab === 'quests' && (
           <section
             data-testid="quests-placeholder-view"
             className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-3"
@@ -236,7 +246,7 @@ const PopupShell: React.FC<PopupShellProps> = ({
           </section>
         )}
 
-        {activeTab === 'focus' && (
+        {effectiveTab === 'focus' && (
           <TimerView
             session={session}
             activeProfile={activeProfile}
@@ -256,7 +266,7 @@ const PopupShell: React.FC<PopupShellProps> = ({
           />
         )}
 
-        {activeTab === 'awards' && (
+        {effectiveTab === 'awards' && (
           <section
             data-testid="awards-placeholder-view"
             className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-3"
@@ -278,35 +288,38 @@ const PopupShell: React.FC<PopupShellProps> = ({
           </section>
         )}
 
-        {activeTab === 'stats' && <StatsView todayStats={todayStats} />}
+        {effectiveTab === 'stats' && <StatsView todayStats={todayStats} />}
       </main>
 
-      <MusicPlayerSheet
-        isExpanded={isMusicExpanded}
-        onToggleExpand={onToggleMusicExpanded}
-        musicState={musicState}
-        catalog={musicCatalog}
-        onPlayTrack={handlePlayMusicTrack}
-        onPause={handlePauseMusic}
-        onResume={handleResumeMusic}
-        onStop={handleStopMusic}
-        onNext={handleNextMusic}
-        onPrevious={handlePreviousMusic}
-        onSeek={handleSeekMusic}
-        onSetVolume={handleSetMusicVolume}
-        onToggleShuffle={handleToggleMusicShuffle}
-        onCycleRepeat={handleCycleMusicRepeat}
-        onToggleSyncWithSession={handleToggleMusicSyncWithSession}
-        onTogglePlayDuringBreak={handleToggleMusicPlayDuringBreak}
-        onRefreshCatalog={handleRefreshMusicCatalog}
-      />
+      {showMusicPlayer && (
+        <MusicPlayerSheet
+          isExpanded={isMusicExpanded}
+          onToggleExpand={onToggleMusicExpanded}
+          hasBottomNav={false}
+          musicState={musicState}
+          catalog={musicCatalog}
+          onPlayTrack={handlePlayMusicTrack}
+          onPause={handlePauseMusic}
+          onResume={handleResumeMusic}
+          onStop={handleStopMusic}
+          onNext={handleNextMusic}
+          onPrevious={handlePreviousMusic}
+          onSeek={handleSeekMusic}
+          onSetVolume={handleSetMusicVolume}
+          onToggleShuffle={handleToggleMusicShuffle}
+          onCycleRepeat={handleCycleMusicRepeat}
+          onRefreshCatalog={handleRefreshMusicCatalog}
+        />
+      )}
 
-      <Navbar
-        activeTab={activeTab}
-        onChangeTab={setActiveTab}
-        isSessionActive={isSessionActive}
-        session={session}
-      />
+      {!inFocusSession && (
+        <Navbar
+          activeTab={effectiveTab}
+          onChangeTab={handleChangeTab}
+          isSessionActive={isSessionActive}
+          session={session}
+        />
+      )}
 
       <ProfileBottomSheet
         isOpen={isProfileSheetOpen}
@@ -328,14 +341,30 @@ const PopupShell: React.FC<PopupShellProps> = ({
   );
 };
 
-export default function App() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('map');
+export interface AppProps {
+  initialSession?: SessionSnapshot | null;
+  initialTab?: ActiveTab;
+  initialLocale?: SupportedLocale;
+}
+
+export const App: React.FC<AppProps> = ({
+  initialSession,
+  initialTab = 'map',
+  initialLocale,
+}) => {
+  const [activeTab, setActiveTab] = useState<ActiveTab>(() =>
+    resolveEffectiveTab(initialTab, initialSession ?? null)
+  );
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isProfileSheetOpen, setIsProfileSheetOpen] = useState(false);
   const [isMusicExpanded, setIsMusicExpanded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
-  const [session, setSession] = useState<SessionSnapshot | null>(null);
+  const [session, setSession] = useState<SessionSnapshot | null>(initialSession ?? null);
+  const [hasResolvedInitialSession, setHasResolvedInitialSession] = useState<boolean>(
+    () => typeof document === 'undefined' || initialSession !== undefined
+  );
+  const isResettingRef = useRef(false);
   const [economy, setEconomy] = useState<PlayerEconomy>(DEFAULT_ECONOMY);
   const [activeProfile, setActiveProfile] = useState<FocusProfile | null>(DEFAULT_PROFILE);
   const [profiles, setProfiles] = useState<FocusProfile[]>([DEFAULT_PROFILE]);
@@ -360,54 +389,69 @@ export default function App() {
   // Sync state from background service worker / simulated state
   const refreshState = useCallback(async () => {
     try {
-      const [stateRes, profilesRes, civRes, musicRes] = await Promise.all([
-        sendExtensionMessage<FullSessionStateResponse>({ action: 'GET_SESSION_STATE' }),
-        sendExtensionMessage<FocusProfile[] | ProfilesResponseData>({ action: 'GET_PROFILES' }),
-        getCivilizationStateClient(),
-        getMusicStateClient(),
-      ]);
-
-      if (stateRes.success && stateRes.data) {
-        setSession(stateRes.data.currentSession);
-        setEconomy(stateRes.data.economy);
-        setActiveProfile(stateRes.data.activeProfile);
-        setTodayStats(stateRes.data.todayStats);
-        setLifetimeFocusMinutes(
-          stateRes.data.lifetimeFocusMinutes ??
-            stateRes.data.todayStats?.totalFocusMinutes ??
-            0
-        );
-        setIsBlockingActive(Boolean(stateRes.data.isBlockingActive));
-        if (stateRes.data.settings) {
-          setSettings(stateRes.data.settings);
-          setIsMusicExpanded(Boolean(stateRes.data.settings.musicPlayerExpanded));
-        }
-      }
-
-      if (profilesRes.success && profilesRes.data) {
-        if (Array.isArray(profilesRes.data)) {
-          setProfiles(profilesRes.data);
-        } else if (
-          profilesRes.data &&
-          Array.isArray((profilesRes.data as ProfilesResponseData).profiles)
-        ) {
-          setProfiles((profilesRes.data as ProfilesResponseData).profiles);
-          if ((profilesRes.data as ProfilesResponseData).activeProfile) {
-            setActiveProfile((profilesRes.data as ProfilesResponseData).activeProfile!);
+      const statePromise = sendExtensionMessage<FullSessionStateResponse>({
+        action: 'GET_SESSION_STATE',
+      }).then((stateRes) => {
+        if (stateRes.success && stateRes.data) {
+          const nextSession = stateRes.data.currentSession;
+          setSession(nextSession);
+          if (isInFocusSession(nextSession)) {
+            setActiveTab('focus');
+          }
+          setEconomy(stateRes.data.economy);
+          setActiveProfile(stateRes.data.activeProfile);
+          setTodayStats(stateRes.data.todayStats);
+          setLifetimeFocusMinutes(
+            stateRes.data.lifetimeFocusMinutes ??
+              stateRes.data.todayStats?.totalFocusMinutes ??
+              0
+          );
+          setIsBlockingActive(Boolean(stateRes.data.isBlockingActive));
+          if (stateRes.data.settings) {
+            setSettings(stateRes.data.settings);
+            setIsMusicExpanded(Boolean(stateRes.data.settings.musicPlayerExpanded));
           }
         }
-      }
+        setHasResolvedInitialSession(true);
+        return stateRes;
+      });
 
-      if (civRes.success && civRes.data?.era) {
-        setCivEra(civRes.data.era);
-      }
+      const profilesPromise = sendExtensionMessage<FocusProfile[] | ProfilesResponseData>({
+        action: 'GET_PROFILES',
+      }).then((profilesRes) => {
+        if (profilesRes.success && profilesRes.data) {
+          if (Array.isArray(profilesRes.data)) {
+            setProfiles(profilesRes.data);
+          } else if (
+            profilesRes.data &&
+            Array.isArray((profilesRes.data as ProfilesResponseData).profiles)
+          ) {
+            setProfiles((profilesRes.data as ProfilesResponseData).profiles);
+            if ((profilesRes.data as ProfilesResponseData).activeProfile) {
+              setActiveProfile((profilesRes.data as ProfilesResponseData).activeProfile!);
+            }
+          }
+        }
+      });
 
-      if (musicRes.success && musicRes.data) {
-        setMusicState(musicRes.data.state);
-        setMusicCatalog(musicRes.data.catalog);
-      }
+      const civPromise = getCivilizationStateClient().then((civRes) => {
+        if (civRes.success && civRes.data?.era) {
+          setCivEra(civRes.data.era);
+        }
+      });
+
+      const musicPromise = getMusicStateClient().then((musicRes) => {
+        if (musicRes.success && musicRes.data) {
+          setMusicState(musicRes.data.state);
+          setMusicCatalog(musicRes.data.catalog);
+        }
+      });
+
+      await Promise.all([statePromise, profilesPromise, civPromise, musicPromise]);
     } catch {
       // Non-blocking fallback
+    } finally {
+      setHasResolvedInitialSession(true);
     }
   }, []);
 
@@ -479,8 +523,19 @@ export default function App() {
   };
 
   const handleResetSession = async () => {
-    await sendExtensionMessage({ action: 'RESET_SESSION' });
-    await refreshState();
+    if (isResettingRef.current) return;
+    isResettingRef.current = true;
+    setIsLoading(true);
+    try {
+      await executeExitSessionAction({
+        sendReset: () => sendExtensionMessage({ action: 'RESET_SESSION' }),
+        refreshState,
+        onNavigateToMap: () => setActiveTab('map'),
+      });
+    } finally {
+      isResettingRef.current = false;
+      setIsLoading(false);
+    }
   };
 
   // Profile Action Handlers
@@ -697,22 +752,6 @@ export default function App() {
     applyMusicResponse(res);
   };
 
-  const handleToggleMusicSyncWithSession = async (enabled: boolean) => {
-    const res = await sendExtensionMessage<MusicStateResponseData>({
-      action: 'MUSIC_SET_SYNC_WITH_SESSION',
-      payload: { enabled },
-    });
-    applyMusicResponse(res);
-  };
-
-  const handleToggleMusicPlayDuringBreak = async (enabled: boolean) => {
-    const res = await sendExtensionMessage<MusicStateResponseData>({
-      action: 'MUSIC_SET_PLAY_DURING_BREAK',
-      payload: { enabled },
-    });
-    applyMusicResponse(res);
-  };
-
   const handleRefreshMusicCatalog = async () => {
     const res = await sendExtensionMessage<MusicStateResponseData>({
       action: 'MUSIC_REFRESH_CATALOG',
@@ -722,15 +761,16 @@ export default function App() {
 
   const isSessionActive = Boolean(
     session &&
+      session.status !== 'IDLE' &&
       session.status !== 'COMPLETED' &&
       session.status !== 'ABANDONED' &&
       session.status !== 'INTERRUPTED'
   );
 
   const inLiveExtension = isChromeExtension();
-  const activeLocale = resolveLocale(settings?.language);
+  const activeLocale = resolveLocale(settings?.language ?? initialLocale);
 
-  const popupContent = (
+  const popupContent = hasResolvedInitialSession ? (
     <PopupShell
       onToggleLanguage={handleSetLanguage}
       session={session}
@@ -779,9 +819,12 @@ export default function App() {
       handleSetMusicVolume={handleSetMusicVolume}
       handleToggleMusicShuffle={handleToggleMusicShuffle}
       handleCycleMusicRepeat={handleCycleMusicRepeat}
-      handleToggleMusicSyncWithSession={handleToggleMusicSyncWithSession}
-      handleToggleMusicPlayDuringBreak={handleToggleMusicPlayDuringBreak}
       handleRefreshMusicCatalog={handleRefreshMusicCatalog}
+    />
+  ) : (
+    <div
+      data-testid="popup-boot-loading"
+      className="relative w-[400px] min-h-[580px] max-h-[600px] flex flex-col bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 overflow-hidden shadow-xl rounded-none"
     />
   );
 
@@ -859,4 +902,6 @@ export default function App() {
       </div>
     </I18nProvider>
   );
-}
+};
+
+export default App;

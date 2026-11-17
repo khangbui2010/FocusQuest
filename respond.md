@@ -1,103 +1,103 @@
 # BÁO CÁO NGHIỆM THU — MILESTONE LOFI / GIAI ĐOẠN LOFI-2
 
-**Giai đoạn:** Milestone LOFI — Giai đoạn LOFI-2 *(giao diện & dữ liệu hiển thị trình phát nhạc + trời sáng cho cảnh tập trung; KHÔNG thuộc Phase 5 / Milestone 5B.5)*  
+**Giai đoạn:** Milestone LOFI — Giai đoạn LOFI-2 *(mini-player chỉ hiện khi đang trong phiên tập trung, playlist trong bảng mở rộng, đổi quy tắc phát/dừng nhạc, dọn Header & nền trời sáng cho cảnh tập trung; KHÔNG thuộc Phase 5 hay Milestone 5B.5)*  
 **Ngày hoàn thành:** 2026-11-17  
 **File sao lưu báo cáo cũ:** `/respond_lofi2_prev.md`  
-**Trạng thái:** Đã hoàn tất kiểm định (`527 / 527` tests PASS 3/3 lần, Build PASS, Lint PASS) — **DỪNG chờ duyệt**
+**Trạng thái:** Đã hoàn tất kiểm định (`530 / 530` tests PASS 3/3 lần, Build PASS, Lint PASS) — **DỪNG chờ duyệt**
 
 ---
 
 ## 1. PHẠM VI TUÂN THỦ ("KHÔNG LÀM")
 
-- **Không sửa lõi phát nhạc & sync (`LOFI-1`):** Giữ nguyên hoàn toàn `MusicCoordinator` (`src/background/musicCoordinator.ts`), `src/offscreen/offscreen.ts`, `public/offscreen.html`, cơ chế tải/kiểm tra/cache `tracks.json` (`src/data/musicCatalog.ts`), và toàn bộ giao thức `MUSIC_*`.
-- **Không chạm hệ thống phiên & kinh tế:** Giữ nguyên hoàn toàn `SessionCoordinator`, `RewardEngine`, công thức Coin/XP/Multiplier/CoinBonus, schema civilization/quest (`CURRENT_SCHEMA_VERSION` không đổi).
-- **Không cài thêm thư viện npm mới và không thêm file audio cục bộ** (`0` file `.mp3/.ogg/.wav/.m4a/.flac` trong `public/` & `dist/`).
+- **Không sửa `offscreen`, catalog loader/cache hay nguồn nhạc:** Giữ nguyên hoàn toàn `src/offscreen/*`, `public/offscreen.html`, `src/data/musicCatalog.ts` và các URL archive HTTPS. Không thêm thư viện npm mới và không đóng gói file âm thanh cục bộ (`0` file audio trong `public/` & `dist/`).
+- **Không đổi lõi game/kinh tế/schema/blocking:** Giữ nguyên `RewardEngine`, toàn bộ công thức kinh tế/CoinBonus/Multiplier, `CURRENT_SCHEMA_VERSION`, logic chặn web/allowlist (`BlockingCoordinator`, `dnrAdapter`, `ProfileManager`), và không tái cấu trúc `SessionCoordinator` (chỉ giữ nguyên điểm gọi hook đồng bộ để dừng nhạc khi phiên kết thúc).
 
 ---
 
-## 2. CHI TIẾT CÁC HẠNG MỤC ĐÃ TRIỂN KHAI
+## 2. CHI TIẾT CÁC HẠNG MỤC ĐÃ TRIỂN KHAI (A–G)
 
-### 2.1. Mini-Player luôn hiện (`56px`) ngay trên `<Navbar>` trên mọi tab (`MusicPlayerSheet.tsx` & `App.tsx`)
-- Hợp nhất thành **một component duy nhất** (`MusicPlayerSheet`) đặt ngay phía trên `<Navbar>` trong `App.tsx`, hiển thị ổn định trên tất cả 5 tab (`Nhiệm vụ`, `Tập trung`, `Bản đồ`, `Thành tựu`, `Thống kê`), tuyệt đối không tạo hai trình phát trùng lặp.
-- **Nội dung mini-player (`data-testid="music-mini-player"`, cao `56px`):**
-  - Đường tiến độ mảnh **`3px`** ở mép trên (`data-testid="music-mini-progress-track"` / `"music-mini-progress"`) theo tỷ lệ `positionSec / durationSec`. Bổ sung polling mỗi `1s` trong `App.tsx` bất cứ khi nào `musicState.status === 'PLAYING'` (kể cả khi trình phát đang thu gọn).
-  - Ảnh bìa vuông bo góc chứa icon đĩa/nốt nhạc, tên bài (`truncate`), `tác giả · album` (`truncate`).
-  - 4 `<button>` thật có `aria-label` song ngữ EN/VI và vùng chạm chuẩn tối thiểu **`36px`** (nút Play/Pause **`40px`**): Bài trước (`music-mini-prev-btn`), Play/Pause (`music-mini-play-pause-btn`), Bài kế tiếp (`music-mini-next-btn`), và Chevron-up (`music-mini-expand-btn`).
-  - **Trạng thái rỗng / lỗi mạng:** Giữ nguyên thanh `56px` một hàng gọn hiển thị `"Chưa tải được nhạc"` / `"Music not loaded yet"` (`music-mini-empty-label`) kèm nút `Thử lại` / `Retry` (`music-mini-retry-btn`, `min-h-[36px]`) — không tự biến mất.
-  - Mini-player và sheet chỉ gửi lệnh message lên Service Worker như cũ (UI không tự phát `<audio>`).
+### A. Quy tắc hiển thị chỉ trong phiên tập trung (`App.tsx`, `MusicPlayerSheet.tsx`)
+- Trong `PopupShell` (`src/App.tsx`): mini-player và bảng mở rộng chỉ render khi `showMusicPlayer` đúng, tức phiên đang ở trạng thái **`RUNNING` hoặc `PAUSED`** (bao gồm focus, `SHORT_BREAK`, `LONG_BREAK`) và `effectiveTab === 'focus'`.
+- **Không render** khi ở ngoài phiên (`session === null` hoặc `status === 'IDLE'`), **không render** ở các tab khác, và **không render** trên màn hình kết quả sau khi phiên đã kết thúc (`COMPLETED`, `ABANDONED`, `INTERRUPTED` chờ bấm `Exit`).
+- Do thanh tab `<Navbar>` đã bị ẩn hoàn toàn trong phiên (UX-1), mini-player nằm sát đáy màn tập trung (`hasBottomNav={false}`, backdrop dùng `pb-0`).
 
-### 2.2. Bảng mở rộng Bottom Sheet (`~2/3` chiều cao popup) & Lưu trạng thái Mở/Thu
-- Bấm chevron-up sẽ trượt lên sheet (`h-[416px] max-h-[72%]`, ngay trên thanh tab nhờ `pb-[64px]`), bo góc trên `22px` (`rounded-t-[22px]`), nền tối `bg-slate-950`, lớp nền phía sau làm tối & mờ (`bg-black/55 backdrop-blur-xs`).
-- Thu gọn bằng nút chevron-down (`music-sheet-close-btn`), bấm vào backdrop, hoặc nhấn phím **`Escape`**.
-- **Lưu trạng thái mở/thu (`UserSettings.musicPlayerExpanded?: boolean`, mặc định `false`):**
-  - Thêm trường optional `musicPlayerExpanded?: boolean` vào `UserSettings` (`src/types/storageSchema.ts`), không đổi `schemaVersion`.
-  - Thêm message `SET_MUSIC_PLAYER_EXPANDED` (`src/types/messages.ts`), xử lý tại `MessageHandler` (`src/background/messageHandler.ts`) và bộ mô phỏng Web Preview `extensionClient.ts`.
-- **Bố cục từ trên xuống trong sheet:**
-  - **a.** Tiêu đề `"Nhạc Lofi tập trung"` / `"Focus Lofi Music"` + nút `Refresh` (`music-refresh-catalog-btn`) + Chevron-down (`music-sheet-close-btn`).
-  - **b.** Khối `Đang phát` / `Now Playing`: ảnh bìa vuông **`56px`** (`w-14 h-14`), tên bài, `tác giả · album`.
-  - **c.** Thanh tua (`music-seek-slider`) + thời gian hiện tại/tổng dạng `tabular-nums`.
-  - **d.** Bộ nút điều khiển: Shuffle, Bài trước, nút Play/Pause tròn lớn **`52px`** (`w-[52px] h-[52px]`), Bài kế tiếp, Repeat (`off`/`all`/`one`), Stop, kèm 2 ô tùy chọn đồng bộ phiên (`Stop music when focus session ends`, `Keep playing music during Pomodoro breaks`).
-  - **e.** Hàng âm lượng: nút Tắt/Bật tiếng, thanh kéo volume, chỉ số `%`.
-  - **f.** Thanh chip lọc tác giả cuộn ngang (`music-artist-filters`), **sinh động 100%** từ `catalog`: `"Tất cả · N"` (`"All · N"`) và từng tác giả duy nhất `"<Tác giả> · K"` (`aria-pressed` nổi bật chip đang chọn; tự quay về `"Tất cả"` nếu tác giả biến mất sau khi refresh catalog).
-  - **g.** Danh sách bài cuộn dọc (`flex-1 min-h-0 overflow-y-auto`, mỗi hàng `min-h-[46px]`): hiển thị số thứ tự hoặc equalizer 3 vạch (`music-playing-equalizer`, `fq-music-eq-bar` tôn trọng `prefers-reduced-motion`) khi bài đang phát, tên bài, `tác giả · album`, badge giấy phép ngắn gọn (`CC0` / `BY` / `BY-SA` qua `formatShortLicenseBadge(track.license)` — chỉ rút gọn lúc hiển thị, giữ nguyên chuỗi SPDX gốc trong catalog), thời lượng; bấm để phát bài đó.
-  - **h.** Footer sheet: nút `"Ghi công & giấy phép"` / `"License & Attribution"` (`music-credits-toggle-btn`) bật/tắt bảng thông tin đầy đủ License & Attribution của bài đang phát (hiển thị nguyên SPDX `entry.license`, `attribution`, `creator`, trạng thái chỉnh sửa, liên kết HTTPS `sourceUrl` & `licenseUrl`).
+### B. Đổi quy tắc phát / dừng nhạc (`music.ts`, `messages.ts`, `storageSchema.ts`, `musicCoordinator.ts`, `messageHandler.ts`, `background/index.ts`, `extensionClient.ts`, `MusicPlayerSheet.tsx`)
+- **Pause phiên, Resume, nghỉ ngắn, nghỉ dài không tác động lên nhạc:** `deriveMusicIntent(snapshot: SessionSnapshot | null)` rút gọn chỉ còn `'keep' | 'stop'`: trả về `'keep'` cho mọi phiên `'RUNNING'` hoặc `'PAUSED'` (kể cả `SHORT_BREAK` / `LONG_BREAK`). Nhạc đang phát tiếp tục phát, nhạc đang tạm dừng thủ công giữ nguyên tạm dừng.
+- **Dừng hẳn khi phiên kết thúc hoặc phát hiện phát mồ côi:** Khi phiên kết thúc vì bất cứ lý do gì (`COMPLETED`, `ABANDONED`, `INTERRUPTED`, `RESET_SESSION`, extension disable, browser startup downtime hoặc recovery không còn phiên đang chạy), hoặc khi `MUSIC_GET_STATE` / sự kiện từ offscreen phát hiện nhạc đang phát mà không có phiên hoạt động (`intent === 'stop'`), `MusicCoordinator` thực hiện `stopInternal()`: chuyển trạng thái về `'STOPPED'`, đóng Offscreen Document, đưa `positionSec` về `0`, đồng thời **giữ nguyên** `currentTrackId`, `volume`, `muted`, `shuffle`, `repeatMode`.
+- **Không tự động phát khi bắt đầu phiên:** `START_SESSION` giữ nguyên trạng thái nhạc hiện tại (`IDLE`/`STOPPED`/`PAUSED`), chỉ người dùng tự bấm phát mới phát.
+- **Gỡ bỏ tùy chọn & thông điệp cũ + tương thích ngược storage:** Xóa 2 checkbox `"Stop music when focus session ends"` / `"Keep playing music during Pomodoro breaks"` trong `MusicPlayerSheet.tsx`, xóa `MUSIC_SET_SYNC_WITH_SESSION` & `MUSIC_SET_PLAY_DURING_BREAK` (`messages.ts`, `MessageHandler`), xóa `stopMusicOnSessionEnd` & `musicPlayDuringBreak` (`UserSettings`), và xóa `pausedBySession` (`MusicPlayerState`). Khi đọc dữ liệu storage cũ còn chứa các trường này, `normalizeStateAgainstCatalog()` dựng lại state tường minh nên bỏ qua an toàn mà không crash hay cần migration.
 
-### 2.3. Dọn `Header.tsx` & Chống chồng lấp ở chiều rộng `400px`
-- Gỡ bỏ hoàn toàn nút nốt nhạc `♪` (`music-player-open-btn`, `onOpenMusic`, `isMusicPlaying`) khỏi `Header.tsx` và `App.tsx`.
-- Sửa tràn/chồng lấp giữa `"FOCUS QUEST"` và badge Thời đại ở chiều rộng `400px` cả EN lẫn VI: sử dụng nhóm trái `flex-1 min-w-0 flex items-center gap-1.5 overflow-hidden`, rút gọn nhãn chip thời đại (`header.eraShort.*`, ví dụ `'Đồ Đá'`, `'Đồ Đồng'`, đồng thời giữ tên đầy đủ trong `title`), và giữ nguyên toàn bộ Coins, `Lv. X`, nút `?`, công tắc `EN|VI`, và khiên profile khi phiên chạy.
+### C. Thanh Mini-Player (`MusicPlayerSheet.tsx`)
+- Thanh cao `56px` (`h-[56px]`) gắn đường tiến độ mảnh `3px` (`h-[3px]`) ở mép trên; gồm ảnh bìa nhỏ có icon nhạc, tên bài (truncate ellipsis), `tác giả · album`, nút Bài trước, Play/Pause (`40×40px`), Bài tiếp và Chevron-Up mở rộng (tất cả nút đều là `<button type="button">` thật vùng bấm tối thiểu `36×36px` kèm `aria-label` song ngữ).
+- Khi catalog rỗng hoặc lỗi mạng lúc mở đầu: hiển thị hàng gọn `"Chưa tải được nhạc"` / `"Music not loaded yet"` kèm nút `Thử lại` / `Retry`. Mọi thao tác trên UI chỉ gửi command tới background, không tự phát `<audio>`.
 
-### 2.4. Trời sáng cho cảnh tập trung (`FocusSceneArea.tsx` & `src/index.css`)
-- Gỡ bỏ hoàn toàn gradient trời đêm (`dark:from-slate-900`, `dark:via-slate-800`, `dark:via-indigo-950/70`) và sao đêm (`fq-scene-star`) trên cả 3 trạng thái:
-  - **Đang tập trung (`working`):** Trời xanh sáng (`#6ec1f0` → `#a9dcf9` → `#d4f0ff`), mặt trời vàng rực (`#fde047` + hào quang `#fef9c3`), mây trắng trôi (`fq-scene-cloud`), đồi cỏ xanh tươi (`#86efac` / `#34d399`).
-  - **Tạm dừng (`paused`):** Trời xám xanh nhạt u ám dịu (`#cbd5e1` → `#dbe4ee` → `#edf2f7`), mây đứng yên, đồi xanh dịu, nhân vật đứng tĩnh.
-  - **Nghỉ (`resting`):** Hoàng hôn pastel dịu sáng (`#fed7aa` cam đào → `#fbcfe8` hồng → `#e9d5ff` tím nhạt, **không tối**), mặt trời hoàng hôn ấm, mây nhẹ, nhấp nháy lửa ấm và `zZ`.
-- Nâng tương phản cho `focus-scene-status-chip` (`"ĐANG TẬP TRUNG"` / `"FOCUSING"`) và nút chuông `chime-toggle-btn` bằng nền scrim tối trong mờ `bg-slate-900/75 text-white border-white/25` để đọc rõ trên nền trời sáng ở mọi chế độ hệ điều hành.
+### D. Bảng mở rộng Bottom Sheet (`MusicPlayerSheet.tsx`, `UserSettings.musicPlayerExpanded`)
+- Bấm Chevron-Up mở bottom sheet (`h-[416px] max-h-[72%]`, `rounded-t-[22px]`, nền `bg-slate-950`, backdrop mờ `bg-black/55 backdrop-blur-xs`). Đóng bằng Chevron-Down, bấm nền ngoài hoặc phím `Esc`. Trạng thái mở/đóng được lưu bền vững ở `UserSettings.musicPlayerExpanded` qua `SET_MUSIC_PLAYER_EXPANDED` (không đổi `schemaVersion`).
+- Đầy đủ khối `Now Playing` (`56px` cover), thanh tua, cụm Play `52px` / Prev / Next / Stop / Shuffle / Repeat, thanh âm lượng + Mute, dải chip lọc tác giả động (`"Tất cả · N"` + theo từng nghệ sĩ), danh sách bài cuộn dòng `min-h-[46px]` có equalizer khi đang phát + badge ngắn `CC0`/`BY`/`BY-SA` (không sửa dữ liệu SPDX gốc trong catalog), và footer `"Ghi công & giấy phép"` đóng mặc định để mở xem chi tiết bản quyền từng bài.
 
-### 2.5. Song ngữ 100% EN / VI (`src/i18n/locales/{en,vi}.ts`)
-- Bổ sung đầy đủ các khóa dịch mới (`header.eraShort.*`, `music.lofiSheetTitle`, `music.miniNotLoaded`, `music.expandAria`, `music.collapseAria`, `music.miniPlayerAria`, `music.nowPlayingLabel`, `music.filterAll`, `music.filterArtistAria`, `music.playingEqualizerAria`, `music.creditsFooterBtn`) và đảm bảo parity 100% giữa `EN_MESSAGES` và `VI_MESSAGES`.
+### E. Dọn Header (`Header.tsx`)
+- Không còn nút mở trình phát nhạc (`♪` / `music-player-open-btn`) trên Header; giữ nguyên Brand về trang chủ, Era badge rút gọn (`header.eraShort.*`) chống chồng lấp ở chiều rộng `400px` cả EN & VI, Coins, `Lv. X`, nút `?`, nút `EN|VI`, thanh XP mảnh và huy hiệu khiên khi chạy phiên.
+
+### F. Trời sáng cho cảnh tập trung (`FocusSceneArea.tsx`)
+- Loại bỏ hoàn toàn nền trời tối và sao đêm (`fq-scene-star`); cả 3 trạng thái đều dùng trời sáng/hoàng hôn:
+  - `working`: nền trời xanh ban ngày `#6ec1f0 → #a9dcf9 → #d4f0ff` kèm mặt trời vàng & mây trắng trôi.
+  - `paused`: nền sáng xám xanh dịu `#cbd5e1 → #dbe4ee → #edf2f7`.
+  - `resting`: nền hoàng hôn pastel `#fed7aa → #fbcfe8 → #e9d5ff` với ánh nắng chiều ấm.
+- Hai chip góc trên (`focus-scene-status-chip` & `chime-toggle-btn`) dùng scrim tối `bg-slate-900/75 text-white border-white/25` bảo đảm độ tương phản rõ trên nền sáng.
+
+### G. Đồng bộ song ngữ EN / VI (`src/i18n/locales/{en,vi}.ts`, `src/i18n/errorTranslator.ts`)
+- Xóa các khóa/mapping lỗi thừa (`music.syncWithSessionLabel`, `music.playDuringBreakLabel`, lỗi của 2 action đã xóa); bảo đảm 100% key parity giữa `EN_MESSAGES` và `VI_MESSAGES`.
 
 ---
 
-## 3. CÁC TEST CŨ ĐÃ CẬP NHẬT & LÝ DO
+## 3. CÁC TEST ĐÃ CẬP NHẬT & LÝ DO
 
-1. **`__tests__/ui/focusSceneArea.test.ts` (dòng 78–80, 142, 159):**
-   - *Lý do:* Trước LOFI-2 trạng thái `resting` dùng lớp `fq-scene-star` (sao đêm) và nền `dark:from-slate-900`. Nay LOFI-2 chuyển sang hoàng hôn sáng pastel không có sao đêm và thay `.fq-scene-star` bằng `.fq-music-eq-bar` trong `prefers-reduced-motion`. Test được cập nhật để kiểm tra chắc chắn `resting` dùng mây dịu (`fq-scene-cloud`), không còn `fq-scene-star` hay `dark:from-slate-900`, và `.fq-music-eq-bar` được vô hiệu hóa trong `prefers-reduced-motion`.
-2. **`__tests__/ui/musicPlayerSheet.test.ts` (dòng 81–145):**
-   - *Lý do:* Sheet LOFI-2 đổi tiêu đề thành `"Nhạc Lofi tập trung"` / `"Focus Lofi Music"`, dùng props `isExpanded`/`onToggleExpand`, đồng thời đưa bảng `License & Attribution` vào sau nút footer `"Ghi công & giấy phép"` (mặc định đóng). Helper `renderSheet` được cập nhật để truyền `isExpanded: true`, `defaultCreditsOpen: true` cho các case kiểm tra bảng ghi công và xác nhận mini-player cùng nút footer mới.
-3. **`__tests__/ui/navigationRedesign.test.ts` (dòng 44–45, 172–173):**
-   - *Lý do:* Xác nhận Header không còn `music-player-open-btn`, nhãn chip Era tiếng Việt rút gọn thành `'Đồ Đá'` (giữ `'Thời đại Đồ Đá'` trong `title`), và `App` luôn render `music-mini-player` ngay trên thanh tab dưới cùng.
-4. **`__tests__/ui/extensionPopupShell.test.ts` (dòng 39–40):**
-   - *Lý do:* Xác nhận popup Extension thật luôn có `music-mini-player` và không còn nút nhạc ở Header.
-5. **Bộ test mới bổ sung (`__tests__/ui/lofi2MusicUi.test.ts`):**
-   - Kiểm tra 7 kịch bản toàn diện: mini-player `56px` + progress `3px` + nút thật `>=36px`/`40px` + không trùng trình phát; trạng thái rỗng/mất mạng hiện `"Chưa tải được nhạc"` / `"Music not loaded yet"` + nút Retry; Bottom Sheet `rounded-t-[22px]` + `56px` cover + `52px` play + chip tác giả động + equalizer + badge ngắn `CC0`/`BY`/`BY-SA` giữ nguyên SPDX + footer toggle; Header chống chồng lấp ở `400px` EN/VI; `FocusSceneArea` trời sáng 3 trạng thái + scrim tương phản; persistence `SET_MUSIC_PLAYER_EXPANDED` trên cả `MessageHandler` lẫn simulator `extensionClient.ts`; và parity 100% EN/VI.
+1. **`__tests__/background/musicCoordinator.test.ts`:**
+   - Cập nhật bảng chân lý `deriveMusicIntent(snapshot)` sang chữ ký 1 tham số `'keep' | 'stop'`.
+   - Thay thế các test đồng bộ pause/break cũ sang quy tắc LOFI-2: Pause/Resume/Break không tự dừng hay tự phát lại nhạc; `START_SESSION` không tự động phát; mọi nhánh kết thúc phiên (`completeCountdown`, `finishStopwatch`, `giveUpCountdown`, Pomodoro completion, `handleExtensionDisabledRecovery`, browser startup downtime, `resetSession`, `SERVICE_WORKER_WAKE`, `MUSIC_GET_STATE` khi không còn phiên) đều dừng nhạc và giữ lại track/âm lượng/shuffle/repeat; từ chối 2 action cũ; bỏ qua an toàn các key cũ trong storage (`syncWithSession`, `playDuringBreak`, `pausedBySession`, `stopMusicOnSessionEnd`, `musicPlayDuringBreak`).
+2. **`__tests__/ui/lofi2MusicUi.test.ts`:**
+   - Gỡ các trường/prop cũ (`syncWithSession`, `playDuringBreak`, `pausedBySession`, `onToggleSyncWithSession`, `onTogglePlayDuringBreak`).
+   - Cập nhật assertion của `<App />`: ẩn hoàn toàn `music-mini-player` khi rảnh hoặc ở màn kết quả `COMPLETED`, chỉ render ở đáy màn Tập trung khi `RUNNING`/`PAUSED`, và xác nhận 2 toggle cũ không xuất hiện trong sheet.
+3. **`__tests__/ui/musicPlayerSheet.test.ts`:**
+   - Gỡ các trường/prop cũ và đổi assertion kiểm tra `music-play-during-break-toggle` / `"Tiếp tục phát nhạc trong giờ nghỉ Pomodoro"` thành kiểm tra vắng mặt hoàn toàn.
+4. **`__tests__/ui/navigationRedesign.test.ts` (dòng 44) & `__tests__/ui/extensionPopupShell.test.ts` (dòng 39):**
+   - Đổi assertion trên `<App />` mặc định ở tab Bản đồ từ `assert.ok(html.includes('data-testid="music-mini-player"'))` sang `assert.ok(!html.includes('data-testid="music-mini-player"'))` để khớp quy tắc A của LOFI-2.
+5. **`__tests__/ui/ux1SessionNavigationAndProfile.test.ts`:**
+   - Gỡ trường/prop nhạc cũ trong helper `makePopupShellProps`, và tách assertion `music-mini-player` / `music-sheet-backdrop`: chỉ hiện (với `pb-0`) ở `RUNNING`/`PAUSED`/`SHORT_BREAK`/`LONG_BREAK`, không hiện ở màn kết quả (`COMPLETED`/`ABANDONED`/`INTERRUPTED`) hay ngoài phiên (`null`/`IDLE`).
 
 ---
 
 ## 4. KẾT QUẢ KIỂM ĐỊNH THỰC TẾ (VERIFIED REAL OUTPUTS)
 
-- **`npm run lint` (`tsc --noEmit`):** **PASS** (`Exit code 0`, `0` errors, `0` warnings).
-- **`npm run clean && npm run build`:** **PASS** (`Vite v8.3.8`, `1,736 modules transformed`, `731ms`):
-  - `dist/background.js`: **`88.18 kB`** (gzip: `18.93 kB`)
-  - `dist/assets/popup-*.js`: **`750.76 kB`** (gzip: `197.72 kB`)
-  - `dist/assets/popup-*.css`: **`84.85 kB`** (gzip: `13.48 kB`)
+- **`npm run lint` (`tsc --noEmit`):** **PASS** (`Exit code 0`, `0` errors).
+- **`npm run clean && npm run build`:** **PASS** (`Vite v8.3.8`, `1,737 modules transformed`, `1.02s`):
+  - `dist/background.js`: **`87.76 kB`** (gzip: `18.93 kB`) — `0` kết quả `react-dom` trong bundle nền.
+  - `dist/assets/popup-DR3j5Xqm.js`: **`750.99 kB`** (gzip: `198.04 kB`)
+  - `dist/assets/popup-DgGRUQxi.css`: **`86.84 kB`** (gzip: `13.62 kB`)
+  - `dist/assets/translator-CBOM9ACM.js`: **`51.07 kB`** (gzip: `13.74 kB`)
+  - `dist/assets/domainNormalizer-LjAHelB6.js`: **`48.55 kB`** (gzip: `13.17 kB`)
+  - `dist/assets/storageKeys-BmLuJ1Do.js`: **`0.37 kB`** (gzip: `0.26 kB`)
   - `dist/offscreen.js`: **`3.87 kB`** (gzip: `1.48 kB`)
   - `dist/blocked.js`: **`1.32 kB`** (gzip: `0.60 kB`)
-  - Tổng dung lượng `dist/`: **`1,062,023 B`**, tổng số file audio trong `public/` & `dist/`: **`0`**.
+  - `dist/index.html`: **`0.71 kB`** | `dist/blocked.html`: **`1.81 kB`** | `dist/offscreen.html`: **`0.26 kB`**
+  - Tổng dung lượng `dist/`: **`1,061,849 B`**; số file âm thanh (`.mp3/.ogg/.wav/.m4a/.flac`) trong `public/` & `dist/`: **`0`**.
 - **`npm test` — chạy 3 lần liên tiếp:**
-  - **Lần 1:** **527 / 527 tests PASS** (`0` fail, `0` skipped — `13.91s` / `13,914.88 ms`)
-  - **Lần 2:** **527 / 527 tests PASS** (`0` fail, `0` skipped — `13.94s` / `13,941.44 ms`)
-  - **Lần 3:** **527 / 527 tests PASS** (`0` fail, `0` skipped — `14.19s` / `14,188.88 ms`)
+  - **Lần 1:** **530 / 530 tests PASS** (`0` fail, `0` skipped, `0` cancelled — `17,886.16 ms`, `EXIT=0`)
+  - **Lần 2:** **530 / 530 tests PASS** (`0` fail, `0` skipped, `0` cancelled — `17,995.11 ms`, `EXIT=0`)
+  - **Lần 3:** **530 / 530 tests PASS** (`0` fail, `0` skipped, `0` cancelled — `20,333.90 ms`, `EXIT=0`)
 
 ---
 
-## 5. PHẠM VI KIỂM CHỨNG & DANH SÁCH KIỂM THỬ THỦ CÔNG TRÊN CHROME (>= 116)
+## 5. GIỚI HẠN KIỂM CHỨNG & 9 BƯỚC TỰ KIỂM TRA TRÊN CHROME THẬT
 
-- **Tuyên bố trung thực:** Mọi bài test UI chạy qua **React SSR (`renderToString`)** trên Node.js và backend chạy bằng mock Chrome adapters / `MemoryStorageAdapter`. Các hành vi tương tác trình duyệt thực tế (animation, thanh cuộn ngang/dọc, click ngoài để thu sheet, phím `Esc`, bố cục pixel `400×600px`, phát nhạc thật qua Offscreen trên Chrome >= 116) **chưa được kiểm tra trực quan bằng mắt trên Chrome thật**.
-- **7 bước kiểm thử thủ công đề xuất khi Load unpacked `dist/` (`chrome://extensions`):**
-  1. **Mini-player xuyên suốt 5 tab:** Chuyển qua lại cả 5 tab (`Nhiệm vụ`, `Tập trung`, `Bản đồ`, `Thành tựu`, `Thống kê`), xác nhận thanh mini-player `56px` luôn nằm ngay trên thanh tab, không biến mất và Header không còn nút `♪`.
-  2. **Kiểm tra nút điều khiển & thanh progress `3px`:** Bấm Play/Pause, Next/Previous trên mini-player; xác nhận nhạc phát qua Offscreen, đường progress `3px` mép trên chạy đều theo thời gian kể cả khi không mở sheet.
-  3. **Mở/Thu sheet & lưu trạng thái:** Bấm chevron-up để mở sheet `~2/3` chiều cao, kiểm tra bo góc `22px` và nền mờ phía sau; đóng popup rồi mở lại xác nhận sheet vẫn giữ đúng trạng thái mở; thử thu lại bằng 3 cách (chevron-down, bấm vùng mờ ngoài sheet, nhấn phím `Esc`).
-  4. **Lọc tác giả động & Equalizer & License:** Chọn từng chip tác giả (`Tất cả · N`, `Purrple Cat · ...`, `HoliznaCC0 · ...`), kiểm tra danh sách lọc đúng và cuộn dọc mượt; phát 1 bài để xem equalizer chạy và bấm `"Ghi công & giấy phép"` ở footer để xem thông tin SPDX đầy đủ.
-  5. **Kiểm tra Header & Cảnh trời sáng `400×600`:** Đổi ngôn ngữ `EN | VI`, kiểm tra `"FOCUS QUEST"` và chip `"Đồ Đá"` không chồng lấp; bắt đầu một phiên Focus → chuyển qua Pause → Break (Pomodoro) để xác nhận cả 3 trạng thái đều giữ nền trời sáng/hoàng hôn dịu và chip `"ĐANG TẬP TRUNG"` đọc rõ nét.
-  6. **Kiểm tra vừa khít `400×600px` không cắt nút:** Mở cả trạng thái Timer đang chạy (có mini-player ở dưới) và Map có toolbar Expand/Build để chắc chắn không bị khuất nút `Pause`/`Give Up`/`Skip Break`.
-  7. **Mất mạng khi chưa có cache:** Xóa storage extension rồi tắt mạng và mở popup, kiểm tra mini-player vẫn hiển thị gọn `"Chưa tải được nhạc"` + nút `Thử lại`, sau đó bật mạng bấm `Thử lại` để tải bài thành công.
+- **Giới hạn kiểm chứng:** Toàn bộ UI test được chạy bằng **React SSR (`renderToString`)** trên Node.js và backend test dùng mock Chrome adapters; tôi **chưa mở trực tiếp trên trình duyệt Chrome thật** để xem giao diện `400×600px`, nghe âm thanh stream qua Offscreen Document, hoặc kiểm tra tương tác chuột/phím thật.
+- **9 bước tự kiểm đề xuất trên Chrome (>= 116, `chrome://extensions` → Developer mode → Load unpacked `dist/`):**
+  1. **Ngoài phiên & các tab khác:** Mở popup ở trạng thái rảnh (tab `Bản đồ`, `Nhiệm vụ`, `Thành tựu`, `Thống kê` và màn chuẩn bị `Tập trung`) — xác nhận **không có mini-player** ở đáy và **không có nút `♪`** trên Header; kiểm tra Header ở cả EN & VI không bị đè chữ.
+  2. **Bắt đầu phiên (không tự phát nhạc):** Bắt đầu một phiên Focus — xác nhận thanh tab dưới cùng biến mất và thanh **mini-player `56px`** xuất hiện sát đáy màn tập trung, hiển thị đúng tên bài mặc định nhưng **không tự phát nhạc**.
+  3. **Trời sáng `FocusSceneArea`:** Quan sát khung cảnh trại Thời đại Đồ Đá ở trạng thái đang chạy (`working`), `Pause` (`paused`), và Pomodoro nghỉ (`resting`) — xác nhận nền trời sáng ban ngày / hoàng hôn pastel không có trời tối hay sao đêm, và 2 chip góc trên đọc rõ nét.
+  4. **Phát nhạc, mở/đóng bảng playlist (`rounded-t-[22px]`):** Bấm Play rồi bấm chevron-up trên mini-player — xác nhận sheet tối trượt lên từ đáy trên nền mờ, thử lọc chip tác giả, chọn bài khác, tua thanh tiến độ, chỉnh âm lượng/mute, shuffle/repeat, mở `"Ghi công & giấy phép"`, rồi đóng sheet bằng chevron-down / click nền ngoài / phím `Esc`. Đóng và mở lại popup để xác nhận nhớ trạng thái mở/đóng và bài/âm lượng đã chọn.
+  5. **Pause phiên & Resume phiên:** Đang phát nhạc, bấm `Pause` phiên rồi `Resume` — xác nhận nhạc **vẫn tiếp tục phát bình thường**; sau đó thử tự bấm Pause trên trình phát nhạc rồi mới Pause/Resume phiên — xác nhận nhạc **giữ nguyên tạm dừng**, không tự phát lại.
+  6. **Pomodoro nghỉ ngắn / nghỉ dài:** Chạy Pomodoro sang pha `SHORT_BREAK` / `LONG_BREAK` — xác nhận thanh mini-player vẫn hiện ở đáy và nhạc đang phát/tạm dừng **giữ nguyên trạng thái**, không còn checkbox `"Keep playing music..."` hay `"Stop music when focus session ends"` trong sheet.
+  7. **Kết thúc phiên & màn kết quả (`Exit`):** Chờ phiên hoàn thành hoặc bấm `Give Up` — xác nhận nhạc **dừng hẳn tức thì** (hết tiếng phát nền ở Chrome Task Manager), đồng thời trên màn kết quả có nút `Exit` thì mini-player **cũng biến mất**. Bấm `Exit` để về Bản đồ.
+  8. **Bắt đầu phiên mới nhớ tùy chọn:** Mở phiên tập trung thứ hai — xác nhận nhạc vẫn giữ đúng bài/âm lượng/shuffle/repeat trước đó, `positionSec` đã reset về `0`, và không tự phát cho tới khi tự bấm Play.
+  9. **Kiểm tra offline / lỗi tải catalog:** Tạm ngắt mạng (hoặc chặn request archive trong DevTools) khi cache trống rồi mở phiên — xác nhận mini-player hiển thị gọn `"Chưa tải được nhạc"` kèm nút `Thử lại`; bật lại mạng rồi bấm `Thử lại` để xác nhận tải lại danh sách thành công.

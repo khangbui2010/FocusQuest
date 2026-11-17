@@ -346,16 +346,16 @@ export const ProfileBottomSheet: React.FC<ProfileBottomSheetProps> = ({
                     <div
                       key={profile.id}
                       data-testid={`profile-row-${profile.id}`}
-                      className={`p-2 rounded-lg border text-xs transition-colors ${
+                      className={`rounded-lg border text-xs transition-colors ${
                         isActive
                           ? 'bg-indigo-50/70 dark:bg-indigo-950/30 border-indigo-300 dark:border-indigo-700/80'
-                          : 'bg-slate-50/70 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700/70'
+                          : 'bg-slate-50/70 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700/70 hover:border-indigo-200 dark:hover:border-indigo-800/70'
                       }`}
                     >
                       {isRenaming ? (
                         <form
                           onSubmit={(e) => handleRenameSubmit(e, profile.id)}
-                          className="flex items-center gap-1.5"
+                          className="p-2 flex items-center gap-1.5"
                         >
                           <input
                             type="text"
@@ -385,8 +385,24 @@ export const ProfileBottomSheet: React.FC<ProfileBottomSheetProps> = ({
                           </button>
                         </form>
                       ) : (
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="min-w-0 flex-1">
+                        <div className="p-1.5 flex items-center justify-between gap-1.5">
+                          <button
+                            type="button"
+                            data-testid={`switch-profile-${profile.id}`}
+                            aria-label={t('profiles.selectAria', { name: profile.name })}
+                            aria-pressed={isActive}
+                            title={
+                              isSessionActive
+                                ? t('profiles.sessionLockBanner')
+                                : t('profiles.selectAria', { name: profile.name })
+                            }
+                            disabled={isMutateDisabled}
+                            onClick={() => {
+                              if (isMutateDisabled || isActive) return;
+                              void runMutation(() => onSwitchProfile(profile.id), setSheetError);
+                            }}
+                            className="min-w-0 flex-1 text-left px-1.5 py-1 rounded-md hover:bg-white/70 dark:hover:bg-slate-800/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                          >
                             <div className="flex items-center gap-1.5">
                               <span
                                 className={`w-2 h-2 rounded-full shrink-0 ${
@@ -407,35 +423,29 @@ export const ProfileBottomSheet: React.FC<ProfileBottomSheetProps> = ({
                                 count: (profile.allowedDomains || []).length,
                               })}
                             </div>
-                          </div>
+                          </button>
 
-                          <div className="flex items-center gap-1 shrink-0">
-                            {!isActive && (
-                              <button
-                                type="button"
-                                data-testid={`switch-profile-${profile.id}`}
-                                disabled={isMutateDisabled}
-                                onClick={() => runMutation(() => onSwitchProfile(profile.id), setSheetError)}
-                                className="px-2 py-1 bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 border border-slate-200 dark:border-slate-700 text-indigo-600 dark:text-indigo-400 rounded text-[11px] font-semibold disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                              >
-                                {t('profiles.useBtn')}
-                              </button>
-                            )}
-
+                          <div className="flex items-center gap-1.5 shrink-0">
                             <button
                               type="button"
                               data-testid={`rename-profile-${profile.id}`}
                               aria-label={t('profiles.renameAria', { name: profile.name })}
+                              title={
+                                isSessionActive
+                                  ? t('profiles.sessionLockBanner')
+                                  : t('profiles.renameAria', { name: profile.name })
+                              }
                               disabled={isMutateDisabled}
-                              onClick={() => {
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 setConfirmDeleteId(null);
                                 setRenamingId(profile.id);
                                 setRenameDraft(profile.name);
                                 setSheetError(null);
                               }}
-                              className="p-1 text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-400 rounded disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                              className="w-9 h-9 rounded-[10px] border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-500 hover:text-indigo-600 hover:border-indigo-300 dark:text-slate-300 dark:hover:text-indigo-400 dark:hover:border-indigo-700 flex items-center justify-center transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shrink-0"
                             >
-                              <Pencil className="w-3.5 h-3.5" />
+                              <Pencil className="w-4 h-4" />
                             </button>
 
                             <button
@@ -447,12 +457,15 @@ export const ProfileBottomSheet: React.FC<ProfileBottomSheetProps> = ({
                                   : t('profiles.deleteAria', { name: profile.name })
                               }
                               title={
-                                isOnlyProfile
+                                isSessionActive
+                                  ? t('profiles.sessionLockBanner')
+                                  : isOnlyProfile
                                   ? t('profiles.cannotDeleteLast')
                                   : t('profiles.deleteAria', { name: profile.name })
                               }
                               disabled={isMutateDisabled || isOnlyProfile}
-                              onClick={() => {
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 if (isMutateDisabled) return;
                                 if (isOnlyProfile) {
                                   setSheetError(t('profiles.cannotDeleteLast'));
@@ -461,9 +474,9 @@ export const ProfileBottomSheet: React.FC<ProfileBottomSheetProps> = ({
                                 setRenamingId(null);
                                 setConfirmDeleteId(profile.id);
                               }}
-                              className="p-1 text-slate-500 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400 rounded disabled:opacity-25 disabled:cursor-not-allowed cursor-pointer"
+                              className="w-9 h-9 rounded-[10px] border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-500 hover:text-rose-600 hover:border-rose-300 dark:text-slate-300 dark:hover:text-rose-400 dark:hover:border-rose-800 flex items-center justify-center transition-colors disabled:opacity-25 disabled:cursor-not-allowed cursor-pointer shrink-0"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
                         </div>

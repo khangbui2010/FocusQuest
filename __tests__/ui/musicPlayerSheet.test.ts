@@ -66,10 +66,7 @@ function makeMusicState(
     shuffle: false,
     repeatMode: 'off',
     shuffledOrder: catalog.map((t) => t.id),
-    syncWithSession: true,
     musicEnabled: false,
-    playDuringBreak: false,
-    pausedBySession: false,
     catalogUpdatedAt: '2026-11-17',
     lastUpdatedAt: 1700000000000,
     lastError: null,
@@ -104,15 +101,13 @@ function renderSheet(
         onSetVolume: () => {},
         onToggleShuffle: () => {},
         onCycleRepeat: () => {},
-        onToggleSyncWithSession: () => {},
-        onTogglePlayDuringBreak: () => {},
         onRefreshCatalog: () => {},
       })
     )
   );
 }
 
-test('MusicPlayerSheet UI: renders streamed EN & VI UI, SPDX attribution, break toggle, refresh button, and ZERO upload controls', () => {
+test('MusicPlayerSheet UI: renders streamed EN & VI UI, SPDX attribution, refresh button, removes obsolete toggles, and ZERO upload controls', () => {
   const catalog = getUiFixtureCatalog();
   const htmlEn = renderSheet(
     'en',
@@ -134,7 +129,8 @@ test('MusicPlayerSheet UI: renders streamed EN & VI UI, SPDX attribution, break 
   assert.ok(htmlEn.includes('Purrple Cat'));
   assert.ok(htmlEn.includes('Attribution Required'));
   assert.ok(htmlEn.includes('0:45'));
-  assert.ok(htmlEn.includes('data-testid="music-play-during-break-toggle"'));
+  assert.equal(htmlEn.includes('data-testid="music-sync-session-toggle"'), false);
+  assert.equal(htmlEn.includes('data-testid="music-play-during-break-toggle"'), false);
   assert.ok(htmlEn.includes('data-testid="music-refresh-catalog-btn"'));
 
   assert.ok(htmlVi.includes('Nhạc Lofi tập trung'));
@@ -142,7 +138,7 @@ test('MusicPlayerSheet UI: renders streamed EN & VI UI, SPDX attribution, break 
   assert.ok(htmlVi.includes('Tạm dừng'));
   assert.ok(htmlVi.includes('Ghi công &amp; giấy phép'));
   assert.ok(htmlVi.includes('Bản quyền &amp; Ghi công'));
-  assert.ok(htmlVi.includes('Tiếp tục phát nhạc trong giờ nghỉ Pomodoro'));
+  assert.equal(htmlVi.includes('Tiếp tục phát nhạc trong giờ nghỉ Pomodoro'), false);
 
   // Zero upload UI invariant
   assert.equal(htmlEn.includes('type="file"'), false, 'Must never render file upload input');

@@ -99,10 +99,7 @@ function makeMusicState(
     shuffle: false,
     repeatMode: 'off',
     shuffledOrder: catalog.map((t) => t.id),
-    syncWithSession: true,
     musicEnabled: false,
-    playDuringBreak: false,
-    pausedBySession: false,
     catalogUpdatedAt: '2026-11-17',
     lastUpdatedAt: 1700000000000,
     lastError: null,
@@ -137,8 +134,6 @@ function renderPlayer(
         onSetVolume: () => {},
         onToggleShuffle: () => {},
         onCycleRepeat: () => {},
-        onToggleSyncWithSession: () => {},
-        onTogglePlayDuringBreak: () => {},
         onRefreshCatalog: () => {},
       })
     )
@@ -175,12 +170,58 @@ test('LOFI-2 Mini-Player: renders 56px bar with 3px progress, accessible buttons
   assert.ok(collapsedHtml.includes('aria-label="Mở rộng trình phát nhạc"'));
   assert.ok(!collapsedHtml.includes('data-testid="music-player-sheet"'), 'Sheet must stay collapsed');
 
-  // Live App popup places mini-player immediately before bottom navbar and renders NO header open button
-  const appHtml = renderToString(React.createElement(App));
-  const miniIdx = appHtml.indexOf('data-testid="music-mini-player"');
-  const navIdx = appHtml.indexOf('data-testid="bottom-navbar"');
-  assert.ok(miniIdx > 0 && navIdx > miniIdx, 'Mini-player must be rendered above bottom navbar');
-  assert.ok(!appHtml.includes('data-testid="music-player-open-btn"'), 'Header must not render duplicate music button');
+  // Live App popup hides mini-player outside focus sessions and on terminal screens; shows it ONLY during RUNNING/PAUSED sessions (including breaks)
+  const idleAppHtml = renderToString(React.createElement(App));
+  assert.ok(idleAppHtml.includes('data-testid="bottom-navbar"'));
+  assert.ok(!idleAppHtml.includes('data-testid="music-mini-player"'), 'Mini-player must NOT render outside focus session');
+  assert.ok(!idleAppHtml.includes('data-testid="music-player-open-btn"'), 'Header must not render duplicate music button');
+
+  const activeSessionHtml = renderToString(
+    React.createElement(App, {
+      initialSession: {
+        id: 'sess-lofi2-active',
+        mode: 'COUNTDOWN',
+        status: 'RUNNING',
+        targetMinutes: 25,
+        startedAt: 1700000000000,
+        currentPauseStartedAt: null,
+        totalPauseMs: 0,
+        pauseCount: 0,
+        pauseHistory: [],
+        lastHeartbeatAt: 1700000000000,
+        completedAt: null,
+        rewardProcessed: false,
+        lockedMultiplier: 1.0,
+        profileId: 'p1',
+      },
+      initialTab: 'map',
+    })
+  );
+  assert.ok(!activeSessionHtml.includes('data-testid="bottom-navbar"'));
+  assert.ok(activeSessionHtml.includes('data-testid="music-mini-player"'), 'Mini-player must render at bottom during RUNNING session');
+
+  const completedOutcomeHtml = renderToString(
+    React.createElement(App, {
+      initialSession: {
+        id: 'sess-lofi2-done',
+        mode: 'COUNTDOWN',
+        status: 'COMPLETED',
+        targetMinutes: 25,
+        startedAt: 1700000000000,
+        currentPauseStartedAt: null,
+        totalPauseMs: 0,
+        pauseCount: 0,
+        pauseHistory: [],
+        lastHeartbeatAt: 1700001500000,
+        completedAt: 1700001500000,
+        rewardProcessed: true,
+        lockedMultiplier: 1.0,
+        profileId: 'p1',
+      },
+    })
+  );
+  assert.ok(completedOutcomeHtml.includes('data-testid="outcome-exit-btn"'));
+  assert.ok(!completedOutcomeHtml.includes('data-testid="music-mini-player"'), 'Mini-player must NOT render on session outcome screen');
 });
 
 test('LOFI-2 Mini-Player Empty/Error state: stays visible with Retry button in both EN and VI', () => {
@@ -261,6 +302,8 @@ test('LOFI-2 Bottom Sheet: ~2/3 rounded-t-[22px] sheet, 56px cover, 52px play bu
   assert.ok(withCredits.includes('data-testid="music-credits-section"'));
   assert.ok(withCredits.includes('CC-BY-SA-3.0'));
   assert.ok(withCredits.includes('soundcloud.com/ikkunwastaken'));
+  assert.ok(!withCredits.includes('data-testid="music-sync-session-toggle"'), 'Obsolete stop-on-end checkbox must be removed');
+  assert.ok(!withCredits.includes('data-testid="music-play-during-break-toggle"'), 'Obsolete play-during-break toggle must be removed');
 });
 
 test('LOFI-2 Header Anti-Overlap & Cleanup: zero music open button and collision-free 400px layout in EN & VI', () => {

@@ -142,6 +142,7 @@ interface TimerViewProps {
   onResetSession: () => Promise<void>;
   onRefreshSession: () => Promise<void>;
   isLoading: boolean;
+  initialActionError?: string | null;
   onOpenProfiles: () => void;
   chimeEnabled?: boolean;
   onToggleChime?: (enabled: boolean) => Promise<void> | void;
@@ -163,6 +164,7 @@ export const TimerView: React.FC<TimerViewProps> = ({
   onResetSession,
   onRefreshSession,
   isLoading,
+  initialActionError = null,
   onOpenProfiles,
   chimeEnabled: propChimeEnabled,
   onToggleChime,
@@ -267,8 +269,13 @@ export const TimerView: React.FC<TimerViewProps> = ({
   // Modal confirm states
   const [showGiveUpConfirm, setShowGiveUpConfirm] = useState<boolean>(false);
   const [showStopwatchConfirm, setShowStopwatchConfirm] = useState<boolean>(false);
-  const [showPomodoroEndConfirm, setShowPomodoroEndConfirm] = useState<boolean>(false);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(initialActionError);
+  const [isExiting, setIsExiting] = useState<boolean>(false);
+  const exitingRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    setActionError(initialActionError);
+  }, [initialActionError, session?.id, session?.status]);
 
   // Periodic 1-second tick for timestamp-based live countdowns
   const [currentTime, setCurrentTime] = useState<number>(Date.now());
@@ -378,14 +385,40 @@ export const TimerView: React.FC<TimerViewProps> = ({
     }
   };
 
+  const handleExitClick = async () => {
+    if (exitingRef.current || isLoading) return;
+    exitingRef.current = true;
+    setIsExiting(true);
+    setActionError(null);
+    try {
+      await onResetSession();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      exitingRef.current = false;
+      setIsExiting(false);
+    }
+  };
+
   // -------------------------------------------------------------
-  // STATE 1: COMPLETED or ABANDONED (Terminal Outcomes)
+  // STATE 1: COMPLETED, ABANDONED, or INTERRUPTED (Terminal Outcomes)
   // -------------------------------------------------------------
-  if (session && (session.status === 'COMPLETED' || session.status === 'ABANDONED')) {
+  if (
+    session &&
+    (session.status === 'COMPLETED' ||
+      session.status === 'ABANDONED' ||
+      session.status === 'INTERRUPTED')
+  ) {
     const isCompleted = session.status === 'COMPLETED';
+    const isInterrupted = session.status === 'INTERRUPTED';
     const isCountdown = session.mode === 'COUNTDOWN';
     const isPomodoro = session.mode === 'POMODORO_COUNTDOWN' || session.mode === 'POMODORO_STOPWATCH';
-    const focusMinutes = elapsed ? elapsed.actualFocusMinutes : 0;
+    const focusMinutes =
+      isInterrupted && typeof session.lastKnownValidFocusMinutes === 'number'
+        ? session.lastKnownValidFocusMinutes
+        : elapsed
+        ? elapsed.actualFocusMinutes
+        : 0;
 
     const multiplier = session.lockedMultiplier || 1.0;
     const baseCoins = isCountdown
@@ -415,7 +448,11 @@ export const TimerView: React.FC<TimerViewProps> = ({
     const totalPomoFocusMins = session.pomodoroState?.totalCompletedFocusMinutes ?? focusMinutes;
 
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-6 text-center animate-fade-in">
+      <div
+        data-testid="timer-outcome-view"
+        data-session-status={session.status}
+        className="flex-1 min-h-0 flex flex-col items-center justify-center p-6 text-center overflow-y-auto animate-fade-in"
+      >
         <div
           className={`w-14 h-14 rounded-full flex items-center justify-center mb-4 ${
             isCompleted
@@ -448,6 +485,8 @@ export const TimerView: React.FC<TimerViewProps> = ({
                 })
             : isPomodoro && completedIntervals > 0
             ? t('timer.outcome.pomoEndedRetainedDesc', { count: completedIntervals })
+            : isInterrupted
+            ? t('timer.outcome.endedInterruptedDesc')
             : t('timer.outcome.endedEarlyDesc')}
         </p>
 
@@ -484,12 +523,24 @@ export const TimerView: React.FC<TimerViewProps> = ({
           </div>
         </div>
 
+        {actionError && (
+          <div
+            data-testid="outcome-exit-error"
+            role="alert"
+            className="w-full max-w-[280px] mb-3 px-3 py-2 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/60 text-xs text-rose-700 dark:text-rose-300"
+          >
+            {localizeErrorMessage(locale, actionError)}
+          </div>
+        )}
+
         <button
-          onClick={() => handleAction(onResetSession)}
-          disabled={isLoading}
-          className="w-full max-w-[280px] py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-medium rounded-lg transition-colors shadow-sm disabled:opacity-50"
+          type="button"
+          data-testid="outcome-exit-btn"
+          onClick={() => void handleExitClick()}
+          disabled={isLoading || isExiting}
+          className="w-full max-w-[280px] py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-medium rounded-lg transition-colors shadow-sm disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
         >
-          {t('timer.outcome.startNewSession')}
+          {t('timer.outcome.exitSession')}
         </button>
       </div>
     );
@@ -618,7 +669,7 @@ export const TimerView: React.FC<TimerViewProps> = ({
       : t('timer.actions.pauseTooltip', { count: pausesLeft });
 
     return (
-      <div className="flex-1 min-h-0 flex flex-col gap-2.5 p-3 overflow-hidden animate-fade-in">
+      <div className="flex-1 min-h-0 flex flex-col gap-2.5 p-3 overflow-y-auto animate-fade-in">
         {/* Top Area: Placeholder FocusSceneArea with Status Chip (left) & Chime Toggle (right) */}
         <FocusSceneArea
           era={era}

@@ -20,13 +20,6 @@ import {
   RepeatMode,
 } from '../types/music.ts';
 import { SessionSnapshot } from '../types/session.ts';
-import { UserSettings } from '../types/storageSchema.ts';
-
-export interface MusicIntentSettings {
-  readonly musicEnabled: boolean;
-  readonly playDuringBreak: boolean;
-  readonly stopMusicOnSessionEnd: boolean;
-}
 
 export interface MusicCoordinatorOptions {
   readonly initialCatalog?: readonly MusicTrack[];
@@ -38,47 +31,22 @@ export interface MusicCoordinatorOptions {
 }
 
 /**
- * Pure intent derivation helper mapping Focus Session state + Music settings
- * to the authoritative target playback intent ('play' | 'pause' | 'stop').
+ * Pure intent derivation helper mapping Focus Session state
+ * to the authoritative target music lifecycle intent ('keep' | 'stop').
+ * - Active session states (RUNNING focus/short break/long break, PAUSED): 'keep'
+ *   (session pause, resume, and breaks never alter user playback; never auto-plays).
+ * - Terminal or absent/idle session (null, IDLE, COMPLETED, ABANDONED, INTERRUPTED): 'stop'.
  */
-export function deriveMusicIntent(
-  snapshot: SessionSnapshot | null,
-  settings: MusicIntentSettings
-): MusicIntent {
+export function deriveMusicIntent(snapshot: SessionSnapshot | null): MusicIntent {
   if (!snapshot) {
-    return settings.musicEnabled ? 'play' : 'stop';
+    return 'stop';
   }
 
-  if (
-    snapshot.status === 'COMPLETED' ||
-    snapshot.status === 'ABANDONED' ||
-    snapshot.status === 'INTERRUPTED'
-  ) {
-    if (settings.stopMusicOnSessionEnd) {
-      return 'stop';
-    }
-    return settings.musicEnabled ? 'play' : 'pause';
+  if (snapshot.status === 'RUNNING' || snapshot.status === 'PAUSED') {
+    return 'keep';
   }
 
-  if (snapshot.status === 'PAUSED') {
-    return 'pause';
-  }
-
-  if (snapshot.status === 'RUNNING') {
-    const isPomodoro =
-      snapshot.mode === 'POMODORO_COUNTDOWN' || snapshot.mode === 'POMODORO_STOPWATCH';
-    const currentPhase = snapshot.pomodoroState?.currentPhase;
-    const isBreakPhase =
-      isPomodoro && (currentPhase === 'SHORT_BREAK' || currentPhase === 'LONG_BREAK');
-
-    if (isBreakPhase && !settings.playDuringBreak) {
-      return 'pause';
-    }
-
-    return settings.musicEnabled ? 'play' : 'pause';
-  }
-
-  return settings.musicEnabled ? 'play' : 'stop';
+  return 'stop';
 }
 
 function clampVolume(value: number): number {
@@ -153,8 +121,7 @@ export function buildShuffledOrder(
 }
 
 export function createDefaultMusicPlayerState(
-  catalog: readonly MusicTrack[] = [],
-  settings?: Partial<UserSettings> | null
+  catalog: readonly MusicTrack[] = []
 ): MusicPlayerState {
   const firstTrack = catalog[0] ?? null;
   return {
@@ -167,10 +134,7 @@ export function createDefaultMusicPlayerState(
     shuffle: false,
     repeatMode: 'off',
     shuffledOrder: catalog.map((t) => t.id),
-    syncWithSession: settings?.stopMusicOnSessionEnd ?? true,
-    musicEnabled: settings?.musicEnabled ?? false,
-    playDuringBreak: settings?.musicPlayDuringBreak ?? false,
-    pausedBySession: false,
+    musicEnabled: false,
     catalogUpdatedAt: null,
     catalogSkippedCount: 0,
     lastUpdatedAt: Date.now(),
@@ -241,11 +205,10 @@ export class MusicCoordinator {
 
   private normalizeStateAgainstCatalog(
     raw: Partial<MusicPlayerState> | null,
-    settings?: Partial<UserSettings> | null,
     preserveEmptyTrackId: boolean = false
   ): MusicPlayerState {
-    const defaults = createDefaultMusicPlayerState(this.catalog, settings);
-    if (!raw) {
+    const defaults = createDefaultMusicPlayerState(this.catalog);
+    if (!raw || typeof raw !== 'object') {
       return defaults;
     }
 
@@ -288,19 +251,6 @@ export class MusicCoordinator {
       this.catalog.length > 0 && raw.currentTrackId && matchedTrack?.id !== raw.currentTrackId
     );
 
-    const syncWithSession =
-      typeof raw.syncWithSession === 'boolean'
-        ? raw.syncWithSession
-        : settings?.stopMusicOnSessionEnd ?? true;
-    const playDuringBreak =
-      typeof raw.playDuringBreak === 'boolean'
-        ? raw.playDuringBreak
-        : settings?.musicPlayDuringBreak ?? false;
-    const musicEnabled =
-      typeof raw.musicEnabled === 'boolean'
-        ? raw.musicEnabled
-        : status === 'PLAYING';
-
     return {
       status,
       currentTrackId: matchedTrack
@@ -317,10 +267,7 @@ export class MusicCoordinator {
       shuffle: Boolean(raw.shuffle),
       repeatMode,
       shuffledOrder: normalizedOrder,
-      syncWithSession,
-      musicEnabled,
-      playDuringBreak,
-      pausedBySession: Boolean(raw.pausedBySession),
+      musicEnabled: status === 'PLAYING',
       catalogUpdatedAt:
         typeof raw.catalogUpdatedAt === 'string'
           ? raw.catalogUpdatedAt
@@ -396,8 +343,7 @@ export class MusicCoordinator {
           ...this.state,
           catalogUpdatedAt: stamped.updatedAt,
           catalogSkippedCount: stamped.skippedCount ?? 0,
-        },
-        null
+        }
       );
       return { catalog: this.catalog, fetched: true };
     } catch (err) {
@@ -422,8 +368,7 @@ export class MusicCoordinator {
 
   private async startPlaybackInOffscreen(
     track: MusicTrack,
-    positionSec: number,
-    options?: { musicEnabled?: boolean; pausedBySession?: boolean }
+    positionSec: number
   ): Promise<MusicPlayerState> {
     try {
       const streamUrl = resolveTrackStreamUrl(track, this.baseUrl);
@@ -446,8 +391,7 @@ export class MusicCoordinator {
         currentTrackId: track.id,
         positionSec: resolvedPosition,
         durationSec: resolvedDuration,
-        musicEnabled: options?.musicEnabled ?? true,
-        pausedBySession: options?.pausedBySession ?? false,
+        musicEnabled: true,
         lastError: null,
         lastErrorCode: null,
       });
@@ -461,7 +405,6 @@ export class MusicCoordinator {
         positionSec: clampPosition(positionSec, trackDuration),
         durationSec: trackDuration ?? this.state.durationSec ?? null,
         musicEnabled: false,
-        pausedBySession: false,
         lastError: err instanceof Error ? err.message : String(err),
         lastErrorCode: code,
       });
@@ -482,13 +425,10 @@ export class MusicCoordinator {
     }
 
     this.initPromise = this.runExclusive(async () => {
-      const [persisted, settings] = await Promise.all([
-        this.storage.getMusicState(),
-        this.storage.getSettings().catch(() => null),
-      ]);
+      const persisted = await this.storage.getMusicState();
 
       const catalogResult = await this.ensureCatalogLoaded(false);
-      this.state = this.normalizeStateAgainstCatalog(persisted, settings, persisted === null);
+      this.state = this.normalizeStateAgainstCatalog(persisted, persisted === null);
 
       if (catalogResult.error && this.catalog.length === 0) {
         this.state = await this.persistState({
@@ -498,7 +438,6 @@ export class MusicCoordinator {
           positionSec: 0,
           durationSec: null,
           musicEnabled: false,
-          pausedBySession: false,
           lastError:
             'Unable to load online Lofi catalog. Check your internet connection and retry.',
           lastErrorCode: 'network',
@@ -542,9 +481,7 @@ export class MusicCoordinator {
                 : this.state.status === 'STOPPED'
                 ? 'STOPPED'
                 : 'PAUSED',
-              musicEnabled: audioStatus.isPlaying
-                ? true
-                : this.state.musicEnabled ?? false,
+              musicEnabled: audioStatus.isPlaying,
               lastError: null,
               lastErrorCode: null,
             });
@@ -552,6 +489,7 @@ export class MusicCoordinator {
             this.state = await this.persistState({
               ...this.state,
               status: 'PAUSED',
+              musicEnabled: false,
             });
           }
         } catch {
@@ -561,17 +499,13 @@ export class MusicCoordinator {
         // Offscreen document was reclaimed while SW slept: resume playback at saved position
         const activeTrack = getTrackById(this.state.currentTrackId, this.catalog);
         if (activeTrack) {
-          this.state = await this.startPlaybackInOffscreen(activeTrack, this.state.positionSec, {
-            musicEnabled: true,
-            pausedBySession: false,
-          });
+          this.state = await this.startPlaybackInOffscreen(activeTrack, this.state.positionSec);
         } else {
           this.state = await this.persistState({
             ...this.state,
             status: 'IDLE',
             positionSec: 0,
             musicEnabled: false,
-            pausedBySession: false,
           });
         }
       }
@@ -604,7 +538,6 @@ export class MusicCoordinator {
           positionSec: 0,
           durationSec: null,
           musicEnabled: false,
-          pausedBySession: false,
           lastError:
             'Unable to load online Lofi catalog. Check your internet connection and retry.',
           lastErrorCode: 'network',
@@ -612,7 +545,7 @@ export class MusicCoordinator {
       }
 
       if (result.fetched || this.catalog.length !== prevCatalogLen) {
-        const normalized = this.normalizeStateAgainstCatalog(this.state, null);
+        const normalized = this.normalizeStateAgainstCatalog(this.state);
         const clearedState: MusicPlayerState = {
           ...normalized,
           status:
@@ -645,10 +578,7 @@ export class MusicCoordinator {
               positionSec: 0,
               durationSec: getTrackDurationSec(fallbackTrack),
             };
-            return this.startPlaybackInOffscreen(fallbackTrack, 0, {
-              musicEnabled: true,
-              pausedBySession: false,
-            });
+            return this.startPlaybackInOffscreen(fallbackTrack, 0);
           }
           if (wasPaused) {
             const hasDoc = await this.offscreen.hasDocument().catch(() => false);
@@ -677,13 +607,12 @@ export class MusicCoordinator {
             positionSec: 0,
             durationSec: null,
             musicEnabled: false,
-            pausedBySession: false,
             lastError:
               'Unable to load online Lofi catalog. Check your internet connection and retry.',
             lastErrorCode: 'network',
           });
         } else if (result.fetched) {
-          const normalized = this.normalizeStateAgainstCatalog(this.state, null);
+          const normalized = this.normalizeStateAgainstCatalog(this.state);
           this.state = await this.persistState({
             ...normalized,
             status:
@@ -740,7 +669,6 @@ export class MusicCoordinator {
           positionSec: 0,
           durationSec: null,
           musicEnabled: false,
-          pausedBySession: false,
           lastError: 'Unable to load online Lofi catalog. Check your internet connection and retry.',
           lastErrorCode: 'network',
         });
@@ -761,10 +689,7 @@ export class MusicCoordinator {
             : 0
           : 0;
 
-      return this.startPlaybackInOffscreen(targetTrack, resumeSameTrack, {
-        musicEnabled: true,
-        pausedBySession: false,
-      });
+      return this.startPlaybackInOffscreen(targetTrack, resumeSameTrack);
     });
   }
 
@@ -799,7 +724,6 @@ export class MusicCoordinator {
         positionSec,
         durationSec,
         musicEnabled: false,
-        pausedBySession: false,
       });
     });
   }
@@ -842,7 +766,6 @@ export class MusicCoordinator {
               positionSec: resumedSnap?.currentTime ?? startPos,
               durationSec: resumedSnap?.duration ?? this.state.durationSec,
               musicEnabled: true,
-              pausedBySession: false,
               lastError: null,
               lastErrorCode: null,
             });
@@ -854,10 +777,7 @@ export class MusicCoordinator {
 
       // If Chrome closed the offscreen document after 30s idle pause, this seamlessly
       // recreates the document and resumes streaming from the saved positionSec.
-      return this.startPlaybackInOffscreen(track, startPos, {
-        musicEnabled: true,
-        pausedBySession: false,
-      });
+      return this.startPlaybackInOffscreen(track, startPos);
     });
   }
 
@@ -880,7 +800,6 @@ export class MusicCoordinator {
       status: 'STOPPED',
       positionSec: 0,
       musicEnabled: false,
-      pausedBySession: false,
       lastError: null,
       lastErrorCode: null,
     });
@@ -902,10 +821,7 @@ export class MusicCoordinator {
       const nextTrack = getTrackById(queue[nextIdx], this.catalog);
       if (!nextTrack) return { ...this.state };
 
-      return this.startPlaybackInOffscreen(nextTrack, 0, {
-        musicEnabled: true,
-        pausedBySession: false,
-      });
+      return this.startPlaybackInOffscreen(nextTrack, 0);
     });
   }
 
@@ -920,10 +836,7 @@ export class MusicCoordinator {
       const prevTrack = getTrackById(queue[prevIdx], this.catalog);
       if (!prevTrack) return { ...this.state };
 
-      return this.startPlaybackInOffscreen(prevTrack, 0, {
-        musicEnabled: true,
-        pausedBySession: false,
-      });
+      return this.startPlaybackInOffscreen(prevTrack, 0);
     });
   }
 
@@ -1006,32 +919,6 @@ export class MusicCoordinator {
     });
   }
 
-  async setSyncWithSession(enabled: boolean): Promise<MusicPlayerState> {
-    await this.ensureInitialized();
-    const flag = Boolean(enabled);
-    await this.storage.updateSettings({ stopMusicOnSessionEnd: flag }).catch(() => undefined);
-    return this.runExclusive(async () => {
-      await this.persistState({
-        ...this.state,
-        syncWithSession: flag,
-      });
-      return this.syncInternal();
-    });
-  }
-
-  async setPlayDuringBreak(enabled: boolean): Promise<MusicPlayerState> {
-    await this.ensureInitialized();
-    const flag = Boolean(enabled);
-    await this.storage.updateSettings({ musicPlayDuringBreak: flag }).catch(() => undefined);
-    return this.runExclusive(async () => {
-      await this.persistState({
-        ...this.state,
-        playDuringBreak: flag,
-      });
-      return this.syncInternal();
-    });
-  }
-
   async handleOffscreenEvent(event: OffscreenMusicEvent): Promise<MusicPlayerState> {
     await this.ensureInitialized();
     return this.runExclusive(async () => {
@@ -1062,17 +949,13 @@ export class MusicCoordinator {
               status: 'STOPPED',
               positionSec: 0,
               musicEnabled: false,
-              pausedBySession: false,
             });
           }
 
           if (this.state.repeatMode === 'one') {
             const currentTrack = getTrackById(this.state.currentTrackId, this.catalog);
             if (currentTrack) {
-              return this.startPlaybackInOffscreen(currentTrack, 0, {
-                musicEnabled: true,
-                pausedBySession: false,
-              });
+              return this.startPlaybackInOffscreen(currentTrack, 0);
             }
           }
 
@@ -1088,17 +971,13 @@ export class MusicCoordinator {
               status: 'STOPPED',
               positionSec: 0,
               musicEnabled: false,
-              pausedBySession: false,
             });
           }
 
           const nextIdx = (currentIdx + 1) % queue.length;
           const nextTrack = getTrackById(queue[nextIdx], this.catalog);
           if (nextTrack) {
-            return this.startPlaybackInOffscreen(nextTrack, 0, {
-              musicEnabled: true,
-              pausedBySession: false,
-            });
+            return this.startPlaybackInOffscreen(nextTrack, 0);
           }
 
           return this.persistState({
@@ -1106,7 +985,6 @@ export class MusicCoordinator {
             status: 'STOPPED',
             positionSec: 0,
             musicEnabled: false,
-            pausedBySession: false,
           });
         }
 
@@ -1115,7 +993,6 @@ export class MusicCoordinator {
             ...this.state,
             status: 'ERROR',
             musicEnabled: false,
-            pausedBySession: false,
             lastErrorCode: event.code,
             lastError: event.message || `Audio playback failed (${event.code}).`,
           });
@@ -1131,48 +1008,19 @@ export class MusicCoordinator {
     sessionOverride?: SessionSnapshot | null,
     reason?: string
   ): Promise<MusicPlayerState> {
-    const [storedSession, settings] = await Promise.all([
-      sessionOverride !== undefined ? Promise.resolve(sessionOverride) : this.storage.getCurrentSession(),
-      this.storage.getSettings().catch(() => null),
-    ]);
+    const storedSession =
+      sessionOverride !== undefined
+        ? sessionOverride
+        : await this.storage.getCurrentSession();
 
-    const playDuringBreak =
-      typeof this.state.playDuringBreak === 'boolean'
-        ? this.state.playDuringBreak
-        : settings?.musicPlayDuringBreak ?? false;
-    const stopMusicOnSessionEnd =
-      typeof this.state.syncWithSession === 'boolean'
-        ? this.state.syncWithSession
-        : settings?.stopMusicOnSessionEnd ?? true;
-    const musicEnabled =
-      typeof this.state.musicEnabled === 'boolean'
-        ? this.state.musicEnabled
-        : this.state.status === 'PLAYING';
-
-    // On clean browser startup with no active session, clear any stale active/playing state
-    if (
-      (reason === 'STARTUP_NO_SESSION' || reason === 'BROWSER_STARTUP' || reason === 'BROWSER_UPDATED') &&
-      !storedSession
-    ) {
-      if (this.state.status === 'PLAYING' || musicEnabled || this.state.pausedBySession) {
-        return this.stopInternal();
-      }
-      return { ...this.state };
-    }
-
-    const intent = deriveMusicIntent(storedSession, {
-      musicEnabled,
-      playDuringBreak,
-      stopMusicOnSessionEnd,
-    });
+    const intent = deriveMusicIntent(storedSession);
 
     if (intent === 'stop') {
       const hasDoc = await this.offscreen.hasDocument().catch(() => false);
       if (
         this.state.status === 'PLAYING' ||
         this.state.status === 'PAUSED' ||
-        musicEnabled ||
-        this.state.pausedBySession ||
+        this.state.musicEnabled ||
         hasDoc
       ) {
         return this.stopInternal();
@@ -1180,47 +1028,10 @@ export class MusicCoordinator {
       return { ...this.state };
     }
 
-    if (intent === 'pause') {
-      if (this.state.status === 'PLAYING') {
-        let positionSec = this.state.positionSec;
-        let durationSec = this.state.durationSec;
-        const hasDoc = await this.offscreen.hasDocument().catch(() => false);
-        if (hasDoc) {
-          try {
-            const snap = await this.offscreen.sendCommand<AudioStatusSnapshot>({
-              target: 'offscreen',
-              action: 'MUSIC_PAUSE',
-            });
-            if (snap) {
-              positionSec = snap.currentTime;
-              durationSec = snap.duration ?? durationSec;
-            }
-          } catch {
-            // Preserve persisted position
-          }
-        }
-        return this.persistState({
-          ...this.state,
-          status: 'PAUSED',
-          positionSec,
-          durationSec,
-          musicEnabled,
-          pausedBySession: musicEnabled,
-        });
-      }
-
-      if (musicEnabled && !this.state.pausedBySession && this.state.status === 'PAUSED') {
-        return this.persistState({
-          ...this.state,
-          pausedBySession: true,
-        });
-      }
-
-      return { ...this.state };
-    }
-
-    // intent === 'play'
-    if (!musicEnabled) {
+    // intent === 'keep': Active focus session (RUNNING focus/break or PAUSED).
+    // Session Pause, Resume, Short Break, and Long Break never alter user playback,
+    // and starting a session never auto-plays music.
+    if (this.state.status !== 'PLAYING') {
       return { ...this.state };
     }
 
@@ -1234,30 +1045,25 @@ export class MusicCoordinator {
     }
 
     const hasDoc = await this.offscreen.hasDocument().catch(() => false);
-    if (this.state.status === 'PLAYING' && hasDoc) {
-      try {
-        const snap = await this.offscreen.sendCommand<AudioStatusSnapshot>({
-          target: 'offscreen',
-          action: 'MUSIC_GET_STATUS',
-        });
-        if (snap && snap.isPlaying && snap.trackId === track.id) {
-          if (this.state.pausedBySession) {
-            return this.persistState({
-              ...this.state,
-              pausedBySession: false,
-            });
-          }
-          return { ...this.state };
-        }
-      } catch {
-        // Fallback to starting/resuming playback in offscreen
-      }
+    if (hasDoc) {
+      return { ...this.state };
     }
 
-    return this.startPlaybackInOffscreen(track, this.state.positionSec, {
-      musicEnabled: true,
-      pausedBySession: false,
-    });
+    // Only recover offscreen playback on explicit startup/wake recovery when user was playing
+    if (
+      reason === 'BROWSER_STARTUP' ||
+      reason === 'BROWSER_STARTUP_ACTIVE' ||
+      reason === 'BROWSER_UPDATED' ||
+      reason === 'EXTENSION_RE_ENABLED' ||
+      reason === 'EXTENSION_RELOADED' ||
+      reason === 'EXTENSION_UPDATED' ||
+      reason === 'RECOVERY' ||
+      reason === 'SERVICE_WORKER_WAKE'
+    ) {
+      return this.startPlaybackInOffscreen(track, this.state.positionSec);
+    }
+
+    return { ...this.state };
   }
 
   /**

@@ -15,8 +15,6 @@ import {
   MusicSetVolumePayload,
   MusicSetShufflePayload,
   MusicSetRepeatPayload,
-  MusicSetSyncWithSessionPayload,
-  MusicSetPlayDuringBreakPayload,
 } from '../../types/messages.ts';
 import {
   LOFI_BASE_URL,
@@ -137,10 +135,7 @@ let mockMusicState: MusicPlayerState = {
   shuffle: false,
   repeatMode: 'off',
   shuffledOrder: [],
-  syncWithSession: true,
   musicEnabled: false,
-  playDuringBreak: false,
-  pausedBySession: false,
   catalogUpdatedAt: null,
   lastUpdatedAt: Date.now(),
   lastError: null,
@@ -258,7 +253,6 @@ async function ensureMockCatalogLoaded(forceRefresh = false): Promise<void> {
         positionSec: 0,
         durationSec: null,
         musicEnabled: false,
-        pausedBySession: false,
         lastError: 'Unable to load online Lofi catalog. Check your internet connection and retry.',
         lastErrorCode: 'network',
         lastUpdatedAt: Date.now(),
@@ -306,14 +300,13 @@ function stopPreviewAudioAndState(): void {
     status: 'STOPPED',
     positionSec: 0,
     musicEnabled: false,
-    pausedBySession: false,
     lastUpdatedAt: Date.now(),
     lastError: null,
     lastErrorCode: null,
   };
 }
 
-function pausePreviewAudio(bySession: boolean): void {
+function pausePreviewAudio(): void {
   const currentPos =
     previewAudio && Number.isFinite(previewAudio.currentTime)
       ? previewAudio.currentTime
@@ -329,19 +322,13 @@ function pausePreviewAudio(bySession: boolean): void {
     ...mockMusicState,
     status: 'PAUSED',
     positionSec: currentPos,
-    musicEnabled: bySession ? Boolean(mockMusicState.musicEnabled) : false,
-    pausedBySession: bySession && Boolean(mockMusicState.musicEnabled),
+    musicEnabled: false,
     lastUpdatedAt: Date.now(),
   };
 }
 
 function syncSimulatedMusicWithSession(): void {
-  const intent = deriveMusicIntent(mockState.currentSession, {
-    musicEnabled: Boolean(mockMusicState.musicEnabled ?? mockMusicState.status === 'PLAYING'),
-    playDuringBreak: Boolean(mockMusicState.playDuringBreak),
-    stopMusicOnSessionEnd: Boolean(mockMusicState.syncWithSession),
-  });
-
+  const intent = deriveMusicIntent(mockState.currentSession);
   if (intent === 'stop') {
     if (
       mockMusicState.status === 'PLAYING' ||
@@ -349,22 +336,6 @@ function syncSimulatedMusicWithSession(): void {
       mockMusicState.musicEnabled
     ) {
       stopPreviewAudioAndState();
-    }
-    return;
-  }
-
-  if (intent === 'pause') {
-    if (mockMusicState.status === 'PLAYING') {
-      pausePreviewAudio(true);
-    }
-    return;
-  }
-
-  if (mockMusicState.musicEnabled && mockMusicState.status !== 'PLAYING') {
-    const track =
-      getTrackById(mockMusicState.currentTrackId, mockMusicCatalog) ?? mockMusicCatalog[0];
-    if (track) {
-      startPreviewAudioTrack(track, mockMusicState.positionSec);
     }
   }
 }
@@ -423,7 +394,6 @@ function startPreviewAudioTrack(track: MusicTrack, positionSec: number): void {
     positionSec: clampedPos,
     durationSec: duration,
     musicEnabled: true,
-    pausedBySession: false,
     lastUpdatedAt: Date.now(),
     lastError: null,
     lastErrorCode: null,
@@ -1454,6 +1424,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
     }
 
     case 'MUSIC_GET_STATE': {
+      syncSimulatedMusicWithSession();
       return makeMusicResponse<T>();
     }
 
@@ -1494,7 +1465,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
 
     case 'MUSIC_PAUSE': {
       if (mockMusicState.status === 'PLAYING' || mockMusicState.musicEnabled) {
-        pausePreviewAudio(false);
+        pausePreviewAudio();
       }
       return makeMusicResponse<T>();
     }
@@ -1599,28 +1570,6 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         repeatMode: validMode,
         lastUpdatedAt: now,
       };
-      return makeMusicResponse<T>();
-    }
-
-    case 'MUSIC_SET_SYNC_WITH_SESSION': {
-      const { enabled } = (message as { payload: MusicSetSyncWithSessionPayload }).payload;
-      mockMusicState = {
-        ...mockMusicState,
-        syncWithSession: Boolean(enabled),
-        lastUpdatedAt: now,
-      };
-      syncSimulatedMusicWithSession();
-      return makeMusicResponse<T>();
-    }
-
-    case 'MUSIC_SET_PLAY_DURING_BREAK': {
-      const { enabled } = (message as { payload: MusicSetPlayDuringBreakPayload }).payload;
-      mockMusicState = {
-        ...mockMusicState,
-        playDuringBreak: Boolean(enabled),
-        lastUpdatedAt: now,
-      };
-      syncSimulatedMusicWithSession();
       return makeMusicResponse<T>();
     }
 

@@ -143,7 +143,9 @@ test('Start Focus View (5b): removes Quest session terminology in idle, active, 
 
   assert.ok(activeHtml.includes('Give Up Session'));
   assert.ok(completedHtml.includes('Focus Session Completed!'));
-  assert.ok(completedHtml.includes('Start New Session'));
+  assert.ok(completedHtml.includes('data-testid="outcome-exit-btn"'));
+  assert.ok(completedHtml.includes('>Exit<'));
+  assert.ok(!completedHtml.includes('Start New Session'));
   assert.ok(abandonedHtml.includes('Session Ended'));
 });
 

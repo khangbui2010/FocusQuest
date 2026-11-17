@@ -106,6 +106,10 @@ const EXACT_VI_ERROR_MAP: Record<string, string> = {
     'Không thể hoàn tất sớm chu kỳ trong Pomodoro Bấm giờ.',
   "SET_LANGUAGE requires valid language ('en' | 'vi').": "Ngôn ngữ không hợp lệ (chỉ hỗ trợ 'en' hoặc 'vi').",
   'SET_CHIME_ENABLED requires boolean enabled flag.': 'Cấu hình chuông báo không hợp lệ.',
+  'Failed to exit session.': 'Không thể thoát phiên tập trung. Vui lòng thử lại.',
+  'Could not exit the session. Please try again.': 'Không thể thoát phiên tập trung. Vui lòng thử lại.',
+  'Background worker unreachable.': 'Không thể kết nối tiến trình nền. Vui lòng thử lại.',
+  'Empty response received.': 'Không nhận được phản hồi từ tiến trình nền.',
 
   // Music Player backend messages
   'Unable to load online Lofi catalog. Check your internet connection and retry.':
@@ -122,8 +126,6 @@ const EXACT_VI_ERROR_MAP: Record<string, string> = {
   'MUSIC_SET_VOLUME requires finite numeric volume.': 'Mức âm lượng không hợp lệ.',
   'MUSIC_SET_SHUFFLE requires boolean enabled flag.': 'Cài đặt phát ngẫu nhiên không hợp lệ.',
   "MUSIC_SET_REPEAT requires mode ('off' | 'all' | 'one').": 'Chế độ lặp lại không hợp lệ.',
-  'MUSIC_SET_SYNC_WITH_SESSION requires boolean enabled flag.': 'Cài đặt đồng bộ phiên tập trung không hợp lệ.',
-  'MUSIC_SET_PLAY_DURING_BREAK requires boolean enabled flag.': 'Cài đặt phát nhạc trong giờ nghỉ không hợp lệ.',
   'Music coordinator is not initialized.': 'Trình điều phối nhạc chưa được khởi tạo.',
   'MusicCoordinator is not configured in MessageHandler.': 'Trình điều phối nhạc chưa được cấu hình.',
 };

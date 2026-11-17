@@ -12,7 +12,7 @@ import { SessionCoordinator, ALARM_NAMES } from './sessionCoordinator.ts';
 import { MessageHandler } from './messageHandler.ts';
 import { CivilizationCoordinator } from './civilizationCoordinator.ts';
 import { ChromeOffscreenAdapter } from '../chrome/offscreenAdapter.ts';
-import { MusicCoordinator } from './musicCoordinator.ts';
+import { MusicCoordinator, deriveMusicIntent } from './musicCoordinator.ts';
 
 import { LifecycleReason } from '../types/lifecycle.ts';
 import { OffscreenMusicEvent } from '../types/music.ts';
@@ -195,8 +195,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     typeof message === 'object' &&
     (message as { target?: string }).target === 'background'
   ) {
-    musicCoordinator
-      .handleOffscreenEvent(message as OffscreenMusicEvent)
+    (async () => {
+      const evt = message as OffscreenMusicEvent;
+      if (evt.action === 'MUSIC_POSITION' || evt.action === 'MUSIC_ENDED') {
+        const currentSession = await storageManager.getCurrentSession();
+        if (deriveMusicIntent(currentSession) === 'stop') {
+          return musicCoordinator.sync(currentSession, 'NO_ACTIVE_SESSION');
+        }
+      }
+      return musicCoordinator.handleOffscreenEvent(evt);
+    })()
       .then((state) => sendResponse({ success: true, data: state }))
       .catch((err) =>
         sendResponse({

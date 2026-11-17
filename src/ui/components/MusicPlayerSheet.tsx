@@ -37,6 +37,8 @@ export interface MusicPlayerSheetProps {
   isOpen?: boolean;
   /** Legacy alias kept for compatibility with existing unit harnesses. */
   onClose?: () => void;
+  /** Whether the 64px bottom navigation bar is currently rendered below the mini-player. */
+  hasBottomNav?: boolean;
   /** Optional initial state for the License & Attribution panel (defaults to false). */
   defaultCreditsOpen?: boolean;
   musicState: MusicPlayerState;
@@ -51,8 +53,6 @@ export interface MusicPlayerSheetProps {
   onSetVolume: (volume: number, muted?: boolean) => Promise<void> | void;
   onToggleShuffle: (enabled: boolean) => Promise<void> | void;
   onCycleRepeat: (nextMode: RepeatMode) => Promise<void> | void;
-  onToggleSyncWithSession: (enabled: boolean) => Promise<void> | void;
-  onTogglePlayDuringBreak?: (enabled: boolean) => Promise<void> | void;
   onRefreshCatalog?: () => Promise<void> | void;
 }
 
@@ -84,6 +84,7 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
   onToggleExpand,
   isOpen,
   onClose,
+  hasBottomNav = true,
   defaultCreditsOpen = false,
   musicState,
   catalog,
@@ -97,8 +98,6 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
   onSetVolume,
   onToggleShuffle,
   onCycleRepeat,
-  onToggleSyncWithSession,
-  onTogglePlayDuringBreak,
   onRefreshCatalog,
 }) => {
   const { locale, t } = useTranslation();
@@ -380,7 +379,7 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
                   aria-label={t('music.expandAria')}
                   aria-expanded={expanded}
                   title={t('music.expandAria')}
-                  onClick={() => handleSetExpanded(true)}
+                  onClick={() => handleSetExpanded(!expanded)}
                   className="min-w-[36px] min-h-[36px] w-9 h-9 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 flex items-center justify-center transition-colors motion-reduce:transition-none cursor-pointer"
                 >
                   <ChevronUp className="w-4 h-4" />
@@ -396,7 +395,9 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
         <div
           data-testid="music-sheet-backdrop"
           onClick={() => handleSetExpanded(false)}
-          className="fixed inset-0 z-50 pb-[64px] flex items-end justify-center bg-black/55 backdrop-blur-xs"
+          className={`fixed inset-0 z-50 ${
+            hasBottomNav ? 'pb-[64px]' : 'pb-0'
+          } flex items-end justify-center bg-black/55 backdrop-blur-xs`}
         >
           <div
             role="dialog"
@@ -676,31 +677,6 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
                   <span className="text-[10px] font-mono tabular-nums text-slate-400 w-8 text-right shrink-0">
                     {musicState.muted ? '0%' : `${Math.round(musicState.volume * 100)}%`}
                   </span>
-                </div>
-
-                {/* Session-sync toggles preserved concisely */}
-                <div className="grid grid-cols-1 gap-1">
-                  <label className="flex items-center justify-between gap-2 px-2 py-1 rounded-md bg-slate-900 border border-slate-800 text-[11px] text-slate-200 cursor-pointer">
-                    <span className="truncate">{t('music.syncWithSessionLabel')}</span>
-                    <input
-                      type="checkbox"
-                      data-testid="music-sync-session-toggle"
-                      checked={musicState.syncWithSession}
-                      onChange={(e) => void onToggleSyncWithSession(e.target.checked)}
-                      className="w-3.5 h-3.5 accent-indigo-500 rounded cursor-pointer shrink-0"
-                    />
-                  </label>
-
-                  <label className="flex items-center justify-between gap-2 px-2 py-1 rounded-md bg-slate-900 border border-slate-800 text-[11px] text-slate-200 cursor-pointer">
-                    <span className="truncate">{t('music.playDuringBreakLabel')}</span>
-                    <input
-                      type="checkbox"
-                      data-testid="music-play-during-break-toggle"
-                      checked={Boolean(musicState.playDuringBreak)}
-                      onChange={(e) => void onTogglePlayDuringBreak?.(e.target.checked)}
-                      className="w-3.5 h-3.5 accent-indigo-500 rounded cursor-pointer shrink-0"
-                    />
-                  </label>
                 </div>
               </div>
 

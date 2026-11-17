@@ -19,9 +19,7 @@ export interface UserSettings {
   notificationsEnabled: boolean;    // Chrome Notifications
   language?: SupportedLocale;       // UI & notification language ('en' | 'vi')
   chimeEnabled?: boolean;           // Web Audio phase transition chimes (undefined means enabled)
-  musicEnabled?: boolean;           // User background Lofi playback intent
-  musicPlayDuringBreak?: boolean;   // Keep playing music during Pomodoro breaks (default false)
-  stopMusicOnSessionEnd?: boolean;  // Stop music when focus session ends (default true)
+  musicEnabled?: boolean;           // Legacy field ignored at runtime; playback state lives in MUSIC_STATE
   musicPlayerExpanded?: boolean;    // Persist MusicPlayerSheet expanded/collapsed state (default false)
 }
 

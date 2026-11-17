@@ -9,7 +9,7 @@ export type MusicLicenseType =
 
 export type MusicErrorCode = 'autoplay_blocked' | 'network' | 'decode' | 'unknown';
 
-export type MusicIntent = 'play' | 'pause' | 'stop';
+export type MusicIntent = 'keep' | 'stop';
 
 export interface RemoteMusicTrackRaw {
   readonly id: string;
@@ -76,10 +76,7 @@ export interface MusicPlayerState {
   shuffle: boolean;
   repeatMode: RepeatMode;
   shuffledOrder: string[];
-  syncWithSession: boolean;
   musicEnabled?: boolean;
-  playDuringBreak?: boolean;
-  pausedBySession?: boolean;
   catalogUpdatedAt?: string | null;
   catalogSkippedCount?: number;
   lastUpdatedAt: number;
