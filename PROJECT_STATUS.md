@@ -1,0 +1,177 @@
+# FOCUS QUEST — PROJECT STATUS
+Cập nhật lần cuối: 2026-11-16
+Giai đoạn hiện tại: Music Player (MP3 đóng gói sẵn + Offscreen Document + `MusicCoordinator` + UI Sheet) & Session Notifications Hardening ĐÃ HOÀN TẤT — bước kế tiếp theo lộ trình 5B.5: Giai đoạn 1b (`blocked.html` / `_locales` / kiểm tra Chrome thật)
+Trạng thái: Verified (509/509 Tests PASS 3/3 lần | Build PASS | Lint PASS — UI chạy qua React SSR `renderToString`; audio phát thực & notification Chrome thật cần kiểm chứng trực quan khi Load unpacked `dist/`)
+
+---
+
+## 1. TỔNG QUAN TIẾN TRÌNH CÁC GIAI ĐOẠN
+
+- **Phase 1-3 (HOÀN THÀNH)**: Core Timer, State Machine, Time Calculator, Storage Mutex, DNR Website Blocker, Pomodoro Flow & Break Blocking (67 tests PASS trong lịch sử).
+- **Phase 4 (HOÀN THÀNH)**: Popup UI (React 19 + Tailwind CSS), ExtensionClient bridge, Allowlist management, Header, Timer view, Daily stats (72 tests PASS trong lịch sử).
+- **Phase 5A (HOÀN THÀNH)**: Economy Foundation, Additive Coin Bonus aggregation, RewardEngine & SessionCoordinator integration, Decimal precision, Storage migration & regression (251 tests PASS trong lịch sử).
+- **Phase 5B.1 (HOÀN THÀNH)**: Core Map Grid & Collision Validation Engine (`GridMap`, kiểm tra footprint/collision, mở rộng 4 hướng với tọa độ âm, đặt/gỡ công trình nguyên tử — *mô hình ban đầu 20×20 / chunk 10×10 đã được chuyển sang **8×8 / chunk 4×4** ở Giai đoạn 4a-2 V2 / ĐC-12, cây/cảnh quan nằm ở lớp hiển thị UI*).
+- **Phase 5B.2 (HOÀN THÀNH)**: Building Catalog & Storage Schema v2 Migration (`BuildingDefinition`, `BuildingInstance`, 3 nhóm `DECORATIVE`/`FOCUS_SUPPORT`/`ECONOMY_EFFECT`, Building Catalog, tính phí nâng cấp, `CivilizationState`, deep consistency validation, schema v2 migration, tích hợp `StorageManager`).
+- **Phase 5B.3 & 5B.3.2 (HOÀN THÀNH)**: Background Coordinator, Typed Message Handlers & Atomic Civilization Transactions (`executeCivilizationTransaction`, `StorageMutex`, `onCommitted` hook, rollback compensation, bảo toàn độ chính xác số thực IEEE-754).
+- **Phase 5B.4.3B (HOÀN THÀNH)**: Lifecycle Recovery Verification & Correctness Hardening (Phân loại Service Worker vs Browser restart, bảo toàn quy tắc All-or-Nothing của Pomodoro Countdown: 0 reward khi gián đoạn, Pomodoro Stopwatch tích lũy từng interval hoàn thành, xử lý Heartbeat Concurrency và crash khi render ProfileAllowlistView).
+- **Phase 5B.4.3C (HOÀN THÀNH — PACKAGING HARDENING, CIVILIZATION-FIRST UI & DỌN TÀN DƯ TEMPLATE)**:
+  - *F-08 → F-11 (Đã đóng):* Cấu hình `vite.config.ts` đa entrypoint (`popup` + `background`), đồng bộ package name `"focus-quest"`, đưa `civilizationView.test.ts` vào bộ test chuẩn (`382/382 PASS` ở mốc lịch sử này), thay `__dirname` bằng `import.meta.dirname`.
+  - *Civilization-First UI:* Triển khai 6 components trong `src/ui/components/civilization/` (`CivilizationHeader.tsx`, `BuildingCatalogPanel.tsx`, `BuildingDetailsModal.tsx`, `LandExpansionModal.tsx`, `MapGridView.tsx`, `CivilizationScreen.tsx`) và đồng bộ parity simulator trong `src/ui/services/extensionClient.ts`.
+  - *Dọn tàn dư template:* Gỡ dependencies thừa (`@google/genai`, `express`, `dotenv`, `motion`, `@types/express`), sửa script `clean` thành `"rm -rf dist"`, xóa `.env.example`, cập nhật `metadata.json` (`majorCapabilities: []`) và `index.html`.
+- **Milestone 5B.5 (ĐANG TRIỂN KHAI — Kế hoạch chính thức `respond_plan_5B.5.md`, ĐC-1..ĐC-12):**
+  - **Đã hoàn thành (7 giai đoạn):**
+    1. **Giai đoạn 1a** — Nền tảng i18n lõi (`src/i18n/*`) & công tắc chuông (`chimeEnabled?: boolean`, giữ `soundEnabled` deprecated/ignored), `SET_LANGUAGE` / `SET_CHIME_ENABLED` (+8 tests → `390/390 PASS`).
+    2. **Giai đoạn 5a** — Điều hướng 3 tab đáy (`Quest | Start Focus | Stats` trong `Navbar.tsx`), Compact `Header.tsx` (thêm Era badge, `EN|VI`, `← Map`, huy hiệu khiên khi active), Home mặc định là `Your Civilization` (`App.tsx`), khung tạm tab `Quest` (+6 tests, sửa có chủ đích `extensionPopupShell.test.ts:32-35` → `396/396 PASS`).
+    3. **Giai đoạn 5b** — Làm mới `TimerView.tsx` (`DurationPresetChips.tsx`, thuật ngữ `Focus Session`), thay lối vào tạm `ProfileAllowlistView.tsx` bằng `ProfileBottomSheet.tsx` (Switch/Create/Rename/Delete/Allowlist + khóa cứng khi chạy phiên), bổ sung `GET_ACTIVE_PROFILE`/`RENAME_PROFILE`/`DELETE_PROFILE` vào simulator, đổi `package.json` `test` sang glob `__tests__/ui/*.test.ts` (+15 tests → `411/411 PASS`).
+    4. **Giai đoạn 5b-2** — Bố cục màn hình ĐANG TẬP TRUNG: tạo `FocusSceneArea.tsx` (giữ chỗ tĩnh CSS/SVG) & `sessionModeLabel.ts`, khung gọn 3 hàng / 3 cột trong `TimerView.tsx`, tách `src/i18n/locale.ts` giúp giảm shared chunk `domainNormalizer-*.js` (`43.85 → 21.97 kB`) (+14 tests → `425/425 PASS`).
+    5. **Giai đoạn 5b-3** — Sửa 3 lỗi sau 5b-2: tách `sessionActions.ts` (`onSkipBreak` gọi `SKIP_POMODORO_BREAK`), sửa `"Total Reward: 0 Coin, 0 XP"` ở Pomodoro Countdown simulator + fallback `TimerView`, neo `<svg>` `FocusSceneArea` phủ 100% chiều cao (`viewBox="0 0 360 220"`) (+8 tests → `433/433 PASS`).
+    6. **Giai đoạn 4a** — Giải nén tài nguyên CC0 Kenney Tiny Town & Tiny Dungeon (`public/assets/sprites/` & `docs/sprites/`), xây `spriteData.ts`, `PixelSprite.tsx`, `TileImage.tsx`, `spriteRegistry.ts`, `SpriteGallery.tsx` (`#sprites` chỉ ở Web Preview), tích hợp nền cỏ Tiny Town + 6 sprite Stone Age vào `MapGridView.tsx`, `BuildingCatalogPanel.tsx`, `BuildingDetailsModal.tsx`, cập nhật `CREDITS.md` & `README.md` (+12 tests → `445/445 PASS`).
+    7. **Giai đoạn 4a-2 (ĐC-12 V2 + Bổ sung tán lá)** — Thu nhỏ đất đầu game xuống **`8×8`** (`2×2` chunk **`4×4`** = `64` ô), mỗi lần mở rộng `+1` chunk `4×4` (`+16` ô, miễn phí tới 5B.6); **gỡ bỏ hoàn toàn cây dạng dữ liệu game V1** (`terrainGenerator.ts`, `TerrainFeature`, `CELL_TERRAIN`), giữ nguyên `GridMapSnapshot = { chunks, buildings }` và `CURRENT_CIVILIZATION_SCHEMA_VERSION = 2` (state `10×10` cũ bị `sanitizeCivilizationState` từ chối → seed lại bản đồ `8×8`). Tạo lớp hiển thị thuần UI `terrainDecor.ts` (`TERRAIN_DECOR_SEED = 5202402`, zero `Math.random`): vùng đã mở chỉ có cỏ (`0–2`), mảng đất thưa (`12–14, 24–26, 36–42`), đá rêu (`43`), mầm/nấm thưa (`17, 29`), không cây & không chặn đặt; vùng chưa mở (`MapGridView` thêm viền rừng `FOREST_MARGIN_CELLS = 2` quanh bounding box -> `12×12` ban đầu ở `CELL_SIZE = 32`) ghép khối tán lá liền mạch (`[6,8]/[30,32]`, `[9,11]/[33,35]`, `[7]/[31]`, `[10]/[34]`, mảnh tán lá không bao giờ đứng lẻ) xen cây đứng riêng (`3–5, 15–16, 27–28`) + lớp tối `bg-slate-950/50`. Cập nhật `LandExpansionModal.tsx` (`4×4`, `+16 cells`), `SpriteGallery.tsx`, `TILE_INDEX.md`, `CREDITS.md` (+10 tests vs mốc 4a → `455/455 PASS`).
+    8. **Giai đoạn 4b (ĐC-11 — HOÀN TẤT 2026-11-16):** Thay hình giữ chỗ tĩnh SVG trong `FocusSceneArea.tsx` bằng cảnh trại Thời đại Đồ Đá có hoạt ảnh CSS xác định (`src/index.css`, tôn trọng `prefers-reduced-motion`) với 3 nhân vật CC0 Tiny Dungeon (`86`, `88`, `100`) + công cụ cầm tay (`117`, `119`), cây/đạo cụ Tiny Town (`3/15`, `4/16`, `5`, `17`, `29`, `106`) và `PixelSprite` (`stone_age_study_cave`, `stone_age_campfire`), phân biệt 3 trạng thái `working` / `paused` / `resting`, i18n `aria-label` EN/VI (+5 tests trong `focusSceneArea.test.ts`, cập nhật 2 test giữ chỗ 5b-2/5b-3 → `490/490 PASS`).
+    9. **Music Player & Session Notifications Hardening (`respond_plan_music_player.md` — HOÀN TẤT 2026-11-16):**
+       - *Music Player:* Đóng gói **10 file MP3 ngoại tuyến** vào `public/assets/music/` (**5 track Purrple Cat `CC BY 4.0`** + **5 track HoliznaCC0 `CC0 1.0`** từ `freemusicarchive.org/music/holiznacc0/public-domain-lofi`; xóa bỏ hoàn toàn `public/assets/aistudio/`), lập `public/assets/music/CREDITS.md` và catalog động `src/data/musicCatalog.ts` hỗ trợ `CC0` / `CC BY` / `CC BY-SA` (bắt buộc đủ ghi công `CC BY 4.0` cho Purrple Cat, hiển thị nguồn/giấy phép CC0 cho HoliznaCC0), cập nhật `manifest.json` (`minimum_chrome_version: "109"`, quyền `"offscreen"`), cấu hình entrypoint thứ 4 `src/offscreen/offscreen.ts` + `public/offscreen.html` CSP-safe (0 inline script), triển khai `ChromeOffscreenAdapter` + `MusicCoordinator` (khóa tuần tự riêng biệt, phục hồi khi SW restart qua `GET_AUDIO_STATUS` hoặc `LOAD_AND_PLAY` tại `positionSec`), 12 action `MUSIC_*` trong `MessageHandler` + simulator `extensionClient.ts`, `MusicPlayerSheet.tsx` + nút `Header.tsx`, song ngữ EN/VI + `errorTranslator.ts` (+12 tests music).
+       - *Session Notifications:* Chuẩn hóa toàn bộ thông báo hoàn thành phiên trên `SessionCoordinator` + `ChromeNotificationsAdapter` (sửa default icon `'icons/icon128.png'`, thêm kiểm tra `UserSettings.notificationsEnabled`, bổ sung completion notifications cho `finishStopwatch()` `STOPWATCH >= 5m` và `POMODORO_STOPWATCH >= 1 interval`, chuẩn hóa `notificationSent: true` cho `POMODORO_COUNTDOWN` 100%, chống trùng ID pha Pomodoro cùng mili-giây, gắn `onSessionEndedHook` cô lập lỗi 2 chiều với `MusicCoordinator`, giữ `soundEffects.ts` độc lập) (+7 tests notification → `509/509 PASS`).
+  - **Bước tiếp theo trong 5B.5:** **Giai đoạn 1b** (`src/blocked/blocked.ts` / `_locales` / `manifest.json` kiểm tra Chrome thật — lưu ý phần lớn đã có từ Chặng E, rà soát hoàn tất theo lộ trình), sau đó tới Thống kê nâng cao (**Giai đoạn 3**: `StatsView` biểu đồ SVG Day/Month/Year), `Quest` engine (**2a/2b/5c**) và `Awards` thật.
+- **Milestone 5B.6 — Land Expansion Economy & Visual Reveal (ĐÃ HOÀN TẤT CẢ 5B.6a + 5B.6b):**
+  - **Milestone 5B.6a (HOÀN TẤT — Kinh tế mở rộng đất, Chọn chunk liền kề & Xác nhận):**
+    - *Hằng số giá & Level đã chốt (`src/core/civilization/constants.ts` & `landExpansion.ts`):* `INITIAL_CHUNK_COUNT = 4`, `LAND_EXPANSION_BASE_COST = 60`, `LAND_EXPANSION_RATIO_BASE = 1.25`, `LAND_EXPANSION_RATIO_STEP = 0.01`, `LAND_EXPANSION_RATIO_CAP = 1.5`, `LAND_EXPANSION_LEVEL_OFFSET = 2`. Giá `cost(k) = Math.round(60 * prod(i=1..k-1) min(1.5, 1.25 + 0.01*(i-1)))` (`60, 75, 95, 120, 154, ...`), chặn trần `requiredLevel = k + 2` (`Lv. 3, 4, 5, ...`), độc lập hoàn toàn với Multiplier & CoinBonus, không reset đất khi chuyển Era.
+    - *Mở rộng theo tọa độ chunk liền kề:* Gỡ bỏ `ExpansionDirection` (`types.ts`) và `GridMap.expandInDirection` (`gridMap.ts`). `EXPAND_LAND` chỉ nhận `{ origin: GridCoordinate }` chia hết `4×4`, kiểm tra nguyên tử Level -> Coins -> `gridMap.expandChunk(origin)` trước khi trừ `focusCoins` thực IEEE-754. `MapGridView.tsx` highlight mọi chunk khả dụng `getAvailableExpansionSlots()`, `LandExpansionModal.tsx` hiện bảng xác nhận chi phí & cấp độ.
+  - **Milestone 5B.6a-fix (HOÀN TẤT 2026-11-16 — Sửa `npm install` ERESOLVE & Flaky Test `Alarm validation 8`):**
+    - *Sửa `npm install` ERESOLVE:* Nâng devDependency `esbuild` từ `^0.25.0` lên `^0.28.0` trong `package.json` (khớp `peerOptional` của `vite@8.3.5` và `tsx@4.23.15`; đã xác nhận không có code nào trong repo import trực tiếp `esbuild`), đồng bộ cả `package-lock.json` và `bun.lock` về `esbuild@0.28.2`. `rm -rf node_modules && npm install` (không `--legacy-peer-deps`) thoát `0`.
+    - *Sửa flaky test `Alarm validation 8` (`__tests__/background/pomodoroAlarmValidation.test.ts:268`):* Xác minh qua `sessionCoordinator.ts` (`1127, 1347, 1443, 1937-1940`) rằng `breakStartedAt` và `phaseStartedAt` mới sau reconcile đều lấy `Date.now()`, có thể trùng mili-giây khi chạy in-memory. Đổi `>` thành `>=` kèm comment giải thích (không sửa code production); kiểm chứng **10/10 lần `npm test` (tuần tự & song song) đạt 483/483 PASS**.
+  - **Lô 5 Chặng A → B → C → D → E (HOÀN TẤT 2026-11-16):**
+    - **Chặng A (Sửa môi trường test Windows/Node):** `isNodeRuntime()` trong `translator.ts` tránh đọc `navigator.language = 'vi-VN'` khi test trên Node, chuẩn hóa `.replace(/\\/g, '/')` trong `migrationRunner.ts`, `clean` đa nền tảng bằng Node `fs.rmSync` trong `package.json`.
+    - **Chặng B (Cải tổ Rừng & Tán lá theo Chunk `4×4`):** Sửa vai trò ô `3/15`, `4/16` thành cây cao `1×2`, `27/28/5` thành `1×1`, ghép Cluster A `2×2` (`[6,8]/[30,32]`, `[9,11]/[33,35]`) và Cross B 5 ô (`[·,7,·]/[18,19,20]/[·,31,·]`, `[·,10,·]/[21,22,23]/[·,34,·]`); vùng khóa dùng `FOREST_MARGIN_CHUNKS = 2` (`24×24` render stage), `LOCKED_FOREST_OVERLAY_OPACITY = 0.40`, bỏ viền cắt ô rừng; vùng mở có thêm bụi `5` thưa trên cỏ trơn `0`.
+    - **Chặng C / Milestone 5B.6b (Animation rìu chém rừng & rung nhẹ sau commit):** Tạo `expansionReveal.ts` (`EXPANSION_AXE_TILE_INDEX = 127`, mốc `680ms` mở lộ đất, `340ms` rung riêng `map-shake-layer`, `1150ms` tổng), `ExpansionRevealOverlay.tsx` + keyframes CSS tôn trọng `prefers-reduced-motion` và giữ zoom `100%`.
+    - **Chặng D (Thanh điều hướng đáy 5 tab):** `Navbar.tsx` chuyển sang 5 tab **`Quests | Focus | Map | Awards | Stats`** (chiều cao `h-[64px]`, tab `Map` mặc định ở giữa `1.6fr`), thêm placeholder `Awards`, giữ chấm trạng thái `Focus`, gỡ nút `← Map` trên `Header.tsx`.
+    - **Chặng E (Song ngữ 100% EN/VI, Notifications, `blocked.ts` CSP-safe & `_locales`):** Mở rộng từ điển `en.ts`/`vi.ts` lên **352 khóa** (parity 100%); tạo `buildingI18n.ts` & `errorTranslator.ts`; i18n toàn bộ `RewardHelpModal`, `StatsView`, `CivilizationHeader`, `BuildingCatalogPanel`, `BuildingDetailsModal`, `CivilizationScreen`, `MapGridView`, `ProfileBottomSheet`, `TimerView`, `App.tsx` web preview; song ngữ toàn bộ 5 điểm phát Chrome Notification trong `SessionCoordinator`; tạo entrypoint thứ 3 `src/blocked/blocked.ts` → `dist/blocked.js` không inline script + `public/_locales/{en,vi}/messages.json` + cập nhật `public/manifest.json` (`default_locale: "en"`, `__MSG_extName__`, `__MSG_extDescription__`).
+  - **Giai đoạn 4a-3 (HOÀN TẤT 2026-11-16 — Rừng vùng chưa mở: ghép cây theo 6 mẫu M1–M6, sửa độ tương phản & mật độ ~30%):**
+    - *Sửa thứ tự lớp tương phản & lỗi CSS `TileImage`:* Trong `MapGridView.tsx` (`GridCell`) và `SpriteGallery.tsx`, đặt lớp làm tối nền (`bg-slate-950`, `LOCKED_FOREST_OVERLAY_OPACITY = 0.44`) **sau nền cỏ** và **trước overlay cây** — cây giữ nguyên 100% màu sắc gốc Tiny Town. Đồng thời sửa `TileImage.tsx` không xuất song song `relative` + `absolute` (tránh Tailwind v4 `.relative` ghi đè `.absolute` làm ẩn toàn bộ cây).
+    - *6 mẫu bắt buộc (`M1–M6`) + chỉ dùng bụi `5` làm filler (~30% mật độ cây):* Khắc phục hiện tượng `15/16` bị cụt viền trên khi đứng lẻ bằng cách **gỡ bỏ hoàn toàn filler `15/16` đơn lẻ** (`15` chỉ nằm dưới `3` trong `M1`, `16` chỉ nằm dưới `4` trong `M2`); giữ **`5` (bụi xanh viền kín 4 phía)** làm `1×1` filler duy nhất và giải nghệ `27/28`. Hạ mật độ cây xuống **`31.60%–31.77%`** (`68.23%–68.40%` cỏ trống) trên các mẫu `24×24`, đặt giãn cách tự nhiên 3 tầng (`'none' → 'not_same' → 'any'`) và khóa bounding box `width × height` (kể cả góc `"—"` của `M5/M6`) qua `lockedMask` (`isCellUnlockedFn`).
+    - *Kiểm thử & Gallery (`485/485 PASS`):* Cập nhật `SpriteGallery.tsx` (6 card `M1–M6` + mẫu `16×11` dùng `getCellDecor` tại `(-8, -8)` và boundary `(cx, cy) => cx < -8 || cx >= 8 || cy < -8 || cy >= 3` không cắt mép dưới), `__tests__/ui/terrainDecor.test.ts`, `docs/sprites/TILE_INDEX.md`, `public/assets/sprites/CREDITS.md`.
+- **Phase 5C (Sau 5B.5 / 5B.6)**: Era Progression & Building Upgrades (Thao tác nâng cấp công trình `UPGRADE_BUILDING`, kích hoạt nút Upgrade đang khóa ở `"Milestone 5C"`, chuyển đổi kỷ nguyên lịch sử từ Stone Age sang Bronze Age, mở rộng catalog Bronze Age).
+- **Ý tưởng chưa lên kế hoạch chi tiết (Backlog ngoài 5B.5 / 5B.6 / 5C):**
+  - 6 Era còn lại sau Stone Age & Bronze Age (`IRON_AGE`, `MEDIEVAL`, `EARLY_MODERN`, `MODERN`, `FUTURISTIC`, `INTERPLANETARY` — đã có enum trong `buildingTypes.ts` và khóa tên Era trong `i18n` & `buildingI18n.ts`).
+  - Cơ chế chặt/dọn cây cối như dữ liệu game và cây cối biến thể theo từng Era.
+  - Render virtualization khi bản đồ mở rộng rất lớn.
+  - Tối ưu tách chunk bundle Vite cho `popup-*.js` (> 500 kB, đang chủ ý hoãn).
+  - Nối effect `FOCUS_STAT_UNLOCK` (`focus_metric_streak_analysis`) của công trình `stone_age_elder_hut` (Elder's Hut) vào logic hiển thị/khóa mở thống kê Streak trong `StatsView`.
+
+---
+
+## 2. CHI TIẾT TRIỂN KHAI CÁC GIAI ĐOẠN ĐÃ NGHIỆM THU
+
+### 2.1. Core Map Grid & Collision Engine (Phase 5B.1 — Cập nhật 8×8 / 4×4 & Mở rộng Chunk Động)
+- Lưới bản đồ ban đầu là **`8 × 8` ô (`64` cells)** cấu thành từ `2 × 2` chunks **`4 × 4`** *(đã thay cho mô hình `20×20` / chunk `10×10`)*.
+- Phân tách pure domain logic, hệ tọa độ nguyên `(x, y)`, hỗ trợ mở rộng từng chunk `4×4` (`+16` ô) tại mọi ô khả dụng liền kề biên giới vùng đất đã mở (`getAvailableExpansionSlots`), xử lý mượt mà tọa độ âm.
+- Footprint validation, kiểm tra va chạm công trình (`CELL_OCCUPIED`), chống duplicate ID, thao tác đặt/gỡ công trình nguyên tử. Cảnh quan đất/cỏ/mầm/nấm & rừng tối vùng chưa mở nằm thuần ở lớp hiển thị UI (`terrainDecor.ts`), không ảnh hưởng logic đặt công trình.
+
+### 2.2. Building Catalog & Storage Schema v2 Migration (Phase 5B.2)
+- **Phân định rõ ràng Model:**
+  - `BuildingDefinition`: Định nghĩa loại công trình mẫu bất biến (`id`, `name`, `description`, `era`, `category`, `footprint`, `baseCost`, `upgradeCostMultiplier`, `maxLevel`, `unlockRequirements`, `effects`, `iconIdentifier`).
+  - `BuildingInstance`: Thể hiện của công trình người chơi sở hữu trên bản đồ (`id`, `definitionId`, `position`, `level`, `placedAt`).
+- **Phân loại 3 nhóm công trình (Categories):**
+  - `DECORATIVE`: Công trình trang trí thế giới (`stone_age_campfire` Campfire, `stone_age_totem` Ancient Totem). Không sinh coin/xp, không có bonus.
+  - `FOCUS_SUPPORT`: Công trình hỗ trợ Focus (Meditation Cave [`stone_age_study_cave`], Elder's Hut [`stone_age_elder_hut`]). Cung cấp effect `FOCUS_FEATURE_UNLOCK` và `FOCUS_STAT_UNLOCK` *(hiện `FOCUS_STAT_UNLOCK` chưa nối vào `StatsView`)*.
+  - `ECONOMY_EFFECT`: Công trình hỗ trợ kinh tế (Foraging Post [`stone_age_foraging_post`], Primitive Granary [`stone_age_food_cache`]). Cung cấp effect `COIN_BONUS` cộng dồn (+2%, +3% mỗi level) áp dụng **chỉ cho Coins** của phiên Focus hoàn thành, hoàn toàn không tác động lên XP.
+- **Quy tắc Zero Passive Income:** Tuyệt đối không sinh coin/xp thụ động theo thời gian. Mọi tài nguyên chỉ kiếm được qua phiên Focus thực tế *(và sắp tới có thêm thưởng nhiệm vụ Focus trong Giai đoạn 2a/2b cũng chỉ tiến triển khi hoàn thành Focus Session)*.
+- **Storage Schema v2 Migration:** Key lưu trữ `STORAGE_KEYS.CIVILIZATION = 'fq_civilization'`, `CURRENT_SCHEMA_VERSION = 2` (hiện tại vẫn là v2; v3 dành cho Giai đoạn 2a), bảo toàn 100% tài sản và lịch sử người chơi cũ.
+
+### 2.3. Background Coordinator & Atomic Transactions (Phase 5B.3 & 5B.3.2)
+- **Thẩm quyền tập trung:** `CivilizationCoordinator` là Single Source of Truth duy nhất điều phối giao dịch văn minh.
+- **Atomic Transactions (`executeCivilizationTransaction`):** Đưa toàn bộ quy trình đọc snapshot, kiểm tra điều kiện mở khóa, kiểm tra va chạm footprint, kiểm tra số dư coin, trừ coin và ghi storage vào một critical section duy nhất dưới `StorageMutex`.
+- **Đồng bộ hóa CoinBonus:** Cung cấp synchronous hook `onCommitted` chạy ngay trong lock trước khi nhả mutex, cập nhật `this.cachedBonuses` đồng bộ cho `SessionCoordinator`.
+- **Cơ chế Rollback Compensation:** Khi ghi storage thất bại, tự động rollback trạng thái ban đầu; nếu rollback cũng thất bại, ném transparent error cảnh báo nguy cơ inconsistent state.
+- **Bảo toàn số thực IEEE-754:** Không làm tròn `Math.floor` hay cắt tỉa số dư tiền tệ và XP.
+
+### 2.4. Lifecycle Recovery & Correctness Hardening (Phase 5B.4.3B)
+- **Phân loại chính xác Lifecycle:** Phân biệt rõ ràng Service Worker restart (không làm đứt phiên) với browser/profile restart và extension reload/update thông qua session markers và lifecycle hooks.
+- **Pomodoro Countdown All-or-Nothing:** Chỉ nhận thưởng khi hoàn thành 100% nhiệm vụ; mọi trường hợp gián đoạn (tắt browser, reload extension, give up) trả về 0 Coins và 0 XP.
+- **Pomodoro Stopwatch Incremental Rewards:** Trao thưởng công bằng dựa trên các interval đã hoàn thành trọn vẹn, tính phạt 0.5x cho interval dở dang nếu gián đoạn hợp lệ.
+- **Loại bỏ TOCTOU Race Condition:** Khắc phục Heartbeat Mutex serialization và xử lý crash khi render quản lý profile lúc profiles chưa tải xong.
+
+### 2.5. Civilization-First UI, Packaging Hardening & Template Cleanup (Phase 5B.4.3C)
+- **Kiến trúc 6 Components UI (`src/ui/components/civilization/`):** `CivilizationHeader.tsx`, `BuildingCatalogPanel.tsx`, `BuildingDetailsModal.tsx`, `LandExpansionModal.tsx`, `MapGridView.tsx`, `CivilizationScreen.tsx` hoạt động trong khung popup 400×600px, hỗ trợ pan (ngưỡng 4px), zoom `0.6×–2.0×`, `Recenter`, `Esc` hủy đặt, hover preview xanh/đỏ, `Demolish Building` 2 bước và giữ nút nâng cấp khóa `"Milestone 5C"`.
+- **Đóng gói & Dọn template:** Multipage entrypoint Vite (`popup` + `background`), bỏ `@google/genai`/`express`/`dotenv`/`motion`/`@types/express`, xóa `.env.example`, cập nhật `metadata.json` (`majorCapabilities: []`) & `index.html`.
+
+### 2.6. Milestone 5B.5 — Các giai đoạn đã hoàn thành (1a, 5a, 5b, 5b-2, 5b-3, 4a, 4a-2)
+- **Giai đoạn 1a (Nền tảng i18n lõi & Công tắc chuông):**
+  - Xây `src/i18n/` (`types.ts`, `translator.ts`, `I18nContext.tsx`, `locales/en.ts`, `locales/vi.ts`, sau đó tách thêm `locale.ts` ở 5b-2 để background không kéo dictionary); Node/test luôn fallback `'en'`.
+  - Mở rộng `UserSettings` với `language?: SupportedLocale` và `chimeEnabled?: boolean` (`undefined` = bật), giữ `soundEnabled` làm trường deprecated/ignored, xóa comment `"No audio in MVP"`.
+  - Thêm `SET_LANGUAGE`, `SET_CHIME_ENABLED` trong `messages.ts`, `MessageHandler.ts`, `extensionClient.ts` và trả `settings` qua `GET_SESSION_STATE`; gating Web Audio chime trong `soundEffects.ts` và `TimerView.tsx`.
+- **Giai đoạn 5a (Điều hướng 3 tab đáy, Header gọn & Home bản đồ):**
+  - Chuyển Home mặc định của `App.tsx` sang `'home'` (`Your Civilization` + `CivilizationScreen`).
+  - Hạ `Navbar.tsx` xuống bottom bar 3 tab (`Quest | Start Focus CTA | Stats`, toggle về `'home'` khi bấm lại tab active; tab `Quest` hiện là khung tạm `Coming soon`).
+  - Làm gọn `Header.tsx` 2 hàng (Brand về Home, Era badge `Stone Age`, Coins, `Lv. X`, `?` giữ `data-testid="help-btn"`, nút 1-chạm `EN|VI`, `← Map` khi rời Home, huy hiệu khiên + tên Profile chỉ hiện khi chạy phiên).
+- **Giai đoạn 5b (Start Focus & ProfileBottomSheet):**
+  - Cập nhật `TimerView.tsx` với `DurationPresetChips.tsx` (`15m/25m/45m/60m`), đồng bộ i18n và thuật ngữ `Focus Session` (thay cho `"Quest"` ở các màn timer), giữ `Edit Profiles` khóa cứng khi `RUNNING`/`PAUSED`.
+  - Tạo `ProfileBottomSheet.tsx` (Switch, Create, inline Rename, Delete có xác nhận 2 bước & chặn xóa profile cuối, Add/Remove domains theo `DomainNormalizer`) thay cho `ProfileAllowlistView.tsx` (đã xóa); bổ sung `GET_ACTIVE_PROFILE`, `RENAME_PROFILE`, `DELETE_PROFILE` vào simulator `extensionClient.ts`.
+  - Chuyển script `"test"` trong `package.json` sang glob `__tests__/ui/*.test.ts`.
+- **Giai đoạn 5b-2 & 5b-3 (Màn hình ĐANG TẬP TRUNG, `FocusSceneArea` & Sửa 3 lỗi):**
+  - Tái bố cục `STATE 2` trong `TimerView.tsx`: vùng cảnh `FocusSceneArea.tsx` ở trên (hiện là SVG tĩnh theo `era` + `sceneState`, có chip trạng thái góc trái & nút chuông góc phải), bên dưới là `running-control-card` 3 hàng (nhãn từ `sessionModeLabel.ts`, 3 cột `[Pause/Resume | đồng hồ | Give Up/End Session]`, dòng thưởng kèm chip hệ số) + vùng `sr-only` tạm giữ tương thích cho `startFocusView.test.ts:150-164` tới Giai đoạn 6.
+  - Sửa 3 lỗi ở 5b-3: nối `onSkipBreak` (`sessionActions.ts`) gọi `SKIP_POMODORO_BREAK` tách khỏi `onAdvancePomodoroStage`; sửa `"Total Reward: 0 Coin, 0 XP"` ở Pomodoro Countdown trong simulator & fallback `TimerView`; cho `<svg>` của `FocusSceneArea` neo `absolute inset-0 w-full h-full` (`viewBox="0 0 360 220"`) phủ kín 100% chiều cao khung.
+  - Tách `src/i18n/locale.ts` giúp `dist/assets/domainNormalizer-*.js` giảm từ `43.85 kB` xuống còn `21.97–21.98 kB`.
+- **Giai đoạn 4a (Sprite Bản đồ & Công trình Stone Age):**
+  - Giải nén gói CC0 đính kèm vào `public/assets/sprites/` (`CREDITS.md`, `kenney-tiny-town`, `kenney-tiny-dungeon` kèm `License.txt` CC0 1.0) và `docs/sprites/` (`TILE_INDEX.md`, ảnh labeled).
+  - Xây `spriteData.ts` (26 màu bảng Tiny Town, 6 ma trận pixel-art Stone Age + validator), `PixelSprite.tsx` (SVG `crispEdges` gom RLE `<rect>`), `TileImage.tsx` (cắt ô `16×16` từ sheet CC0 `192×176` với `maxWidth/maxHeight: none`), `spriteRegistry.ts`, và `SpriteGallery.tsx` (preview `#sprites` chỉ bật khi `!isChromeExtension()`).
+  - Gắn nền cỏ Tiny Town (`#0, #1, #2` hash xác định) + 6 sprite công trình vào `MapGridView.tsx`, `BuildingCatalogPanel.tsx`, `BuildingDetailsModal.tsx`; giữ nguyên fallback Lucide icon và toàn bộ logic placement/pan/zoom/demolish/khóa `"Milestone 5C"`. Cập nhật `CREDITS.md` và `README.md`.
+- **Giai đoạn 4a-2 (V2 + Bổ sung tán lá — Đất đầu game `8×8`, Chunk `4×4` & Cảnh quan rừng ở vùng chưa mở):**
+  - Cập nhật `src/core/civilization/constants.ts` (`INITIAL_GRID_WIDTH/HEIGHT = 8`, `CHUNK_WIDTH/HEIGHT = 4`, `INITIAL_TOTAL_CELLS = 64`), giữ nguyên API & snapshot `GridMapSnapshot = { chunks, buildings }` sạch (không còn `TerrainFeature`/`CELL_TERRAIN`/`terrainGenerator`), giữ `CURRENT_CIVILIZATION_SCHEMA_VERSION = 2` và từ chối/re-seed state `10×10` cũ trong `GridMap.fromSnapshot` & `sanitizeCivilizationState`.
+  - Xây `src/ui/components/civilization/terrainDecor.ts` thuần UI (`TERRAIN_DECOR_SEED = 5202402`, zero `Math.random`, an toàn tọa độ âm): vùng đã mở (`isUnlocked = true`) render cỏ `0–2`, mảng đất thưa (`12–14, 24–26, 36–42`), đá rêu (`43`) và mầm/nấm thưa (`17, 29`) — tuyệt đối không có cây/tán lá và không chặn đặt; vùng chưa mở (`isUnlocked = false`) render viền rừng làm tối (`bg-slate-950/50`) ghép khối tán lá liền (`2×2` `[6,8]/[30,32]`, `[9,11]/[33,35]` và `1×2` `[7]/[31]`, `[10]/[34]`, bảo đảm không có mảnh tán lá đứng lẻ kể cả ở góc L) xen cây đứng riêng (`3–5, 15–16, 27–28`).
+  - Nâng `CELL_SIZE = 32` trên `MapGridView.tsx` với viền rừng `FOREST_MARGIN_CELLS = 2` (`12×12` = `384×384px` ban đầu ở `zoom 1.0`), cập nhật `LandExpansionModal.tsx` (`4×4`, `+16 cells`), `SpriteGallery.tsx` (section `gallery-landscape-v2`: khối tán lá ghép `2×2`/`1×2`/`3×3`, `#17`, `#29`, đối chiếu `6×4` mở/khóa), `TILE_INDEX.md`, `CREDITS.md` và i18n EN/VI.
+
+---
+
+## 3. KẾT QUẢ KIỂM ĐỊNH THỰC TẾ (VERIFIED REAL VERIFICATION RESULTS)
+
+*Lưu ý: Các số liệu dưới đây được xác minh trực tiếp bằng việc chạy lệnh thực tế trên repository sau khi hoàn tất **Music Player & Session Notifications Hardening** (`2026-11-16`). Toàn bộ UI tests chạy qua React SSR (`renderToString`) trên Node.js và backend tests chạy qua mock Chrome adapters; **phát nhạc thực tế qua Offscreen Document và Chrome Notifications thật trên Chrome desktop (`chrome://extensions` Load unpacked) chưa kiểm chứng trực quan**.*
+
+### 3.1. Production Build (`npm run clean && npm run build`)
+- **Trạng thái:** **PASS (Exit code 0)** — Vite `v8.3.8`, `1,736 modules transformed`, thời gian **`1.12s`**.
+- **Kiểm tra Artifacts thư mục `dist/`:**
+  - `dist/background.js`: **CÓ (`95.90 kB` / `95,906 B`, gzip: `20.72 kB`)** — Service Worker độc lập (`bgHasReactOrUI: false`, không kéo React/DOM vào background).
+  - `dist/offscreen.js`: **CÓ (`2.82 kB` / `2,828 B`, gzip: `1.12 kB`)** — Audio engine MV3 chạy trong Offscreen Document.
+  - `dist/offscreen.html`: **CÓ (`209 B`)** — CSP-safe với duy nhất `<script type="module" src="./offscreen.js"></script>` (0 inline script).
+  - `dist/blocked.js`: **CÓ (`1.32 kB` / `1,321 B`, gzip: `0.60 kB`)** — Module CSP-safe điều khiển đa ngôn ngữ `blocked.html`.
+  - `dist/blocked.html`: **CÓ (`1,810 B`)** — Giao diện Focus Shield song ngữ EN/VI, chống nháy nội dung với `#blocked-card`, không inline script.
+  - `dist/index.html`: **CÓ (`0.71 kB` / `717 B`, gzip: `0.40 kB`)** — Popup HTML entrypoint.
+  - `dist/manifest.json`: **CÓ (`984 B`)** — Chrome MV3 Manifest với `"minimum_chrome_version": "109"`, `"default_locale": "en"`, `"permissions"` gồm `"offscreen"`, và `web_accessible_resources` mở `["blocked.html", "blocked.js", "assets/*"]`.
+  - `dist/_locales/`: **CÓ** — `en/messages.json` và `vi/messages.json`.
+  - `dist/icons/`: **CÓ** — Bộ icon đầy đủ (`icon16.png`, `icon32.png`, `icon48.png`, `icon128.png`, `icon.svg`).
+  - `dist/assets/popup-*.js`: **CÓ (`734.00 kB` / `734,002 B`, gzip: `194.37 kB`)** *(còn cảnh báo Vite chunk > 500 kB, chủ ý hoãn tách chunk)*.
+  - `dist/assets/popup-*.css`: **CÓ (`82.07 kB` / `82,077 B`, gzip: `12.99 kB`)**.
+  - `dist/assets/translator-*.js`: **CÓ (`48.59 kB` / `48,594 B`, gzip: `13.20 kB`)**.
+  - `dist/assets/domainNormalizer-*.js`: **CÓ (`28.89 kB` / `28,891 B`, gzip: `8.55 kB`)**.
+  - `dist/assets/storageKeys-*.js`: **CÓ (`0.33 kB` / `334 B`, gzip: `0.24 kB`)**.
+  - `dist/assets/sprites/`: **CÓ** — Đủ `CREDITS.md`, `kenney-tiny-town` và `kenney-tiny-dungeon`.
+  - `dist/assets/music/`: **CÓ** — Đủ **10 file `.mp3`** (5 Purrple Cat `CC BY 4.0` + 5 HoliznaCC0 `CC0 1.0`, tổng `54,798,277 B` / `53 MB`) + `CREDITS.md`; đã xác nhận **KHÔNG tồn tại** `public/assets/aistudio` hay `dist/assets/aistudio`.
+
+### 3.2. Automated Tests (`npm test`)
+- **Trạng thái:** **PASS (Exit code 0) — 3/3 lần chạy liên tiếp** — **509 / 509 tests PASS (100%)** (`30.06s`, `30.26s`, `31.12s`).
+  - Passed: **509** | Failed: **0** | Skipped: **0** | Cancelled: **0** | Todo: **0**.
+
+### 3.3. Typecheck & Lint (`npm run lint` — `tsc --noEmit`)
+- **Trạng thái:** **PASS (Exit code 0)** — **0 errors, 0 warnings**.
+
+---
+
+## 4. ĐỐI CHIẾU TÀI LIỆU & KIỂM SOÁT RÀNG BUỘC
+
+1. **Các bất biến kinh tế & nghiệp vụ tiếp tục được bảo toàn tới sau Lô A → E:**
+   - **Zero Passive Income & Economy:** Coins/XP/Multiplier/CoinBonus hoàn toàn nguyên vẹn; XP không chịu ảnh hưởng CoinBonus.
+   - **All-or-Nothing Pomodoro Countdown & Allowlist Lock:** Giữ nguyên toàn bộ khóa bảo vệ trong phiên chạy/tạm dừng.
+   - **Mở rộng đất & Schema:** Giữ nguyên công thức `cost(k)`, điều kiện `Player Level >= k + 2`, `CURRENT_SCHEMA_VERSION = 2` (`fq_civilization` & `GridMap`/coordinator/transaction), DNR blocking, nút Upgrade khóa `"Milestone 5C"`.
+   - **Cảnh quan & Animation (Chặng B–C):** Thuần lớp hiển thị UI, không lưu trong storage, không cản đặt công trình.
+2. **Điểm còn chưa kiểm chứng thực tế:** Hình ảnh sprite rừng/cây `4×4`, độ tương phản lớp phủ 40%, chuyển động rìu chém rừng `680ms`/`1150ms`, độ vừa vặn thanh 5 tab trong popup `400px`, `blocked.html` trên tab chuyển hướng DNR thật, và `chrome.i18n` / Web Audio **chưa kiểm chứng bằng mắt trong Chrome Extension thật (`chrome://extensions` Load unpacked)**.
+
+---
+
+## 5. BƯỚC TIẾP THEO (NEXT STEPS)
+
+1. **Nghiệm thu thủ công trên Chrome Extension thật (`chrome://extensions` → Load unpacked `dist/`):** Kiểm tra phát nhạc MP3 offline qua Offscreen Document (đóng/mở popup vẫn phát mượt), thông báo hoàn thành Countdown / Pomodoro / Stopwatch, nút nhạc trên Header & `MusicPlayerSheet`, hoạt ảnh `FocusSceneArea` (working/paused/resting + reduced-motion), rừng `4×4`, rìu chém rừng và trang `blocked.html`.
+2. **Bước kế tiếp trong lộ trình 5B.5 — Giai đoạn 1b (`blocked.html`, `_locales`, `manifest.json` & kiểm tra Chrome thật):** Rà soát/nghiệm thu Giai đoạn 1b, sau đó triển khai các giai đoạn còn lại:
+   - **Stats nâng cao (Giai đoạn 3):** `statsAggregator.ts` + `StatsBarChart.tsx` SVG thuần (Day/Month/Year) và nối `FOCUS_STAT_UNLOCK` của `Elder's Hut`.
+   - **Quest Engine & UI (Giai đoạn 2a → 2b → 5c):** Schema v3, Migration v3, `QuestCoordinator`, nối nguyên tử vào `commitSessionOutcomeInternal` và hoàn thiện tab `Quests`.
+   - **Awards thật:** Hiện thực hóa hệ thống thành tựu thay cho màn hình giữ chỗ tab `Awards`.
+3. **CWS Hardening & Tối ưu Gói:** Thống nhất 1 lockfile (`package-lock.json` vs `bun.lock`), xem xét tách chunk Vite (`popup-*.js` > `500 kB`), và chuẩn bị thuyết minh quyền `web_accessible_resources` (`<all_urls>`) + `host_permissions` + `"offscreen"` khi lên Chrome Web Store.
+4. **Milestone 5C:** `UPGRADE_BUILDING`, chuyển kỷ nguyên sang Bronze Age và mở khóa nút nâng cấp trong `BuildingDetailsModal`.

@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": "Focus Quest",
+    "description": "Extension name displayed in Chrome toolbar and Web Store."
+  },
+  "extDescription": {
+    "message": "Gamified focus timer and allowlist website blocker that turns productive study time into civilization progress.",
+    "description": "Extension summary displayed in Chrome Extensions manager and Web Store."
+  }
+}

@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Focus Quest">
+  <defs>
+    <linearGradient id="focusQuestBrand" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4F46E5" />
+      <stop offset="1" stop-color="#7C3AED" />
+    </linearGradient>
+  </defs>
+
+  <rect x="2.56" y="2.56" width="122.88" height="122.88" rx="30.72" fill="url(#focusQuestBrand)" />
+
+  <!-- Clock face -->
+  <circle cx="64" cy="64" r="38.4" fill="#FFFFFF" fill-opacity="0.13" />
+  <circle cx="64" cy="64" r="34.82" fill="none" stroke="#FFFFFF" stroke-width="7.17" />
+
+  <!-- Hands at 10:10 -->
+  <g stroke="#FFFFFF" stroke-width="8.19" stroke-linecap="round">
+    <line x1="64" y1="64" x2="47.93" y2="54.72" />
+    <line x1="64" y1="64" x2="87.83" y2="50.24" />
+  </g>
+
+  <!-- Centre pin -->
+  <circle cx="64" cy="64" r="5.89" fill="#FFFFFF" />
+</svg>
