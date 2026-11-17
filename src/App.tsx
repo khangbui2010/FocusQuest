@@ -88,8 +88,8 @@ interface PopupShellProps {
   setIsHelpOpen: React.Dispatch<React.SetStateAction<boolean>>;
   isProfileSheetOpen: boolean;
   setIsProfileSheetOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  isMusicSheetOpen: boolean;
-  setIsMusicSheetOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  isMusicExpanded: boolean;
+  onToggleMusicExpanded: (expanded: boolean) => Promise<void>;
   musicState: MusicPlayerState;
   musicCatalog: readonly MusicTrack[];
   refreshState: () => Promise<void>;
@@ -145,8 +145,8 @@ const PopupShell: React.FC<PopupShellProps> = ({
   setIsHelpOpen,
   isProfileSheetOpen,
   setIsProfileSheetOpen,
-  isMusicSheetOpen,
-  setIsMusicSheetOpen,
+  isMusicExpanded,
+  onToggleMusicExpanded,
   musicState,
   musicCatalog,
   refreshState,
@@ -187,8 +187,6 @@ const PopupShell: React.FC<PopupShellProps> = ({
         activeProfile={activeProfile}
         onOpenProfiles={() => setIsProfileSheetOpen(true)}
         onOpenHelp={() => setIsHelpOpen(true)}
-        onOpenMusic={() => setIsMusicSheetOpen(true)}
-        isMusicPlaying={musicState.status === 'PLAYING'}
         isBlockingActive={isBlockingActive}
         isSessionActive={isSessionActive}
         era={civEra}
@@ -283,6 +281,26 @@ const PopupShell: React.FC<PopupShellProps> = ({
         {activeTab === 'stats' && <StatsView todayStats={todayStats} />}
       </main>
 
+      <MusicPlayerSheet
+        isExpanded={isMusicExpanded}
+        onToggleExpand={onToggleMusicExpanded}
+        musicState={musicState}
+        catalog={musicCatalog}
+        onPlayTrack={handlePlayMusicTrack}
+        onPause={handlePauseMusic}
+        onResume={handleResumeMusic}
+        onStop={handleStopMusic}
+        onNext={handleNextMusic}
+        onPrevious={handlePreviousMusic}
+        onSeek={handleSeekMusic}
+        onSetVolume={handleSetMusicVolume}
+        onToggleShuffle={handleToggleMusicShuffle}
+        onCycleRepeat={handleCycleMusicRepeat}
+        onToggleSyncWithSession={handleToggleMusicSyncWithSession}
+        onTogglePlayDuringBreak={handleToggleMusicPlayDuringBreak}
+        onRefreshCatalog={handleRefreshMusicCatalog}
+      />
+
       <Navbar
         activeTab={activeTab}
         onChangeTab={setActiveTab}
@@ -305,26 +323,6 @@ const PopupShell: React.FC<PopupShellProps> = ({
         onRemoveDomain={handleRemoveDomain}
       />
 
-      <MusicPlayerSheet
-        isOpen={isMusicSheetOpen}
-        onClose={() => setIsMusicSheetOpen(false)}
-        musicState={musicState}
-        catalog={musicCatalog}
-        onPlayTrack={handlePlayMusicTrack}
-        onPause={handlePauseMusic}
-        onResume={handleResumeMusic}
-        onStop={handleStopMusic}
-        onNext={handleNextMusic}
-        onPrevious={handlePreviousMusic}
-        onSeek={handleSeekMusic}
-        onSetVolume={handleSetMusicVolume}
-        onToggleShuffle={handleToggleMusicShuffle}
-        onCycleRepeat={handleCycleMusicRepeat}
-        onToggleSyncWithSession={handleToggleMusicSyncWithSession}
-        onTogglePlayDuringBreak={handleToggleMusicPlayDuringBreak}
-        onRefreshCatalog={handleRefreshMusicCatalog}
-      />
-
       <RewardHelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
     </div>
   );
@@ -334,7 +332,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('map');
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isProfileSheetOpen, setIsProfileSheetOpen] = useState(false);
-  const [isMusicSheetOpen, setIsMusicSheetOpen] = useState(false);
+  const [isMusicExpanded, setIsMusicExpanded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
   const [session, setSession] = useState<SessionSnapshot | null>(null);
@@ -382,6 +380,7 @@ export default function App() {
         setIsBlockingActive(Boolean(stateRes.data.isBlockingActive));
         if (stateRes.data.settings) {
           setSettings(stateRes.data.settings);
+          setIsMusicExpanded(Boolean(stateRes.data.settings.musicPlayerExpanded));
         }
       }
 
@@ -421,7 +420,7 @@ export default function App() {
   }, [refreshState]);
 
   useEffect(() => {
-    if (!isMusicSheetOpen || musicState.status !== 'PLAYING' || typeof window === 'undefined') {
+    if (musicState.status !== 'PLAYING' || typeof window === 'undefined') {
       return;
     }
     const timer = window.setInterval(() => {
@@ -433,7 +432,7 @@ export default function App() {
       });
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [isMusicSheetOpen, musicState.status]);
+  }, [musicState.status]);
 
   // Session Action Handlers
   const handleStartSession = async (
@@ -609,6 +608,22 @@ export default function App() {
     await refreshState();
   };
 
+  const handleToggleMusicExpanded = async (expanded: boolean) => {
+    setIsMusicExpanded(expanded);
+    setSettings((prev) =>
+      prev
+        ? { ...prev, musicPlayerExpanded: expanded }
+        : { soundEnabled: false, notificationsEnabled: true, musicPlayerExpanded: expanded }
+    );
+    const res = await sendExtensionMessage<UserSettings>({
+      action: 'SET_MUSIC_PLAYER_EXPANDED',
+      payload: { expanded },
+    });
+    if (res.success && res.data) {
+      setSettings(res.data);
+    }
+  };
+
   // Music Player Action Handlers
   const applyMusicResponse = (res: { success: boolean; data?: MusicStateResponseData }) => {
     if (res.success && res.data) {
@@ -735,8 +750,8 @@ export default function App() {
       setIsHelpOpen={setIsHelpOpen}
       isProfileSheetOpen={isProfileSheetOpen}
       setIsProfileSheetOpen={setIsProfileSheetOpen}
-      isMusicSheetOpen={isMusicSheetOpen}
-      setIsMusicSheetOpen={setIsMusicSheetOpen}
+      isMusicExpanded={isMusicExpanded}
+      onToggleMusicExpanded={handleToggleMusicExpanded}
       musicState={musicState}
       musicCatalog={musicCatalog}
       refreshState={refreshState}

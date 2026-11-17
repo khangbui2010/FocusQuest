@@ -193,13 +193,13 @@
   }
 }
 
-@keyframes fq-scene-star-twinkle {
+@keyframes fq-music-eq {
   0%,
   100% {
-    opacity: 0.35;
+    transform: scaleY(0.35);
   }
   50% {
-    opacity: 0.95;
+    transform: scaleY(1);
   }
 }
 
@@ -241,8 +241,9 @@
   animation: fq-scene-cloud-drift 16s ease-in-out infinite alternate;
 }
 
-.fq-scene-star {
-  animation: fq-scene-star-twinkle 2.8s steps(2, end) infinite;
+.fq-music-eq-bar {
+  transform-origin: bottom;
+  animation: fq-music-eq 0.8s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -262,7 +263,7 @@
   .fq-scene-spark,
   .fq-scene-zzz,
   .fq-scene-cloud,
-  .fq-scene-star {
+  .fq-music-eq-bar {
     animation: none !important;
     transition: none !important;
     transform: none !important;

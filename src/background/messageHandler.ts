@@ -371,6 +371,17 @@ export class MessageHandler {
           return { success: true, data: updated };
         }
 
+        case 'SET_MUSIC_PLAYER_EXPANDED': {
+          if (!msg.payload || typeof msg.payload !== 'object' || typeof msg.payload.expanded !== 'boolean') {
+            return {
+              success: false,
+              error: 'SET_MUSIC_PLAYER_EXPANDED requires boolean expanded flag.',
+            };
+          }
+          const updated = await this.storage.updateSettings({ musicPlayerExpanded: msg.payload.expanded });
+          return { success: true, data: updated };
+        }
+
         // --- Music Player Actions ---
         case 'MUSIC_GET_STATE': {
           const mc = this.getMusicCoordinator();

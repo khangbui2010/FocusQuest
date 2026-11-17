@@ -81,15 +81,17 @@ function makeMusicState(
 function renderSheet(
   locale: 'en' | 'vi',
   catalog: readonly MusicTrack[],
-  musicState: MusicPlayerState
+  musicState: MusicPlayerState,
+  options: { isExpanded?: boolean; defaultCreditsOpen?: boolean } = {}
 ): string {
   return renderToString(
     React.createElement(
       I18nProvider,
       { locale },
       React.createElement(MusicPlayerSheet, {
-        isOpen: true,
-        onClose: () => {},
+        isExpanded: options.isExpanded ?? true,
+        onToggleExpand: () => {},
+        defaultCreditsOpen: options.defaultCreditsOpen ?? true,
         musicState,
         catalog,
         onPlayTrack: () => {},
@@ -123,7 +125,8 @@ test('MusicPlayerSheet UI: renders streamed EN & VI UI, SPDX attribution, break 
     makeMusicState(catalog, { status: 'PAUSED', positionSec: 12 })
   );
 
-  assert.ok(htmlEn.includes('Focus Music Player'));
+  assert.ok(htmlEn.includes('data-testid="music-mini-player"'));
+  assert.ok(htmlEn.includes('Focus Lofi Music'));
   assert.ok(htmlEn.includes('Streamed Lofi library'));
   assert.equal(htmlEn.includes('Bundled offline MP3 library'), false);
   assert.ok(htmlEn.includes('Twilight Market'));
@@ -134,9 +137,10 @@ test('MusicPlayerSheet UI: renders streamed EN & VI UI, SPDX attribution, break 
   assert.ok(htmlEn.includes('data-testid="music-play-during-break-toggle"'));
   assert.ok(htmlEn.includes('data-testid="music-refresh-catalog-btn"'));
 
-  assert.ok(htmlVi.includes('Trình Phát Nhạc Tập Trung'));
+  assert.ok(htmlVi.includes('Nhạc Lofi tập trung'));
   assert.ok(htmlVi.includes('Thư viện nhạc Lofi trực tuyến'));
   assert.ok(htmlVi.includes('Tạm dừng'));
+  assert.ok(htmlVi.includes('Ghi công &amp; giấy phép'));
   assert.ok(htmlVi.includes('Bản quyền &amp; Ghi công'));
   assert.ok(htmlVi.includes('Tiếp tục phát nhạc trong giờ nghỉ Pomodoro'));
 

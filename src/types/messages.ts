@@ -35,6 +35,7 @@ export type MessageAction =
   | 'EXPAND_LAND'
   | 'SET_LANGUAGE'
   | 'SET_CHIME_ENABLED'
+  | 'SET_MUSIC_PLAYER_EXPANDED'
   | 'MUSIC_GET_STATE'
   | 'MUSIC_PLAY'
   | 'MUSIC_PAUSE'
@@ -100,6 +101,10 @@ export interface SetLanguagePayload {
 
 export interface SetChimeEnabledPayload {
   enabled: boolean;
+}
+
+export interface SetMusicPlayerExpandedPayload {
+  expanded: boolean;
 }
 
 export interface MusicPlayPayload {
@@ -181,6 +186,7 @@ export type ExtensionMessage =
   | { action: 'EXPAND_LAND'; payload: ExpandLandPayload }
   | { action: 'SET_LANGUAGE'; payload: SetLanguagePayload }
   | { action: 'SET_CHIME_ENABLED'; payload: SetChimeEnabledPayload }
+  | { action: 'SET_MUSIC_PLAYER_EXPANDED'; payload: SetMusicPlayerExpandedPayload }
   | { action: 'MUSIC_GET_STATE' }
   | { action: 'MUSIC_PLAY'; payload?: MusicPlayPayload }
   | { action: 'MUSIC_PAUSE' }

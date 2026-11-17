@@ -1624,6 +1624,26 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
       return makeMusicResponse<T>();
     }
 
+    case 'SET_MUSIC_PLAYER_EXPANDED': {
+      const payload = (message as { payload?: { expanded?: unknown } }).payload;
+      if (!payload || typeof payload.expanded !== 'boolean') {
+        return {
+          success: false,
+          error: 'SET_MUSIC_PLAYER_EXPANDED requires boolean expanded flag.',
+        };
+      }
+      const prevSettings: UserSettings = mockState.settings ?? {
+        soundEnabled: false,
+        notificationsEnabled: true,
+      };
+      const updatedSettings: UserSettings = {
+        ...prevSettings,
+        musicPlayerExpanded: payload.expanded,
+      };
+      mockState.settings = updatedSettings;
+      return { success: true, data: { ...updatedSettings } as unknown as T };
+    }
+
     default:
       return { success: true, data: undefined as unknown as T };
   }

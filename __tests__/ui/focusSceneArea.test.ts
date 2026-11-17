@@ -75,7 +75,9 @@ test('FocusSceneArea (4b): renders distinct animated Stone Age villager & campsi
   assert.ok(restingHtml.includes('fq-scene-glow-rest'));
   assert.ok(restingHtml.includes('fq-scene-zzz'));
   assert.ok(restingHtml.includes('data-testid="scene-rest-zzz"'));
-  assert.ok(restingHtml.includes('fq-scene-star'));
+  assert.ok(restingHtml.includes('fq-scene-cloud'));
+  assert.ok(!restingHtml.includes('fq-scene-star'), 'LOFI-2 sunset sky must not render night stars');
+  assert.ok(!restingHtml.includes('dark:from-slate-900'), 'LOFI-2 sky must always stay daytime/sunset');
   assert.ok(!restingHtml.includes('fq-scene-villager-work'));
   assert.ok(!restingHtml.includes('fq-scene-spark'));
   assert.ok(!restingHtml.includes('data-testid="scene-tool-crafter"'));
@@ -140,7 +142,7 @@ test('FocusSceneArea (4b): supports prefers-reduced-motion via both static reduc
   const staticResting = renderScene('resting', { reducedMotion: true });
   assert.ok(!staticResting.includes('fq-scene-villager-rest'));
   assert.ok(!staticResting.includes('fq-scene-zzz'));
-  assert.ok(!staticResting.includes('fq-scene-star'));
+  assert.ok(!staticResting.includes('fq-scene-cloud'));
 
   const cssPath = path.resolve(import.meta.dirname, '../../src/index.css');
   const cssContent = fs.readFileSync(cssPath, 'utf8');
@@ -158,7 +160,7 @@ test('FocusSceneArea (4b): supports prefers-reduced-motion via both static reduc
     '.fq-scene-spark',
     '.fq-scene-zzz',
     '.fq-scene-cloud',
-    '.fq-scene-star',
+    '.fq-music-eq-bar',
   ]) {
     const mediaIdx = cssContent.indexOf('@media (prefers-reduced-motion: reduce)');
     const ruleIdx = cssContent.indexOf(cls, mediaIdx);

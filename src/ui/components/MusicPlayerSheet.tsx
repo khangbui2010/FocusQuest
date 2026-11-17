@@ -1,5 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
+  AlertCircle,
+  ChevronDown,
+  ChevronUp,
   Disc3,
   ExternalLink,
   Music,
@@ -8,14 +11,13 @@ import {
   RefreshCw,
   Repeat,
   Repeat1,
+  ShieldCheck,
   Shuffle,
   SkipBack,
   SkipForward,
   Square,
   Volume2,
   VolumeX,
-  X,
-  AlertCircle,
 } from 'lucide-react';
 import { MusicPlayerState, MusicTrack, RepeatMode } from '../../types/music.ts';
 import {
@@ -27,8 +29,16 @@ import { useTranslation } from '../../i18n/I18nContext.tsx';
 import { localizeErrorMessage } from '../../i18n/errorTranslator.ts';
 
 export interface MusicPlayerSheetProps {
-  isOpen: boolean;
-  onClose: () => void;
+  /** Expanded sheet visibility (persisted in UserSettings.musicPlayerExpanded, default false). */
+  isExpanded?: boolean;
+  /** Toggle sheet expanded/collapsed state. */
+  onToggleExpand?: (expanded: boolean) => Promise<void> | void;
+  /** Legacy alias kept for compatibility with existing unit harnesses. */
+  isOpen?: boolean;
+  /** Legacy alias kept for compatibility with existing unit harnesses. */
+  onClose?: () => void;
+  /** Optional initial state for the License & Attribution panel (defaults to false). */
+  defaultCreditsOpen?: boolean;
   musicState: MusicPlayerState;
   catalog: readonly MusicTrack[];
   onPlayTrack: (trackId?: string) => Promise<void> | void;
@@ -52,9 +62,29 @@ const NEXT_REPEAT_MODE: Record<RepeatMode, RepeatMode> = {
   one: 'off',
 };
 
+const ALL_ARTISTS_FILTER = '__ALL__';
+
+export function formatShortLicenseBadge(license: string): string {
+  const upper = license.trim().toUpperCase();
+  if (upper.startsWith('CC0')) return 'CC0';
+  if (upper.includes('BY-SA')) return 'BY-SA';
+  if (upper.includes('BY')) return 'BY';
+  return license;
+}
+
+function slugifyArtistTestId(artist: string): string {
+  return artist
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '') || 'artist';
+}
+
 export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
+  isExpanded,
+  onToggleExpand,
   isOpen,
   onClose,
+  defaultCreditsOpen = false,
   musicState,
   catalog,
   onPlayTrack,
@@ -74,6 +104,19 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
   const { locale, t } = useTranslation();
   const [scrubSec, setScrubSec] = useState<number | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [selectedArtist, setSelectedArtist] = useState<string>(ALL_ARTISTS_FILTER);
+  const [isCreditsOpen, setIsCreditsOpen] = useState<boolean>(defaultCreditsOpen);
+
+  const expanded = Boolean(isExpanded ?? isOpen ?? false);
+  const safeCatalog = Array.isArray(catalog) ? catalog : [];
+
+  const handleSetExpanded = (nextExpanded: boolean) => {
+    if (onToggleExpand) {
+      void onToggleExpand(nextExpanded);
+    } else if (!nextExpanded && onClose) {
+      onClose();
+    }
+  };
 
   const handleRefreshClick = async () => {
     if (!onRefreshCatalog || isRefreshing) return;
@@ -87,24 +130,40 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
 
   useEffect(() => {
     setScrubSec(null);
-  }, [musicState.currentTrackId, isOpen]);
+  }, [musicState.currentTrackId, expanded]);
 
   useEffect(() => {
-    if (!isOpen || typeof window === 'undefined') return;
+    if (!expanded || typeof window === 'undefined') return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        onClose();
+        handleSetExpanded(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [expanded, onToggleExpand, onClose]);
 
-  if (!isOpen) {
-    return null;
-  }
+  const artistChips = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const track of safeCatalog) {
+      counts.set(track.artist, (counts.get(track.artist) ?? 0) + 1);
+    }
+    return Array.from(counts.entries()).map(([artist, count]) => ({ artist, count }));
+  }, [safeCatalog]);
 
-  const safeCatalog = Array.isArray(catalog) ? catalog : [];
+  const effectiveArtistFilter =
+    selectedArtist !== ALL_ARTISTS_FILTER &&
+    artistChips.some((entry) => entry.artist === selectedArtist)
+      ? selectedArtist
+      : ALL_ARTISTS_FILTER;
+
+  const filteredTracks = useMemo(() => {
+    if (effectiveArtistFilter === ALL_ARTISTS_FILTER) {
+      return safeCatalog;
+    }
+    return safeCatalog.filter((track) => track.artist === effectiveArtistFilter);
+  }, [safeCatalog, effectiveArtistFilter]);
+
   const activeTrack =
     getTrackById(musicState.currentTrackId, safeCatalog) ?? safeCatalog[0] ?? null;
 
@@ -115,7 +174,14 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
   const effectiveDuration =
     musicState.durationSec ?? activeTrack?.durationSec ?? activeTrack?.duration ?? 0;
   const displayedPosition =
-    scrubSec !== null ? scrubSec : Math.min(musicState.positionSec, effectiveDuration || musicState.positionSec);
+    scrubSec !== null
+      ? scrubSec
+      : Math.min(musicState.positionSec, effectiveDuration || musicState.positionSec);
+
+  const progressPercent =
+    hasTracks && effectiveDuration > 0
+      ? Math.max(0, Math.min(100, (displayedPosition / effectiveDuration) * 100))
+      : 0;
 
   const statusLabel = (() => {
     switch (musicState.status) {
@@ -154,7 +220,7 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
     }
   };
 
-  // Deduplicate attribution credits so required CC BY / CC BY-SA attributions remain visible cleanly
+  // Attribution credits for currently active track (honoring CC-BY / CC-BY-SA)
   const attributionEntries = (() => {
     const targetTracks = activeTrack ? [activeTrack] : safeCatalog;
     const seen = new Set<string>();
@@ -169,340 +235,57 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
     return list;
   })();
 
-  return (
-    <div
-      data-testid="music-sheet-backdrop"
-      onClick={onClose}
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-xs"
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={t('music.sheetTitle')}
-        data-testid="music-player-sheet"
-        onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-[400px] h-[86%] max-h-[520px] bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-700 rounded-t-2xl shadow-2xl flex flex-col overflow-hidden"
-      >
-        {/* Sheet Header */}
-        <div className="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 shrink-0">
-          <div className="flex items-center gap-2 min-w-0">
-            <Music className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
-            <div className="min-w-0">
-              <h2 className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate">
-                {t('music.sheetTitle')}
-              </h2>
-              <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
-                {t('music.streamedSubtitle')} · {statusLabel}
-              </p>
-            </div>
-          </div>
+  const playPauseAriaLabel = isPlaying
+    ? t('music.controls.pause')
+    : isPaused
+    ? t('music.controls.resume')
+    : t('music.controls.play');
 
-          <button
-            type="button"
-            data-testid="music-sheet-close-btn"
-            aria-label={t('music.closeAria')}
-            onClick={onClose}
-            className="p-1 rounded-md text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors motion-reduce:transition-none cursor-pointer shrink-0"
-          >
-            <X className="w-4 h-4" />
-          </button>
+  return (
+    <>
+      {/* 1. Persistent Mini-Player Bar (~56px, immediately above bottom tab bar on every tab) */}
+      <section
+        aria-label={t('music.miniPlayerAria')}
+        data-testid="music-mini-player"
+        className="relative h-[56px] shrink-0 bg-slate-900 dark:bg-slate-950 text-white border-t border-slate-800 flex flex-col justify-between select-none"
+      >
+        {/* Top 3px slim progress indicator */}
+        <div
+          data-testid="music-mini-progress-track"
+          className="w-full h-[3px] bg-slate-800 overflow-hidden shrink-0"
+        >
+          <div
+            data-testid="music-mini-progress"
+            className="h-full bg-indigo-400 transition-all duration-300 motion-reduce:transition-none"
+            style={{ width: `${progressPercent}%` }}
+          />
         </div>
 
-        {/* Scrollable Content */}
-        <div className="flex-1 min-h-0 overflow-y-auto p-3.5 space-y-3">
-          {/* Audio Error Alert */}
-          {(musicState.lastError || musicState.lastErrorCode) && (
-            <div
-              data-testid="music-player-error"
-              role="alert"
-              className="flex items-start gap-2 p-2.5 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/70 rounded-lg text-[11px] text-rose-700 dark:text-rose-200"
-            >
-              <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400 mt-0.5" />
-              <span>
-                {localizeErrorMessage(
-                  locale,
-                  musicState.lastError ||
-                    (musicState.lastErrorCode
-                      ? `Audio playback failed (${musicState.lastErrorCode}).`
-                      : '')
-                )}
-              </span>
-            </div>
-          )}
-
-          {/* Now Playing Control Deck */}
-          <section className="rounded-xl bg-slate-900 dark:bg-slate-950 text-white p-3.5 border border-slate-800 space-y-3">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-10 h-10 rounded-lg bg-indigo-600/25 border border-indigo-400/30 flex items-center justify-center shrink-0">
-                <Disc3
-                  className={`w-5 h-5 text-indigo-300 ${
-                    isPlaying ? 'animate-spin motion-reduce:animate-none' : ''
-                  }`}
-                />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div
-                  data-testid="music-current-title"
-                  className="text-sm font-bold text-white truncate"
-                >
-                  {activeTrack ? activeTrack.title : t('music.noTrackSelected')}
+        {/* Mini-player content row (53px remaining) */}
+        <div className="flex-1 min-h-0 px-2.5 flex items-center justify-between gap-2">
+          {!hasTracks ? (
+            <>
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <div className="w-9 h-9 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0">
+                  <Music className="w-4 h-4 text-slate-400" />
                 </div>
-                {activeTrack && (
-                  <div className="text-[11px] text-slate-300 truncate">
-                    {activeTrack.artist} · {activeTrack.album}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Seek Timeline */}
-            <div className="space-y-1">
-              <input
-                type="range"
-                data-testid="music-seek-slider"
-                aria-label={t('music.controls.seekAria')}
-                min={0}
-                max={effectiveDuration > 0 ? effectiveDuration : 100}
-                step={1}
-                disabled={!hasTracks || effectiveDuration <= 0}
-                value={Math.floor(displayedPosition)}
-                onChange={(e) => setScrubSec(Number(e.target.value))}
-                onMouseUp={(e) => {
-                  const val = Number((e.target as HTMLInputElement).value);
-                  setScrubSec(null);
-                  void onSeek(val);
-                }}
-                onTouchEnd={(e) => {
-                  const val = Number((e.target as HTMLInputElement).value);
-                  setScrubSec(null);
-                  void onSeek(val);
-                }}
-                onKeyUp={(e) => {
-                  const val = Number((e.target as HTMLInputElement).value);
-                  setScrubSec(null);
-                  void onSeek(val);
-                }}
-                className="w-full h-1.5 accent-indigo-400 cursor-pointer disabled:opacity-40"
-              />
-              <div className="flex items-center justify-between text-[10px] font-mono tabular-nums text-slate-400">
-                <span data-testid="music-position-time">
-                  {formatMusicDuration(displayedPosition)}
-                </span>
-                <span data-testid="music-duration-time">
-                  {formatMusicDuration(effectiveDuration)}
+                <span
+                  data-testid="music-mini-empty-label"
+                  className="text-xs font-medium text-slate-300 truncate"
+                >
+                  {t('music.miniNotLoaded')}
                 </span>
               </div>
-            </div>
 
-            {/* Primary Transport Controls */}
-            <div className="flex items-center justify-between gap-1">
-              <button
-                type="button"
-                data-testid="music-shuffle-btn"
-                aria-pressed={musicState.shuffle}
-                aria-label={
-                  musicState.shuffle
-                    ? t('music.controls.shuffleOn')
-                    : t('music.controls.shuffleOff')
-                }
-                title={
-                  musicState.shuffle
-                    ? t('music.controls.shuffleOn')
-                    : t('music.controls.shuffleOff')
-                }
-                disabled={!hasTracks}
-                onClick={() => void onToggleShuffle(!musicState.shuffle)}
-                className={`p-2 rounded-lg transition-colors motion-reduce:transition-none cursor-pointer disabled:opacity-35 ${
-                  musicState.shuffle
-                    ? 'bg-indigo-500/25 text-indigo-300'
-                    : 'text-slate-400 hover:text-white hover:bg-slate-800'
-                }`}
-              >
-                <Shuffle className="w-4 h-4" />
-              </button>
-
-              <button
-                type="button"
-                data-testid="music-prev-btn"
-                aria-label={t('music.controls.previous')}
-                title={t('music.controls.previous')}
-                disabled={!hasTracks}
-                onClick={() => void onPrevious()}
-                className="p-2 rounded-lg text-slate-200 hover:text-white hover:bg-slate-800 transition-colors motion-reduce:transition-none cursor-pointer disabled:opacity-35"
-              >
-                <SkipBack className="w-4 h-4" />
-              </button>
-
-              <button
-                type="button"
-                data-testid="music-play-pause-btn"
-                aria-label={
-                  isPlaying
-                    ? t('music.controls.pause')
-                    : isPaused
-                    ? t('music.controls.resume')
-                    : t('music.controls.play')
-                }
-                disabled={!hasTracks}
-                onClick={handlePrimaryPlayPause}
-                className="w-10 h-10 rounded-full bg-indigo-500 hover:bg-indigo-400 text-white flex items-center justify-center shadow-md transition-colors motion-reduce:transition-none cursor-pointer disabled:opacity-35"
-              >
-                {isPlaying ? (
-                  <Pause className="w-4 h-4 fill-current" />
-                ) : (
-                  <Play className="w-4 h-4 fill-current ml-0.5" />
-                )}
-              </button>
-
-              <button
-                type="button"
-                data-testid="music-next-btn"
-                aria-label={t('music.controls.next')}
-                title={t('music.controls.next')}
-                disabled={!hasTracks}
-                onClick={() => void onNext()}
-                className="p-2 rounded-lg text-slate-200 hover:text-white hover:bg-slate-800 transition-colors motion-reduce:transition-none cursor-pointer disabled:opacity-35"
-              >
-                <SkipForward className="w-4 h-4" />
-              </button>
-
-              <button
-                type="button"
-                data-testid="music-repeat-btn"
-                aria-label={repeatLabel}
-                title={repeatLabel}
-                disabled={!hasTracks}
-                onClick={() => void onCycleRepeat(NEXT_REPEAT_MODE[musicState.repeatMode])}
-                className={`p-2 rounded-lg transition-colors motion-reduce:transition-none cursor-pointer disabled:opacity-35 ${
-                  musicState.repeatMode !== 'off'
-                    ? 'bg-indigo-500/25 text-indigo-300'
-                    : 'text-slate-400 hover:text-white hover:bg-slate-800'
-                }`}
-              >
-                {musicState.repeatMode === 'one' ? (
-                  <Repeat1 className="w-4 h-4" />
-                ) : (
-                  <Repeat className="w-4 h-4" />
-                )}
-              </button>
-
-              <button
-                type="button"
-                data-testid="music-stop-btn"
-                aria-label={t('music.controls.stop')}
-                title={t('music.controls.stop')}
-                disabled={!hasTracks || (musicState.status === 'IDLE' && musicState.positionSec === 0)}
-                onClick={() => void onStop()}
-                className="p-2 rounded-lg text-slate-400 hover:text-rose-300 hover:bg-slate-800 transition-colors motion-reduce:transition-none cursor-pointer disabled:opacity-35"
-              >
-                <Square className="w-3.5 h-3.5 fill-current" />
-              </button>
-            </div>
-
-            {/* Volume Row */}
-            <div className="flex items-center gap-2 pt-1 border-t border-slate-800/80">
-              <button
-                type="button"
-                data-testid="music-mute-btn"
-                aria-label={
-                  musicState.muted ? t('music.controls.unmute') : t('music.controls.mute')
-                }
-                title={
-                  musicState.muted ? t('music.controls.unmute') : t('music.controls.mute')
-                }
-                onClick={() => void onSetVolume(musicState.volume, !musicState.muted)}
-                className="p-1.5 rounded text-slate-300 hover:text-white hover:bg-slate-800 cursor-pointer shrink-0"
-              >
-                {musicState.muted || musicState.volume === 0 ? (
-                  <VolumeX className="w-4 h-4 text-rose-400" />
-                ) : (
-                  <Volume2 className="w-4 h-4" />
-                )}
-              </button>
-              <input
-                type="range"
-                data-testid="music-volume-slider"
-                aria-label={t('music.controls.volumeLabel')}
-                min={0}
-                max={100}
-                step={1}
-                value={musicState.muted ? 0 : Math.round(musicState.volume * 100)}
-                onChange={(e) => {
-                  const vol = Number(e.target.value) / 100;
-                  void onSetVolume(vol, vol === 0);
-                }}
-                className="flex-1 h-1.5 accent-indigo-400 cursor-pointer"
-              />
-              <span className="text-[10px] font-mono tabular-nums text-slate-400 w-8 text-right shrink-0">
-                {musicState.muted ? '0%' : `${Math.round(musicState.volume * 100)}%`}
-              </span>
-            </div>
-          </section>
-
-          {/* Session Sync Options */}
-          <div className="space-y-1.5">
-            <label className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 text-xs text-slate-700 dark:text-slate-200 cursor-pointer">
-              <span className="font-medium">{t('music.syncWithSessionLabel')}</span>
-              <input
-                type="checkbox"
-                data-testid="music-sync-session-toggle"
-                checked={musicState.syncWithSession}
-                onChange={(e) => void onToggleSyncWithSession(e.target.checked)}
-                className="w-4 h-4 accent-indigo-600 rounded cursor-pointer shrink-0"
-              />
-            </label>
-
-            <label className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 text-xs text-slate-700 dark:text-slate-200 cursor-pointer">
-              <span className="font-medium">{t('music.playDuringBreakLabel')}</span>
-              <input
-                type="checkbox"
-                data-testid="music-play-during-break-toggle"
-                checked={Boolean(musicState.playDuringBreak)}
-                onChange={(e) => void onTogglePlayDuringBreak?.(e.target.checked)}
-                className="w-4 h-4 accent-indigo-600 rounded cursor-pointer shrink-0"
-              />
-            </label>
-          </div>
-
-          {/* Dynamic Playlist from online Lofi catalog */}
-          <section className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                {t('music.playlistHeading', { count: safeCatalog.length })}
-              </h3>
-              {onRefreshCatalog && (
-                <button
-                  type="button"
-                  data-testid="music-refresh-catalog-btn"
-                  aria-label={t('music.refreshCatalogAria')}
-                  disabled={isRefreshing}
-                  onClick={() => void handleRefreshClick()}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 cursor-pointer disabled:opacity-50"
-                >
-                  <RefreshCw className={`w-3 h-3 ${isRefreshing ? 'animate-spin' : ''}`} />
-                  <span>{isRefreshing ? t('music.retryingCatalogBtn') : t('music.refreshCatalogLabel')}</span>
-                </button>
-              )}
-            </div>
-
-            {safeCatalog.length === 0 ? (
-              <div
-                data-testid="music-empty-catalog"
-                className="p-4 text-center rounded-lg border border-dashed border-slate-200 dark:border-slate-700 space-y-2"
-              >
-                <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  {t('music.emptyCatalogTitle')}
-                </div>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  {t('music.emptyCatalogDesc')}
-                </p>
+              <div className="flex items-center gap-1 shrink-0">
                 {onRefreshCatalog && (
                   <button
                     type="button"
-                    data-testid="music-retry-catalog-btn"
+                    data-testid="music-mini-retry-btn"
+                    aria-label={t('music.retryCatalogBtn')}
                     disabled={isRefreshing}
                     onClick={() => void handleRefreshClick()}
-                    className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                    className="min-h-[36px] px-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-50"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
                     <span>
@@ -510,116 +293,638 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
                     </span>
                   </button>
                 )}
-              </div>
-            ) : (
-              <div data-testid="music-playlist-list" className="space-y-1">
-                {safeCatalog.map((track, idx) => {
-                  const isCurrent = activeTrack?.id === track.id;
-                  const isTrackPlaying = isCurrent && isPlaying;
-                  return (
-                    <button
-                      key={track.id}
-                      type="button"
-                      data-testid={`music-track-${track.id}`}
-                      onClick={() => void onPlayTrack(track.id)}
-                      className={`w-full text-left px-2.5 py-2 rounded-lg border flex items-center justify-between gap-2 transition-colors motion-reduce:transition-none cursor-pointer ${
-                        isCurrent
-                          ? 'bg-indigo-50/80 dark:bg-indigo-950/40 border-indigo-300 dark:border-indigo-700'
-                          : 'bg-slate-50/70 dark:bg-slate-800/40 border-slate-200/80 dark:border-slate-800 hover:bg-slate-100/80 dark:hover:bg-slate-800'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                        <span className="w-5 text-center text-[11px] font-mono tabular-nums text-slate-400 dark:text-slate-500 shrink-0">
-                          {isTrackPlaying ? (
-                            <Play className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 fill-current inline" />
-                          ) : (
-                            idx + 1
-                          )}
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <div className="text-xs font-semibold text-slate-900 dark:text-slate-100 truncate">
-                            {track.title}
-                          </div>
-                          <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
-                            {track.artist} · {track.album} · {track.license}
-                          </div>
-                        </div>
-                      </div>
-                      <span className="text-[11px] font-mono tabular-nums text-slate-500 dark:text-slate-400 shrink-0">
-                        {(track.durationSec ?? track.duration) !== undefined
-                          ? formatMusicDuration(track.durationSec ?? track.duration)
-                          : '--:--'}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </section>
 
-          {/* License & Attribution Credits */}
-          {attributionEntries.length > 0 && (
-            <section
-              data-testid="music-credits-section"
-              className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/40 p-2.5 space-y-2"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  {t('music.creditsHeading')}
-                </h3>
-                {attributionEntries.some((entry) => isAttributionRequired(entry.license)) && (
-                  <span className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400">
-                    {t('music.attributionRequiredBadge')}
-                  </span>
-                )}
-              </div>
-
-              {attributionEntries.map((entry) => (
-                <div
-                  key={entry.id}
-                  data-testid={`music-attribution-${entry.id}`}
-                  className="text-[11px] text-slate-600 dark:text-slate-300 space-y-1 leading-relaxed"
+                <button
+                  type="button"
+                  data-testid="music-mini-expand-btn"
+                  aria-label={t('music.expandAria')}
+                  aria-expanded={expanded}
+                  onClick={() => handleSetExpanded(!expanded)}
+                  className="min-w-[36px] min-h-[36px] w-9 h-9 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 flex items-center justify-center transition-colors motion-reduce:transition-none cursor-pointer"
                 >
-                  <div className="font-medium text-slate-800 dark:text-slate-100">
-                    {entry.attribution}
-                  </div>
-                  <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                    {t('music.licenseLabel')}: {entry.license} · {t('music.creatorLabel')}:{' '}
-                    {entry.creator} ·{' '}
-                    {(entry.isModified ?? entry.modified)
-                      ? t('music.modifiedYes')
-                      : t('music.modifiedNo')}
-                  </div>
-                  <div className="flex items-center gap-3 pt-0.5 text-[10px]">
-                    {entry.sourceUrl && (
-                      <a
-                        href={entry.sourceUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-indigo-600 dark:text-indigo-400 hover:underline"
-                      >
-                        <span>{t('music.sourceLink')}</span>
-                        <ExternalLink className="w-2.5 h-2.5" />
-                      </a>
-                    )}
-                    {entry.licenseUrl && (
-                      <a
-                        href={entry.licenseUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-indigo-600 dark:text-indigo-400 hover:underline"
-                      >
-                        <span>{t('music.licenseLink')}</span>
-                        <ExternalLink className="w-2.5 h-2.5" />
-                      </a>
-                    )}
-                  </div>
+                  <ChevronUp className="w-4 h-4" />
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Cover icon + Title + Artist · Album */}
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <div className="w-9 h-9 rounded-lg bg-indigo-500/25 border border-indigo-400/35 flex items-center justify-center shrink-0">
+                  <Disc3
+                    className={`w-4 h-4 text-indigo-300 ${
+                      isPlaying ? 'animate-spin motion-reduce:animate-none' : ''
+                    }`}
+                  />
                 </div>
-              ))}
-            </section>
+                <div className="min-w-0 flex-1">
+                  <div
+                    data-testid="music-mini-title"
+                    className="text-xs font-semibold text-white truncate leading-tight"
+                  >
+                    {activeTrack ? activeTrack.title : t('music.noTrackSelected')}
+                  </div>
+                  {activeTrack && (
+                    <div
+                      data-testid="music-mini-subtitle"
+                      className="text-[10px] text-slate-300 truncate leading-tight mt-0.5"
+                    >
+                      {`${activeTrack.artist} · ${activeTrack.album}`}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Mini transport + chevron-up controls (min 36px target, play 40px) */}
+              <div className="flex items-center gap-0.5 shrink-0">
+                <button
+                  type="button"
+                  data-testid="music-mini-prev-btn"
+                  aria-label={t('music.controls.previous')}
+                  title={t('music.controls.previous')}
+                  onClick={() => void onPrevious()}
+                  className="min-w-[36px] min-h-[36px] w-9 h-9 rounded-lg text-slate-200 hover:text-white hover:bg-slate-800 flex items-center justify-center transition-colors motion-reduce:transition-none cursor-pointer"
+                >
+                  <SkipBack className="w-4 h-4" />
+                </button>
+
+                <button
+                  type="button"
+                  data-testid="music-mini-play-pause-btn"
+                  aria-label={playPauseAriaLabel}
+                  title={playPauseAriaLabel}
+                  onClick={handlePrimaryPlayPause}
+                  className="min-w-[40px] min-h-[40px] w-[40px] h-[40px] rounded-full bg-indigo-500 hover:bg-indigo-400 text-white flex items-center justify-center shadow-sm transition-colors motion-reduce:transition-none cursor-pointer"
+                >
+                  {isPlaying ? (
+                    <Pause className="w-4 h-4 fill-current" />
+                  ) : (
+                    <Play className="w-4 h-4 fill-current ml-0.5" />
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  data-testid="music-mini-next-btn"
+                  aria-label={t('music.controls.next')}
+                  title={t('music.controls.next')}
+                  onClick={() => void onNext()}
+                  className="min-w-[36px] min-h-[36px] w-9 h-9 rounded-lg text-slate-200 hover:text-white hover:bg-slate-800 flex items-center justify-center transition-colors motion-reduce:transition-none cursor-pointer"
+                >
+                  <SkipForward className="w-4 h-4" />
+                </button>
+
+                <button
+                  type="button"
+                  data-testid="music-mini-expand-btn"
+                  aria-label={t('music.expandAria')}
+                  aria-expanded={expanded}
+                  title={t('music.expandAria')}
+                  onClick={() => handleSetExpanded(true)}
+                  className="min-w-[36px] min-h-[36px] w-9 h-9 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 flex items-center justify-center transition-colors motion-reduce:transition-none cursor-pointer"
+                >
+                  <ChevronUp className="w-4 h-4" />
+                </button>
+              </div>
+            </>
           )}
         </div>
-      </div>
-    </div>
+      </section>
+
+      {/* 2. Expandable Bottom Sheet (~2/3 popup height, slides above bottom tab bar) */}
+      {expanded && (
+        <div
+          data-testid="music-sheet-backdrop"
+          onClick={() => handleSetExpanded(false)}
+          className="fixed inset-0 z-50 pb-[64px] flex items-end justify-center bg-black/55 backdrop-blur-xs"
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={t('music.lofiSheetTitle')}
+            data-testid="music-player-sheet"
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-[400px] h-[416px] max-h-[72%] bg-slate-950 text-slate-100 border-t border-slate-800 rounded-t-[22px] shadow-2xl flex flex-col overflow-hidden"
+          >
+            {/* a. Sheet Header: "Nhạc Lofi tập trung" + Refresh + Chevron-Down */}
+            <div className="px-4 py-2 border-b border-slate-800/90 flex items-center justify-between gap-2 shrink-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <Music className="w-4 h-4 text-indigo-400 shrink-0" />
+                <div className="min-w-0">
+                  <h2 className="text-xs font-bold text-white truncate">
+                    {t('music.lofiSheetTitle')}
+                  </h2>
+                  <p className="text-[10px] text-slate-400 truncate">
+                    {`${t('music.streamedSubtitle')} · ${statusLabel}`}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1 shrink-0">
+                {onRefreshCatalog && (
+                  <button
+                    type="button"
+                    data-testid="music-refresh-catalog-btn"
+                    aria-label={t('music.refreshCatalogAria')}
+                    title={t('music.refreshCatalogAria')}
+                    disabled={isRefreshing}
+                    onClick={() => void handleRefreshClick()}
+                    className="w-8 h-8 rounded-lg text-slate-300 hover:text-indigo-300 hover:bg-slate-800/80 flex items-center justify-center transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  data-testid="music-sheet-close-btn"
+                  aria-label={t('music.collapseAria')}
+                  title={t('music.collapseAria')}
+                  onClick={() => handleSetExpanded(false)}
+                  className="w-9 h-9 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 flex items-center justify-center transition-colors motion-reduce:transition-none cursor-pointer shrink-0"
+                >
+                  <ChevronDown className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Audio Error Banner (if any) */}
+            {(musicState.lastError || musicState.lastErrorCode) && (
+              <div
+                data-testid="music-player-error"
+                role="alert"
+                className="mx-3.5 mt-2 flex items-start gap-2 px-2.5 py-1.5 bg-rose-950/60 border border-rose-800/70 rounded-lg text-[11px] text-rose-200 shrink-0"
+              >
+                <AlertCircle className="w-3.5 h-3.5 shrink-0 text-rose-400 mt-0.5" />
+                <span className="line-clamp-2">
+                  {localizeErrorMessage(
+                    locale,
+                    musicState.lastError ||
+                      (musicState.lastErrorCode
+                        ? `Audio playback failed (${musicState.lastErrorCode}).`
+                        : '')
+                  )}
+                </span>
+              </div>
+            )}
+
+            {/* Upper Deck (b, c, d, e, f) */}
+            <div className="px-3.5 pt-2 pb-1.5 space-y-2 shrink-0 border-b border-slate-800/70">
+              {/* b. Now Playing: 56px cover square + title + artist · album */}
+              <div data-testid="music-now-playing" className="flex items-center gap-3 min-w-0">
+                <div
+                  data-testid="music-sheet-cover"
+                  className="w-14 h-14 rounded-xl bg-indigo-500/20 border border-indigo-400/35 flex items-center justify-center shrink-0"
+                >
+                  <Disc3
+                    className={`w-7 h-7 text-indigo-300 ${
+                      isPlaying ? 'animate-spin motion-reduce:animate-none' : ''
+                    }`}
+                  />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-indigo-300">
+                    {t('music.nowPlayingLabel')}
+                  </div>
+                  <div
+                    data-testid="music-current-title"
+                    className="text-sm font-bold text-white truncate"
+                  >
+                    {activeTrack ? activeTrack.title : t('music.noTrackSelected')}
+                  </div>
+                  {activeTrack && (
+                    <div className="text-[11px] text-slate-300 truncate">
+                      {`${activeTrack.artist} · ${activeTrack.album}`}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* c. Seek Timeline + Tabular Timestamps */}
+              <div className="space-y-0.5">
+                <input
+                  type="range"
+                  data-testid="music-seek-slider"
+                  aria-label={t('music.controls.seekAria')}
+                  min={0}
+                  max={effectiveDuration > 0 ? effectiveDuration : 100}
+                  step={1}
+                  disabled={!hasTracks || effectiveDuration <= 0}
+                  value={Math.floor(displayedPosition)}
+                  onChange={(e) => setScrubSec(Number(e.target.value))}
+                  onMouseUp={(e) => {
+                    const val = Number((e.target as HTMLInputElement).value);
+                    setScrubSec(null);
+                    void onSeek(val);
+                  }}
+                  onTouchEnd={(e) => {
+                    const val = Number((e.target as HTMLInputElement).value);
+                    setScrubSec(null);
+                    void onSeek(val);
+                  }}
+                  onKeyUp={(e) => {
+                    const val = Number((e.target as HTMLInputElement).value);
+                    setScrubSec(null);
+                    void onSeek(val);
+                  }}
+                  className="w-full h-1.5 accent-indigo-400 cursor-pointer disabled:opacity-40"
+                />
+                <div className="flex items-center justify-between text-[10px] font-mono tabular-nums text-slate-400">
+                  <span data-testid="music-position-time">
+                    {formatMusicDuration(displayedPosition)}
+                  </span>
+                  <span data-testid="music-duration-time">
+                    {formatMusicDuration(effectiveDuration)}
+                  </span>
+                </div>
+              </div>
+
+              {/* d. Transport Controls: Shuffle, Prev, 52px Play/Pause, Next, Repeat, Stop */}
+              <div className="flex items-center justify-between gap-1">
+                <button
+                  type="button"
+                  data-testid="music-shuffle-btn"
+                  aria-pressed={musicState.shuffle}
+                  aria-label={
+                    musicState.shuffle
+                      ? t('music.controls.shuffleOn')
+                      : t('music.controls.shuffleOff')
+                  }
+                  title={
+                    musicState.shuffle
+                      ? t('music.controls.shuffleOn')
+                      : t('music.controls.shuffleOff')
+                  }
+                  disabled={!hasTracks}
+                  onClick={() => void onToggleShuffle(!musicState.shuffle)}
+                  className={`w-9 h-9 rounded-lg flex items-center justify-center transition-colors motion-reduce:transition-none cursor-pointer disabled:opacity-35 ${
+                    musicState.shuffle
+                      ? 'bg-indigo-500/25 text-indigo-300'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                  }`}
+                >
+                  <Shuffle className="w-4 h-4" />
+                </button>
+
+                <button
+                  type="button"
+                  data-testid="music-prev-btn"
+                  aria-label={t('music.controls.previous')}
+                  title={t('music.controls.previous')}
+                  disabled={!hasTracks}
+                  onClick={() => void onPrevious()}
+                  className="w-9 h-9 rounded-lg text-slate-200 hover:text-white hover:bg-slate-800 flex items-center justify-center transition-colors motion-reduce:transition-none cursor-pointer disabled:opacity-35"
+                >
+                  <SkipBack className="w-4 h-4" />
+                </button>
+
+                <button
+                  type="button"
+                  data-testid="music-play-pause-btn"
+                  aria-label={playPauseAriaLabel}
+                  disabled={!hasTracks}
+                  onClick={handlePrimaryPlayPause}
+                  className="w-[52px] h-[52px] rounded-full bg-indigo-500 hover:bg-indigo-400 text-white flex items-center justify-center shadow-lg transition-colors motion-reduce:transition-none cursor-pointer disabled:opacity-35 shrink-0"
+                >
+                  {isPlaying ? (
+                    <Pause className="w-5 h-5 fill-current" />
+                  ) : (
+                    <Play className="w-5 h-5 fill-current ml-0.5" />
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  data-testid="music-next-btn"
+                  aria-label={t('music.controls.next')}
+                  title={t('music.controls.next')}
+                  disabled={!hasTracks}
+                  onClick={() => void onNext()}
+                  className="w-9 h-9 rounded-lg text-slate-200 hover:text-white hover:bg-slate-800 flex items-center justify-center transition-colors motion-reduce:transition-none cursor-pointer disabled:opacity-35"
+                >
+                  <SkipForward className="w-4 h-4" />
+                </button>
+
+                <button
+                  type="button"
+                  data-testid="music-repeat-btn"
+                  aria-label={repeatLabel}
+                  title={repeatLabel}
+                  disabled={!hasTracks}
+                  onClick={() => void onCycleRepeat(NEXT_REPEAT_MODE[musicState.repeatMode])}
+                  className={`w-9 h-9 rounded-lg flex items-center justify-center transition-colors motion-reduce:transition-none cursor-pointer disabled:opacity-35 ${
+                    musicState.repeatMode !== 'off'
+                      ? 'bg-indigo-500/25 text-indigo-300'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                  }`}
+                >
+                  {musicState.repeatMode === 'one' ? (
+                    <Repeat1 className="w-4 h-4" />
+                  ) : (
+                    <Repeat className="w-4 h-4" />
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  data-testid="music-stop-btn"
+                  aria-label={t('music.controls.stop')}
+                  title={t('music.controls.stop')}
+                  disabled={!hasTracks || (musicState.status === 'IDLE' && musicState.positionSec === 0)}
+                  onClick={() => void onStop()}
+                  className="w-9 h-9 rounded-lg text-slate-400 hover:text-rose-300 hover:bg-slate-800 flex items-center justify-center transition-colors motion-reduce:transition-none cursor-pointer disabled:opacity-35"
+                >
+                  <Square className="w-3.5 h-3.5 fill-current" />
+                </button>
+              </div>
+
+              {/* e. Volume Row + compact session behavior toggles */}
+              <div className="space-y-1.5 pt-1 border-t border-slate-800/80">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    data-testid="music-mute-btn"
+                    aria-label={
+                      musicState.muted ? t('music.controls.unmute') : t('music.controls.mute')
+                    }
+                    title={
+                      musicState.muted ? t('music.controls.unmute') : t('music.controls.mute')
+                    }
+                    onClick={() => void onSetVolume(musicState.volume, !musicState.muted)}
+                    className="p-1 rounded text-slate-300 hover:text-white hover:bg-slate-800 cursor-pointer shrink-0"
+                  >
+                    {musicState.muted || musicState.volume === 0 ? (
+                      <VolumeX className="w-4 h-4 text-rose-400" />
+                    ) : (
+                      <Volume2 className="w-4 h-4" />
+                    )}
+                  </button>
+                  <input
+                    type="range"
+                    data-testid="music-volume-slider"
+                    aria-label={t('music.controls.volumeLabel')}
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={musicState.muted ? 0 : Math.round(musicState.volume * 100)}
+                    onChange={(e) => {
+                      const vol = Number(e.target.value) / 100;
+                      void onSetVolume(vol, vol === 0);
+                    }}
+                    className="flex-1 h-1.5 accent-indigo-400 cursor-pointer"
+                  />
+                  <span className="text-[10px] font-mono tabular-nums text-slate-400 w-8 text-right shrink-0">
+                    {musicState.muted ? '0%' : `${Math.round(musicState.volume * 100)}%`}
+                  </span>
+                </div>
+
+                {/* Session-sync toggles preserved concisely */}
+                <div className="grid grid-cols-1 gap-1">
+                  <label className="flex items-center justify-between gap-2 px-2 py-1 rounded-md bg-slate-900 border border-slate-800 text-[11px] text-slate-200 cursor-pointer">
+                    <span className="truncate">{t('music.syncWithSessionLabel')}</span>
+                    <input
+                      type="checkbox"
+                      data-testid="music-sync-session-toggle"
+                      checked={musicState.syncWithSession}
+                      onChange={(e) => void onToggleSyncWithSession(e.target.checked)}
+                      className="w-3.5 h-3.5 accent-indigo-500 rounded cursor-pointer shrink-0"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between gap-2 px-2 py-1 rounded-md bg-slate-900 border border-slate-800 text-[11px] text-slate-200 cursor-pointer">
+                    <span className="truncate">{t('music.playDuringBreakLabel')}</span>
+                    <input
+                      type="checkbox"
+                      data-testid="music-play-during-break-toggle"
+                      checked={Boolean(musicState.playDuringBreak)}
+                      onChange={(e) => void onTogglePlayDuringBreak?.(e.target.checked)}
+                      className="w-3.5 h-3.5 accent-indigo-500 rounded cursor-pointer shrink-0"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              {/* f. Dynamic Horizontal Artist Filter Chips */}
+              {hasTracks && (
+                <div
+                  data-testid="music-artist-filters"
+                  className="flex items-center gap-1.5 overflow-x-auto pt-0.5 pb-0.5 no-scrollbar"
+                >
+                  <button
+                    type="button"
+                    data-testid="music-artist-filter-all"
+                    aria-pressed={effectiveArtistFilter === ALL_ARTISTS_FILTER}
+                    onClick={() => setSelectedArtist(ALL_ARTISTS_FILTER)}
+                    className={`px-2.5 py-1 rounded-full text-[11px] font-semibold whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
+                      effectiveArtistFilter === ALL_ARTISTS_FILTER
+                        ? 'bg-indigo-500 text-white shadow-xs'
+                        : 'bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-700 hover:text-white'
+                    }`}
+                  >
+                    {t('music.filterAll', { count: safeCatalog.length })}
+                  </button>
+
+                  {artistChips.map(({ artist, count }) => {
+                    const active = effectiveArtistFilter === artist;
+                    return (
+                      <button
+                        key={artist}
+                        type="button"
+                        data-testid={`music-artist-filter-${slugifyArtistTestId(artist)}`}
+                        aria-pressed={active}
+                        aria-label={t('music.filterArtistAria', { artist })}
+                        onClick={() => setSelectedArtist(artist)}
+                        className={`px-2.5 py-1 rounded-full text-[11px] font-medium whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
+                          active
+                            ? 'bg-indigo-500 text-white shadow-xs'
+                            : 'bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-700 hover:text-white'
+                        }`}
+                      >
+                        {`${artist} · ${count}`}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* g. Scrollable Track List (rows ~46px with index / equalizer, short license badge, duration) */}
+            <div className="flex-1 min-h-0 overflow-y-auto px-3.5 py-2 space-y-1">
+              <h3 className="sr-only">{t('music.playlistHeading', { count: safeCatalog.length })}</h3>
+
+              {safeCatalog.length === 0 ? (
+                <div
+                  data-testid="music-empty-catalog"
+                  className="p-3 text-center rounded-xl border border-dashed border-slate-700 bg-slate-900/60 space-y-2"
+                >
+                  <div className="text-xs font-semibold text-slate-200">
+                    {t('music.emptyCatalogTitle')}
+                  </div>
+                  <p className="text-[11px] text-slate-400">{t('music.emptyCatalogDesc')}</p>
+                  {onRefreshCatalog && (
+                    <button
+                      type="button"
+                      data-testid="music-retry-catalog-btn"
+                      disabled={isRefreshing}
+                      onClick={() => void handleRefreshClick()}
+                      className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+                      <span>
+                        {isRefreshing ? t('music.retryingCatalogBtn') : t('music.retryCatalogBtn')}
+                      </span>
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div data-testid="music-playlist-list" className="space-y-1">
+                  {filteredTracks.map((track, idx) => {
+                    const isCurrent = activeTrack?.id === track.id;
+                    const isTrackPlaying = isCurrent && isPlaying;
+                    const shortBadge = formatShortLicenseBadge(track.license);
+                    return (
+                      <button
+                        key={track.id}
+                        type="button"
+                        data-testid={`music-track-${track.id}`}
+                        onClick={() => void onPlayTrack(track.id)}
+                        className={`w-full min-h-[46px] text-left px-2.5 py-1.5 rounded-xl border flex items-center justify-between gap-2 transition-colors motion-reduce:transition-none cursor-pointer ${
+                          isCurrent
+                            ? 'bg-indigo-950/60 border-indigo-500/70'
+                            : 'bg-slate-900/70 border-slate-800 hover:bg-slate-900 hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                          <span className="w-5 flex items-center justify-center text-[11px] font-mono tabular-nums text-slate-400 shrink-0">
+                            {isTrackPlaying ? (
+                              <span
+                                data-testid="music-playing-equalizer"
+                                aria-label={t('music.playingEqualizerAria')}
+                                className="inline-flex items-end gap-[2px] h-3"
+                              >
+                                <span className="fq-music-eq-bar w-[2px] h-3 bg-indigo-400 rounded-xs" />
+                                <span
+                                  className="fq-music-eq-bar w-[2px] h-2 bg-indigo-300 rounded-xs"
+                                  style={{ animationDelay: '0.2s' }}
+                                />
+                                <span
+                                  className="fq-music-eq-bar w-[2px] h-2.5 bg-indigo-400 rounded-xs"
+                                  style={{ animationDelay: '0.4s' }}
+                                />
+                              </span>
+                            ) : (
+                              idx + 1
+                            )}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-xs font-semibold text-white truncate leading-tight">
+                              {track.title}
+                            </div>
+                            <div className="text-[10px] text-slate-400 truncate leading-tight mt-0.5">
+                              {`${track.artist} · ${track.album}`}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span
+                            data-testid={`music-track-license-${track.id}`}
+                            title={track.license}
+                            className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-[9px] font-mono font-semibold text-slate-300"
+                          >
+                            {shortBadge}
+                          </span>
+                          <span className="text-[11px] font-mono tabular-nums text-slate-400 w-9 text-right">
+                            {(track.durationSec ?? track.duration) !== undefined
+                              ? formatMusicDuration(track.durationSec ?? track.duration)
+                              : '--:--'}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* h. Expandable Attribution Panel + Sheet Footer Toggle */}
+            {isCreditsOpen && attributionEntries.length > 0 && (
+              <section
+                data-testid="music-credits-section"
+                className="mx-3.5 mb-1.5 rounded-xl border border-slate-800 bg-slate-900 p-2.5 space-y-1.5 max-h-[120px] overflow-y-auto shrink-0"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    {t('music.creditsHeading')}
+                  </h3>
+                  {attributionEntries.some((entry) => isAttributionRequired(entry.license)) && (
+                    <span className="text-[10px] font-semibold text-indigo-300">
+                      {t('music.attributionRequiredBadge')}
+                    </span>
+                  )}
+                </div>
+
+                {attributionEntries.map((entry) => (
+                  <div
+                    key={entry.id}
+                    data-testid={`music-attribution-${entry.id}`}
+                    className="text-[11px] text-slate-300 space-y-1 leading-relaxed"
+                  >
+                    <div className="font-medium text-slate-100">{entry.attribution}</div>
+                    <div className="text-[10px] text-slate-400">
+                      {t('music.licenseLabel')}: {entry.license} · {t('music.creatorLabel')}:{' '}
+                      {entry.creator} ·{' '}
+                      {(entry.isModified ?? entry.modified)
+                        ? t('music.modifiedYes')
+                        : t('music.modifiedNo')}
+                    </div>
+                    <div className="flex items-center gap-3 pt-0.5 text-[10px]">
+                      {entry.sourceUrl && (
+                        <a
+                          href={entry.sourceUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-indigo-300 hover:underline"
+                        >
+                          <span>{t('music.sourceLink')}</span>
+                          <ExternalLink className="w-2.5 h-2.5" />
+                        </a>
+                      )}
+                      {entry.licenseUrl && (
+                        <a
+                          href={entry.licenseUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-indigo-300 hover:underline"
+                        >
+                          <span>{t('music.licenseLink')}</span>
+                          <ExternalLink className="w-2.5 h-2.5" />
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </section>
+            )}
+
+            <footer className="px-4 py-1.5 border-t border-slate-800/90 bg-slate-950 flex items-center justify-between shrink-0">
+              <button
+                type="button"
+                data-testid="music-credits-toggle-btn"
+                aria-expanded={isCreditsOpen}
+                onClick={() => setIsCreditsOpen((prev) => !prev)}
+                className="inline-flex items-center gap-1.5 text-[11px] font-medium text-indigo-300 hover:text-indigo-200 cursor-pointer py-0.5"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>{t('music.creditsFooterBtn')}</span>
+              </button>
+              <span className="text-[10px] font-mono text-slate-500">
+                {t('music.playlistHeading', { count: safeCatalog.length })}
+              </span>
+            </footer>
+          </div>
+        </div>
+      )}
+    </>
   );
 };

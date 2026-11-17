@@ -1,7 +1,7 @@
 # FOCUS QUEST — PROJECT STATUS
 Cập nhật lần cuối: 2026-11-17
-Giai đoạn hiện tại: **Milestone LOFI — Giai đoạn LOFI-1 (+ Bản bổ sung LOFI-1b)** (Offscreen Document Chrome >= 116, nguồn nhạc online động + hardening catalog không đáng tin cậy, đồng bộ đầy đủ `SessionCoordinator` ngoài `StorageMutex`, UX Retry khi mất mạng) **ĐÃ HOÀN TẤT** — *Lưu ý: Milestone LOFI là tính năng riêng, KHÔNG thuộc Phase 5 / Milestone 5B.5*. Bước kế tiếp theo lộ trình 5B.5: Giai đoạn 1b (`blocked.html` / `_locales` / kiểm tra Chrome thật).
-Trạng thái: Verified (520/520 Tests PASS 3/3 lần | Build PASS | Lint PASS — UI chạy qua React SSR `renderToString`, backend dùng mock adapters & mock `FetchLike`; phát audio thật & fetch `github.io` trực tiếp cần kiểm chứng khi Load unpacked `dist/` trên Chrome >= 116)
+Giai đoạn hiện tại: **Milestone LOFI — Giai đoạn LOFI-2** (Mini-player `56px` luôn hiện trên thanh tab mọi màn, Bottom Sheet mở rộng `~2/3` chiều cao `rounded-t-[22px]` lưu trạng thái `musicPlayerExpanded`, chip lọc tác giả động, cảnh trời sáng/hoàng hôn pastel ở `FocusSceneArea`, dọn `Header` chống chồng lấp EN/VI `400px`) **ĐÃ HOÀN TẤT** — *Lưu ý: Milestone LOFI là tính năng riêng, KHÔNG thuộc Phase 5 / Milestone 5B.5*. Bước kế tiếp: Chờ duyệt LOFI-2 (hoặc tiếp tục lộ trình 5B.5 Giai đoạn 1b).
+Trạng thái: Verified (527/527 Tests PASS 3/3 lần | Build PASS | Lint PASS — UI chạy qua React SSR `renderToString`, backend dùng mock adapters & mock `FetchLike`; kiểm tra tương tác trực quan popup `400×600`, animation, scroll và phát audio thực tế cần xác minh khi Load unpacked `dist/` trên Chrome >= 116)
 
 ---
 
@@ -36,6 +36,10 @@ Trạng thái: Verified (520/520 Tests PASS 3/3 lần | Build PASS | Lint PASS �
   - **Offscreen Document (`Chrome >= 116`) & Khôi phục qua mốc 30s:** `manifest.json` nâng `"minimum_chrome_version": "116"` để dùng `chrome.runtime.getContexts` chính thức cùng `"offscreen"`; `public/offscreen.html` + `src/offscreen/offscreen.ts` (CSP-safe) phát `<audio>` theo giao thức `target: 'offscreen' | 'background'` (`MUSIC_PLAY`, `MUSIC_PAUSE`, `MUSIC_STOP`, `MUSIC_SEEK`, `MUSIC_SET_VOLUME`, `MUSIC_GET_STATUS`), lưu `positionSec` bền vững qua `MUSIC_POSITION` để tái tạo và tua đúng vị trí khi Chrome đóng Offscreen lúc Pause > 30s (không dùng âm thanh im lặng giữ sống).
   - **Catalog không đáng tin cậy & Offline Retry:** `parseRemoteCatalog` từ chối `schemaVersion !== 1`, `> 200` bài, JSON hỏng (giữ cache cũ TTL 6h); bỏ qua & đếm (`skippedCount`) bài thiếu `title/artist/license/licenseUrl/sourceUrl`, `id` không khớp `^[a-z0-9-]+$` hoặc trùng, URL không phải `https://`, `file` chứa `../`/`/`/`\`, hoặc giấy phép ngoài (`CC0-1.0`, `CC-BY-4.0`, `CC-BY-3.0`, `CC-BY-SA-3.0`, `CC-BY-SA-4.0`). Tự chuyển sang bài đầu tiên nếu bài đang chọn biến mất khi refresh; hiển thị lỗi + nút `Retry` / `Thử lại` (`music-retry-catalog-btn`) khi lần đầu mở offline chưa có cache.
   - **Đồng bộ `SessionCoordinator` ngoài `StorageMutex`:** Đưa toàn bộ `onSessionSyncHook` / `onSessionEndedHook` ra ngoài `storage.runExclusive`, bổ sung hook còn thiếu ở `handleBrowserStartupRecovery` (`BROWSER_STARTUP_ACTIVE`), `executeLifecycleRecovery` (mọi wake/terminal) và `resetSession()` (`RESET`), cô lập `try/catch` để không giữ lock và không làm thay đổi thưởng Coins/XP.
+- **Milestone LOFI *(KHÔNG thuộc Phase 5 / 5B.5)* — Giai đoạn LOFI-2 (`2026-11-17` — ĐÃ HOÀN TẤT, DỪNG CHỜ DUYỆT):**
+  - **Mini-player luôn hiện (`56px`) ngay trên `<Navbar>` ở mọi tab:** Thanh tiến độ `3px` ở mép trên (polling mỗi `1s` cả khi thu gọn nếu đang `PLAYING`), thumbnail nốt nhạc, tên bài + `tác giả · album`, 4 `<button>` thật (`>= 36px`, play `40px`) với `aria-label` song ngữ EN/VI; tự giữ 1 hàng `"Chưa tải được nhạc"` / `"Music not loaded yet"` + nút `Thử lại` khi catalog rỗng/lỗi. Không trùng lặp trình phát thứ hai.
+  - **Bottom Sheet mở rộng (`~2/3` chiều cao popup, `rounded-t-[22px]`):** Trượt lên ngay trên thanh tab, nền `bg-slate-950` + backdrop mờ (`backdrop-blur-xs`), thu gọn bằng chevron-down / click nền / phím `Esc`. Lưu trạng thái `UserSettings.musicPlayerExpanded?: boolean` (mặc định `false`, giữ nguyên `schemaVersion`) qua `SET_MUSIC_PLAYER_EXPANDED`. Đủ khối `Now Playing` (`56px` cover), thanh tua, bộ điều khiển (`52px` play), âm lượng, chip lọc tác giả động (`"Tất cả · N"` + từng tác giả), danh sách cuộn `~46px`/dòng (equalizer khi phát + badge ngắn `CC0`/`BY`/`BY-SA` không sửa dữ liệu gốc `track.license`), và footer `"Ghi công & giấy phép"` mở panel License & Attribution.
+  - **Dọn `Header.tsx` & Trời sáng `FocusSceneArea.tsx`:** Gỡ nút `♪` (`music-player-open-btn`) khỏi Header; dùng nhãn Era rút gọn chống chồng lấp ở `400px` cả EN & VI (giữ đủ Coins, Lv, `?`, `EN|VI`, khiên). Chuyển toàn bộ 3 trạng thái `FocusSceneArea` sang nền trời sáng ngày (`working`: xanh da trời `#6ec1f0`→`#d4f0ff` + nắng vàng + mây trôi; `paused`: xám xanh nhạt; `resting`: hoàng hôn pastel `#fed7aa`→`#fbcfe8`→`#e9d5ff`, gỡ sao đêm `fq-scene-star`) kèm scrim tối `bg-slate-900/75` giúp chip chữ trắng tương phản rõ nét.
 - **Milestone 5B.6 — Land Expansion Economy & Visual Reveal (ĐÃ HOÀN TẤT CẢ 5B.6a + 5B.6b):**
   - **Milestone 5B.6a (HOÀN TẤT — Kinh tế mở rộng đất, Chọn chunk liền kề & Xác nhận):**
     - *Hằng số giá & Level đã chốt (`src/core/civilization/constants.ts` & `landExpansion.ts`):* `INITIAL_CHUNK_COUNT = 4`, `LAND_EXPANSION_BASE_COST = 60`, `LAND_EXPANSION_RATIO_BASE = 1.25`, `LAND_EXPANSION_RATIO_STEP = 0.01`, `LAND_EXPANSION_RATIO_CAP = 1.5`, `LAND_EXPANSION_LEVEL_OFFSET = 2`. Giá `cost(k) = Math.round(60 * prod(i=1..k-1) min(1.5, 1.25 + 0.01*(i-1)))` (`60, 75, 95, 120, 154, ...`), chặn trần `requiredLevel = k + 2` (`Lv. 3, 4, 5, ...`), độc lập hoàn toàn với Multiplier & CoinBonus, không reset đất khi chuyển Era.
@@ -128,31 +132,31 @@ Trạng thái: Verified (520/520 Tests PASS 3/3 lần | Build PASS | Lint PASS �
 
 ## 3. KẾT QUẢ KIỂM ĐỊNH THỰC TẾ (VERIFIED REAL VERIFICATION RESULTS)
 
-*Lưu ý: Các số liệu dưới đây được xác minh trực tiếp bằng việc chạy lệnh thực tế trên repository sau khi hoàn tất **Milestone LOFI — Giai đoạn LOFI-1 + LOFI-1b** (`2026-11-17`). Toàn bộ UI tests chạy qua React SSR (`renderToString`) trên Node.js và backend tests chạy qua mock Chrome adapters & mock `FetchLike`; **phát audio thực tế qua Offscreen Document, fetch `tracks.json` trực tiếp trên `github.io` và Chrome Notifications thật trên Chrome desktop (>= 116, `chrome://extensions` Load unpacked `dist/`) chưa được kiểm chứng trực quan**.*
+*Lưu ý: Các số liệu dưới đây được xác minh trực tiếp bằng việc chạy lệnh thực tế trên repository sau khi hoàn tất **Milestone LOFI — Giai đoạn LOFI-2** (`2026-11-17`). Toàn bộ UI tests chạy qua React SSR (`renderToString`) trên Node.js và backend tests chạy qua mock Chrome adapters & mock `FetchLike`; **hiển thị trực quan popup `400×600px`, cuộn danh sách, animation, phát audio thực tế qua Offscreen Document và fetch `tracks.json` trực tiếp trên `github.io` cần kiểm chứng khi Load unpacked `dist/` trên Chrome >= 116**.*
 
 ### 3.1. Production Build (`npm run clean && npm run build`)
-- **Trạng thái:** **PASS (Exit code 0)** — Vite `v8.3.8`, `1,736 modules transformed`, thời gian **`686ms`**.
-- **Kiểm tra Artifacts thư mục `dist/` (Tổng dung lượng: `1,047,462 B`):**
-  - `dist/background.js`: **CÓ (`87.89 kB` / `87,897 B`, gzip: `18.89 kB`)** — Service Worker độc lập (`bgHasReactOrUI: false`, không kéo React/DOM vào background).
-  - `dist/offscreen.js`: **CÓ (`3.87 kB` / `3,878 B`, gzip: `1.48 kB`)** — Audio engine MV3 chạy trong Offscreen Document.
+- **Trạng thái:** **PASS (Exit code 0)** — Vite `v8.3.8`, `1,736 modules transformed`, thời gian **`731ms`**.
+- **Kiểm tra Artifacts thư mục `dist/` (Tổng dung lượng: `1,062,023 B`):**
+  - `dist/background.js`: **CÓ (`88.18 kB`, gzip: `18.93 kB`)** — Service Worker độc lập (`bgHasReactOrUI: false`, không kéo React/DOM vào background).
+  - `dist/offscreen.js`: **CÓ (`3.87 kB`, gzip: `1.48 kB`)** — Audio engine MV3 chạy trong Offscreen Document (không thay đổi ở LOFI-2).
   - `dist/offscreen.html`: **CÓ (`264 B`)** — CSP-safe với duy nhất `<script type="module" src="./offscreen.js"></script>` (0 inline script).
-  - `dist/blocked.js`: **CÓ (`1.32 kB` / `1,321 B`, gzip: `0.60 kB`)** — Module CSP-safe điều khiển đa ngôn ngữ `blocked.html`.
-  - `dist/blocked.html`: **CÓ (`1,810 B`)** — Giao diện Focus Shield song ngữ EN/VI, chống nháy nội dung với `#blocked-card`, không inline script.
-  - `dist/index.html`: **CÓ (`0.71 kB`, gzip: `0.39 kB`)** — Popup HTML entrypoint.
-  - `dist/manifest.json`: **CÓ (`984 B`)** — Chrome MV3 Manifest với `"minimum_chrome_version": "116"`, `"default_locale": "en"`, `"permissions"` gồm `"offscreen"`, và `web_accessible_resources` mở `["blocked.html", "blocked.js", "assets/*"]` (không thêm `host_permissions` mới).
+  - `dist/blocked.js`: **CÓ (`1.32 kB`, gzip: `0.60 kB`)** — Module CSP-safe điều khiển đa ngôn ngữ `blocked.html`.
+  - `dist/blocked.html`: **CÓ (`1,810 B`)** — Giao diện Focus Shield song ngữ EN/VI, không inline script.
+  - `dist/index.html`: **CÓ (`0.71 kB`, gzip: `0.40 kB`)** — Popup HTML entrypoint.
+  - `dist/manifest.json`: **CÓ (`984 B`)** — Chrome MV3 Manifest (`"minimum_chrome_version": "116"`, `"default_locale": "en"`, `"offscreen"`).
   - `dist/_locales/`: **CÓ** — `en/messages.json` và `vi/messages.json`.
   - `dist/icons/`: **CÓ** — Bộ icon đầy đủ (`icon16.png`, `icon32.png`, `icon48.png`, `icon128.png`, `icon.svg`).
-  - `dist/assets/popup-*.js`: **CÓ (`740.83 kB`, gzip: `196.01 kB`)** *(còn cảnh báo Vite chunk > 500 kB, chủ ý hoãn tách chunk)*.
-  - `dist/assets/popup-*.css`: **CÓ (`82.14 kB`, gzip: `12.99 kB`)**.
-  - `dist/assets/translator-*.js`: **CÓ (`49.14 kB`, gzip: `13.35 kB`)**.
+  - `dist/assets/popup-*.js`: **CÓ (`750.76 kB`, gzip: `197.72 kB`)** *(còn cảnh báo Vite chunk > 500 kB, chủ ý hoãn tách chunk)*.
+  - `dist/assets/popup-*.css`: **CÓ (`84.85 kB`, gzip: `13.48 kB`)**.
+  - `dist/assets/translator-*.js`: **CÓ (`50.77 kB`, gzip: `13.65 kB`)**.
   - `dist/assets/domainNormalizer-*.js`: **CÓ (`51.88 kB`, gzip: `13.68 kB`)**.
   - `dist/assets/storageKeys-*.js`: **CÓ (`0.37 kB`, gzip: `0.26 kB`)**.
   - `dist/assets/sprites/`: **CÓ** — Đủ `CREDITS.md`, `kenney-tiny-town` và `kenney-tiny-dungeon`.
-  - `dist/assets/music/` & file audio cục bộ: **KHÔNG TỒN TẠI (`0` file audio)** — Đã gỡ bỏ hoàn toàn theo LOFI-1 (nhạc stream HTTPS trực tuyến từ `FocusQuest-LOFI-archive`).
+  - `dist/assets/music/` & file audio cục bộ: **KHÔNG TỒN TẠI (`0` file audio)** — Đã gỡ bỏ hoàn toàn theo LOFI-1.
 
 ### 3.2. Automated Tests (`npm test`)
-- **Trạng thái:** **PASS (Exit code 0) — 3/3 lần chạy liên tiếp** — **520 / 520 tests PASS (100%)** (`12.40s`, `11.15s`, `13.14s`).
-  - Passed: **520** | Failed: **0** | Skipped: **0** | Cancelled: **0** | Todo: **0**.
+- **Trạng thái:** **PASS (Exit code 0) — 3/3 lần chạy liên tiếp** — **527 / 527 tests PASS (100%)** (`13.91s`, `13.94s`, `14.19s`).
+  - Passed: **527** | Failed: **0** | Skipped: **0** | Cancelled: **0** | Todo: **0**.
 
 ### 3.3. Typecheck & Lint (`npm run lint` — `tsc --noEmit`)
 - **Trạng thái:** **PASS (Exit code 0)** — **0 errors, 0 warnings**.
@@ -172,7 +176,7 @@ Trạng thái: Verified (520/520 Tests PASS 3/3 lần | Build PASS | Lint PASS �
 
 ## 5. BƯỚC TIẾP THEO (NEXT STEPS)
 
-1. **Nghiệm thu thủ công LOFI-1 trên Chrome thật (>= 116, `chrome://extensions` → Load unpacked `dist/`):** Làm theo danh sách 8 bước kiểm thử thực tế trong `/respond.md` (Play/Pause/Seek/Đóng popup, Pause > 30s bị Chrome đóng Offscreen rồi Resume, đồng bộ Focus/Pomodoro Break/Complete/GiveUp/Shutdown, tắt mạng kiểm tra cache & lần đầu mất mạng nút Retry, xác nhận allowlist rỗng vẫn nghe được nhạc online).
+1. **Nghiệm thu thủ công LOFI-1 + LOFI-2 trên Chrome thật (>= 116, `chrome://extensions` → Load unpacked `dist/`):** Thực hiện danh sách 7 bước kiểm thử giao diện + âm thanh trong `/respond.md` (mini-player 56px trên mọi tab, mở/thu sheet + lưu trạng thái `musicPlayerExpanded`, chip lọc tác giả, footer Ghi công & giấy phép, không chồng lấp Header EN/VI 400px, cảnh trời sáng ở `FocusSceneArea`, thử mất mạng nút Retry).
 2. **Bước kế tiếp trong lộ trình 5B.5 — Giai đoạn 1b (`blocked.html`, `_locales`, `manifest.json` & kiểm tra Chrome thật):** Rà soát/nghiệm thu Giai đoạn 1b, sau đó triển khai các giai đoạn còn lại:
    - **Stats nâng cao (Giai đoạn 3):** `statsAggregator.ts` + `StatsBarChart.tsx` SVG thuần (Day/Month/Year) và nối `FOCUS_STAT_UNLOCK` của `Elder's Hut`.
    - **Quest Engine & UI (Giai đoạn 2a → 2b → 5c):** Schema v3, Migration v3, `QuestCoordinator`, nối nguyên tử vào `commitSessionOutcomeInternal` và hoàn thiện tab `Quests`.

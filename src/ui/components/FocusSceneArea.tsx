@@ -26,10 +26,10 @@ export interface FocusScenePalette {
 export const FOCUS_SCENES: Partial<Record<CivilizationEra, FocusScenePalette>> = {
   STONE_AGE: {
     era: 'STONE_AGE',
-    skyTop: '#dbeafe',
-    skyBottom: '#f0fdf4',
+    skyTop: '#6ec1f0',
+    skyBottom: '#d4f0ff',
     hillBack: '#86efac',
-    hillFront: '#4ade80',
+    hillFront: '#34d399',
     shelterFill: '#78716c',
     silhouetteFill: '#1e293b',
   },
@@ -162,26 +162,21 @@ export const FocusSceneArea: React.FC<FocusSceneAreaProps> = ({
     ? t('timer.scene.ariaResting')
     : t('timer.scene.ariaWorking');
 
+  // Bright daytime skies across all 3 states (LOFI-2: zero dark night gradients)
   const skyGradient = isPaused
-    ? 'from-slate-200 via-amber-50 to-slate-200 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900'
+    ? 'from-[#cbd5e1] via-[#dbe4ee] to-[#edf2f7]'
     : isResting
-    ? 'from-indigo-100 via-cyan-50 to-emerald-50 dark:from-slate-900 dark:via-indigo-950/70 dark:to-slate-900'
-    : 'from-sky-100 via-emerald-50 to-amber-50 dark:from-slate-900 dark:via-emerald-950/40 dark:to-slate-900';
+    ? 'from-[#fed7aa] via-[#fbcfe8] to-[#e9d5ff]'
+    : 'from-[#6ec1f0] via-[#a9dcf9] to-[#d4f0ff]';
 
   const dotColor = isPaused
-    ? 'bg-amber-500'
+    ? 'bg-amber-400'
     : isResting
-    ? 'bg-cyan-500'
-    : 'bg-emerald-500';
+    ? 'bg-orange-300'
+    : 'bg-emerald-400';
 
-  const statusTextColor = isPaused
-    ? 'text-amber-700 dark:text-amber-300'
-    : isResting
-    ? 'text-cyan-700 dark:text-cyan-300'
-    : 'text-emerald-700 dark:text-emerald-300';
-
-  const hillBackFill = isPaused ? '#94a3b8' : isResting ? '#6ee7b7' : palette.hillBack;
-  const hillFrontFill = isPaused ? '#64748b' : isResting ? '#34d399' : palette.hillFront;
+  const hillBackFill = isPaused ? '#94a3b8' : isResting ? '#86efac' : palette.hillBack;
+  const hillFrontFill = isPaused ? '#64748b' : isResting ? '#4ade80' : palette.hillFront;
 
   return (
     <div
@@ -191,16 +186,16 @@ export const FocusSceneArea: React.FC<FocusSceneAreaProps> = ({
       data-scene-state={sceneState}
       data-era={resolvedEra}
       data-reduced-motion={reducedMotion ? 'true' : 'false'}
-      className={`relative w-full flex-1 min-h-[160px] flex flex-col rounded-xl overflow-hidden border border-slate-200/80 dark:border-slate-700/80 bg-gradient-to-b ${skyGradient} select-none`}
+      className={`relative w-full flex-1 min-h-[160px] flex flex-col rounded-xl overflow-hidden border border-sky-200/80 dark:border-slate-700/80 bg-gradient-to-b ${skyGradient} select-none`}
     >
-      {/* Top Corner Overlay Chips: Left = Status, Right = Chime Toggle */}
+      {/* Top Corner Overlay Chips: Left = Status, Right = Chime Toggle (dark scrim for bright-sky contrast) */}
       <div className="absolute top-2.5 inset-x-2.5 z-10 flex items-center justify-between pointer-events-none">
         <div
           data-testid="focus-scene-status-chip"
-          className="pointer-events-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/85 dark:bg-slate-900/85 border border-slate-200/80 dark:border-slate-700/80 shadow-2xs"
+          className="pointer-events-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-900/75 border border-white/25 text-white backdrop-blur-xs shadow-xs"
         >
           <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} />
-          <span className={`text-[11px] font-bold tracking-wider ${statusTextColor}`}>
+          <span className="text-[11px] font-bold tracking-wider text-white">
             {statusLabel}
           </span>
         </div>
@@ -212,12 +207,12 @@ export const FocusSceneArea: React.FC<FocusSceneAreaProps> = ({
           aria-label={chimeAriaLabel}
           aria-pressed={chimeEnabled}
           title={chimeTitle}
-          className="pointer-events-auto p-1.5 rounded-full bg-white/85 dark:bg-slate-900/85 border border-slate-200/80 dark:border-slate-700/80 text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800 transition-colors shadow-2xs cursor-pointer"
+          className="pointer-events-auto p-1.5 rounded-full bg-slate-900/75 border border-white/25 text-white hover:bg-slate-900/90 backdrop-blur-xs transition-colors shadow-xs cursor-pointer"
         >
           {chimeEnabled ? (
-            <Bell className="w-3.5 h-3.5" />
+            <Bell className="w-3.5 h-3.5 text-white" />
           ) : (
-            <BellOff className="w-3.5 h-3.5 text-slate-400" />
+            <BellOff className="w-3.5 h-3.5 text-slate-300" />
           )}
         </button>
       </div>
@@ -229,72 +224,47 @@ export const FocusSceneArea: React.FC<FocusSceneAreaProps> = ({
         aria-hidden="true"
         className="absolute inset-0 w-full h-full block pointer-events-none"
       >
-        {/* Celestial Body & Atmospheric Accents */}
-        {isWorking && (
-          <circle cx="272" cy="74" r="18" fill="#fef3c7" opacity="0.5" />
-        )}
+        {/* Bright Daytime / Sunset Sun & Halo */}
         <circle
           cx="272"
-          cy="74"
-          r="11"
-          fill={isResting ? '#bae6fd' : isPaused ? '#cbd5e1' : '#fde68a'}
-          opacity={isPaused ? '0.65' : '0.9'}
+          cy={isResting ? 98 : 70}
+          r={isWorking ? 20 : isResting ? 22 : 16}
+          fill={isResting ? '#fed7aa' : isPaused ? '#f1f5f9' : '#fef9c3'}
+          opacity={isPaused ? '0.55' : '0.65'}
         />
-        {isResting && (
-          <circle cx="276" cy="71" r="8" fill="#e0f2fe" opacity="0.45" />
-        )}
+        <circle
+          cx="272"
+          cy={isResting ? 98 : 70}
+          r={isResting ? 13 : 12}
+          fill={isResting ? '#fb923c' : isPaused ? '#f8fafc' : '#fde047'}
+          opacity={isPaused ? '0.8' : '0.95'}
+        />
 
-        {/* Deterministic Pixel Clouds (working) */}
-        {isWorking && (
-          <g className={allowAnimation ? 'fq-scene-cloud' : undefined} opacity="0.72" fill="#ffffff">
-            <rect x="64" y="62" width="24" height="6" rx="2" />
-            <rect x="70" y="57" width="12" height="5" rx="2" />
-            <rect x="196" y="50" width="20" height="5" rx="2" />
-            <rect x="200" y="46" width="10" height="4" rx="2" />
-          </g>
-        )}
-
-        {/* Deterministic Twinkling Stars (resting break) */}
-        {isResting && (
-          <g fill="#fef08a">
-            <rect
-              x="92"
-              y="56"
-              width="3"
-              height="3"
-              className={allowAnimation ? 'fq-scene-star' : undefined}
-            />
-            <rect
-              x="176"
-              y="44"
-              width="3"
-              height="3"
-              className={allowAnimation ? 'fq-scene-star' : undefined}
-              style={{ animationDelay: '0.9s' }}
-            />
-            <rect
-              x="232"
-              y="60"
-              width="2.5"
-              height="2.5"
-              className={allowAnimation ? 'fq-scene-star' : undefined}
-              style={{ animationDelay: '1.7s' }}
-            />
-          </g>
-        )}
+        {/* Deterministic White Clouds (drifting in focus, warm wisps at sunset, soft overcast when paused) */}
+        <g
+          className={allowAnimation ? 'fq-scene-cloud' : undefined}
+          opacity={isPaused ? '0.82' : isResting ? '0.78' : '0.9'}
+          fill={isResting ? '#fff1f2' : '#ffffff'}
+        >
+          <rect x="64" y="60" width="28" height="7" rx="3" />
+          <rect x="70" y="54" width="14" height="6" rx="3" />
+          <rect x="192" y="48" width="24" height="6" rx="3" />
+          <rect x="198" y="43" width="12" height="5" rx="2.5" />
+          {isPaused && <rect x="128" y="66" width="26" height="6" rx="3" />}
+        </g>
 
         {/* Distant Hill Ridge (spans full width down to y=220) */}
         <path
           d="M0 144 Q92 114 185 138 T360 128 L360 220 L0 220 Z"
           fill={hillBackFill}
-          opacity={isPaused ? '0.42' : '0.52'}
+          opacity={isPaused ? '0.55' : '0.72'}
         />
 
         {/* Foreground Meadow (fills lower half cleanly to bottom edge y=220) */}
         <path
           d="M0 162 Q115 142 235 156 T360 150 L360 220 L0 220 Z"
           fill={hillFrontFill}
-          opacity={isPaused ? '0.48' : '0.68'}
+          opacity={isPaused ? '0.62' : '0.84'}
         />
 
         {/* Grounded Stone Age Camp Earth Clearing */}
@@ -530,8 +500,8 @@ export const FocusSceneArea: React.FC<FocusSceneAreaProps> = ({
                 {isResting && villager.id === 'elder' && (
                   <span
                     data-testid="scene-rest-zzz"
-                    className={`absolute -top-[10px] right-[1px] font-mono text-[9px] font-bold text-cyan-700 dark:text-cyan-200 leading-none ${
-                      allowAnimation ? 'fq-scene-zzz' : 'opacity-80'
+                    className={`absolute -top-[10px] right-[1px] font-mono text-[9px] font-bold text-indigo-900 bg-white/80 px-0.5 rounded leading-none ${
+                      allowAnimation ? 'fq-scene-zzz' : 'opacity-90'
                     }`}
                   >
                     zZ

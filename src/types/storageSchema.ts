@@ -22,6 +22,7 @@ export interface UserSettings {
   musicEnabled?: boolean;           // User background Lofi playback intent
   musicPlayDuringBreak?: boolean;   // Keep playing music during Pomodoro breaks (default false)
   stopMusicOnSessionEnd?: boolean;  // Stop music when focus session ends (default true)
+  musicPlayerExpanded?: boolean;    // Persist MusicPlayerSheet expanded/collapsed state (default false)
 }
 
 export interface StorageSchema {

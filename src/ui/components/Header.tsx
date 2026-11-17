@@ -1,5 +1,5 @@
 import React from 'react';
-import { Coins, Award, Shield, Music } from 'lucide-react';
+import { Coins, Award, Shield } from 'lucide-react';
 import { PlayerEconomy } from '../../types/economy.ts';
 import { FocusProfile } from '../../types/profiles.ts';
 import { CivilizationEra } from '../../core/civilization/buildingTypes.ts';
@@ -14,8 +14,6 @@ export interface HeaderProps {
   activeProfile?: FocusProfile | null;
   onOpenProfiles?: () => void;
   onOpenHelp?: () => void;
-  onOpenMusic?: () => void;
-  isMusicPlaying?: boolean;
   isBlockingActive?: boolean;
   isSessionActive?: boolean;
   era?: CivilizationEra | string;
@@ -37,13 +35,22 @@ const ERA_TRANSLATION_KEYS: Record<string, TranslationKey> = {
   INTERPLANETARY: 'eras.INTERPLANETARY',
 };
 
+const ERA_SHORT_TRANSLATION_KEYS: Record<string, TranslationKey> = {
+  STONE_AGE: 'header.eraShort.STONE_AGE',
+  BRONZE_AGE: 'header.eraShort.BRONZE_AGE',
+  IRON_AGE: 'header.eraShort.IRON_AGE',
+  MEDIEVAL: 'header.eraShort.MEDIEVAL',
+  EARLY_MODERN: 'header.eraShort.EARLY_MODERN',
+  MODERN: 'header.eraShort.MODERN',
+  FUTURISTIC: 'header.eraShort.FUTURISTIC',
+  INTERPLANETARY: 'header.eraShort.INTERPLANETARY',
+};
+
 export const Header: React.FC<HeaderProps> = ({
   economy,
   activeProfile,
   onOpenProfiles,
   onOpenHelp,
-  onOpenMusic,
-  isMusicPlaying = false,
   isBlockingActive = false,
   isSessionActive = false,
   era = 'STONE_AGE',
@@ -55,7 +62,9 @@ export const Header: React.FC<HeaderProps> = ({
   const levelProgress = levelSystem.calculateLevel(economy.totalXP);
 
   const eraKey = ERA_TRANSLATION_KEYS[era] ?? 'eras.STONE_AGE';
+  const eraShortKey = ERA_SHORT_TRANSLATION_KEYS[era] ?? 'header.eraShort.STONE_AGE';
   const eraLabel = t(eraKey);
+  const eraShortLabel = t(eraShortKey);
   const nextLocale: SupportedLocale = locale === 'en' ? 'vi' : 'en';
   const showActiveShield = Boolean((isSessionActive || isBlockingActive) && activeProfile);
 
@@ -74,14 +83,14 @@ export const Header: React.FC<HeaderProps> = ({
     >
       {/* Row 1: Brand + Era badge | Coins + Level + Help + EN/VI */}
       <div className="flex items-center justify-between gap-1.5 h-[26px]">
-        <div className="flex items-center gap-1.5 min-w-0">
+        <div className="flex-1 min-w-0 flex items-center gap-1.5 overflow-hidden">
           {onNavigateHome ? (
             <button
               type="button"
               data-testid="header-brand-home"
               onClick={onNavigateHome}
               aria-label={t('header.goHomeAria')}
-              className="flex items-center gap-1.5 min-w-0 hover:opacity-85 transition-opacity cursor-pointer"
+              className="flex items-center gap-1.5 shrink-0 hover:opacity-85 transition-opacity cursor-pointer"
             >
               <div className="w-5 h-5 rounded-md bg-indigo-600 flex items-center justify-center text-white font-bold text-[10px] shadow-2xs shrink-0">
                 FQ
@@ -91,7 +100,7 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
             </button>
           ) : (
-            <div className="flex items-center gap-1.5 min-w-0">
+            <div className="flex items-center gap-1.5 shrink-0">
               <div className="w-5 h-5 rounded-md bg-indigo-600 flex items-center justify-center text-white font-bold text-[10px] shadow-2xs shrink-0">
                 FQ
               </div>
@@ -104,15 +113,15 @@ export const Header: React.FC<HeaderProps> = ({
           <span
             data-testid="header-era-badge"
             title={t('header.eraTitle', { era: eraLabel })}
-            className="px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200/80 dark:border-emerald-800/60 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 whitespace-nowrap truncate max-w-[84px]"
+            className="min-w-0 px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200/80 dark:border-emerald-800/60 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 whitespace-nowrap truncate max-w-[82px]"
           >
-            {eraLabel}
+            {eraShortLabel}
           </span>
         </div>
 
         <div className="flex items-center gap-1 shrink-0">
           {/* Coins */}
-          <div className="flex items-center gap-1 px-1.5 py-0.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 rounded text-[11px] font-semibold text-amber-900 dark:text-amber-200 tabular-nums">
+          <div className="flex items-center gap-1 px-1.5 py-0.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 rounded text-[11px] font-semibold text-amber-900 dark:text-amber-200 tabular-nums whitespace-nowrap">
             <Coins className="w-3 h-3 text-amber-600 dark:text-amber-400 shrink-0" />
             <span>{formatRewardAmount(economy.focusCoins)}</span>
           </div>
@@ -122,25 +131,6 @@ export const Header: React.FC<HeaderProps> = ({
             <Award className="w-3 h-3 text-indigo-600 dark:text-indigo-400 shrink-0" />
             <span>Lv. {levelProgress.level}</span>
           </div>
-
-          {/* Music Player button */}
-          {onOpenMusic && (
-            <button
-              type="button"
-              data-testid="music-player-open-btn"
-              aria-label={t('music.openAria')}
-              aria-pressed={isMusicPlaying}
-              onClick={onOpenMusic}
-              title={t('music.openTitle')}
-              className={`w-5 h-5 rounded-full border flex items-center justify-center transition-colors motion-reduce:transition-none cursor-pointer shrink-0 ${
-                isMusicPlaying
-                  ? 'border-indigo-600 bg-indigo-600 text-white shadow-2xs'
-                  : 'border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-400'
-              }`}
-            >
-              <Music className="w-2.5 h-2.5" />
-            </button>
-          )}
 
           {/* Help button */}
           {onOpenHelp && (
