@@ -108,12 +108,21 @@ const EXACT_VI_ERROR_MAP: Record<string, string> = {
   'SET_CHIME_ENABLED requires boolean enabled flag.': 'Cấu hình chuông báo không hợp lệ.',
 
   // Music Player backend messages
-  'No bundled MP3 tracks declared in catalog.': 'Chưa có bài nhạc MP3 nào được khai báo trong thư viện.',
+  'Unable to load online Lofi catalog. Check your internet connection and retry.':
+    'Không thể tải danh sách nhạc Lofi trực tuyến. Hãy kiểm tra kết nối mạng và thử lại.',
+  'Audio playback failed (autoplay_blocked).':
+    'Trình duyệt chặn tự động phát âm thanh. Hãy bấm Phát để bắt đầu nghe nhạc.',
+  'Audio playback failed (network).':
+    'Không thể tải luồng nhạc do lỗi mạng. Hãy kiểm tra kết nối Internet.',
+  'Audio playback failed (decode).': 'Không thể giải mã tệp âm thanh trực tuyến.',
+  'Audio playback failed (unknown).': 'Lỗi phát âm thanh không xác định.',
   'MUSIC_SEEK requires finite numeric positionSec.': 'Vị trí tua nhạc không hợp lệ.',
   'MUSIC_SET_VOLUME requires finite numeric volume.': 'Mức âm lượng không hợp lệ.',
   'MUSIC_SET_SHUFFLE requires boolean enabled flag.': 'Cài đặt phát ngẫu nhiên không hợp lệ.',
   "MUSIC_SET_REPEAT requires mode ('off' | 'all' | 'one').": 'Chế độ lặp lại không hợp lệ.',
   'MUSIC_SET_SYNC_WITH_SESSION requires boolean enabled flag.': 'Cài đặt đồng bộ phiên tập trung không hợp lệ.',
+  'MUSIC_SET_PLAY_DURING_BREAK requires boolean enabled flag.': 'Cài đặt phát nhạc trong giờ nghỉ không hợp lệ.',
+  'Music coordinator is not initialized.': 'Trình điều phối nhạc chưa được khởi tạo.',
   'MusicCoordinator is not configured in MessageHandler.': 'Trình điều phối nhạc chưa được cấu hình.',
 };
 
@@ -300,10 +309,10 @@ export function localizeErrorMessage(
   }
 
   const trackNotFoundMatch = trimmed.match(
-    /^Track '(.+)' was not found in the bundled music catalog\.$/
+    /^Track '(.+)' was not found in the Lofi music catalog\.$/
   );
   if (trackNotFoundMatch) {
-    return `Không tìm thấy bài nhạc '${trackNotFoundMatch[1]}' trong thư viện đóng gói sẵn.`;
+    return `Không tìm thấy bài nhạc '${trackNotFoundMatch[1]}' trong thư viện nhạc Lofi.`;
   }
 
   return trimmed;

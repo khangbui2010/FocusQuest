@@ -15,10 +15,13 @@ export interface DailyStatRecord {
 
 export interface UserSettings {
   /** @deprecated Ignored in runtime; kept for backward schema/migration compatibility. */
-  soundEnabled: boolean;         // deprecated, ignored, kept for backward compatibility
-  notificationsEnabled: boolean; // Chrome Notifications
-  language?: SupportedLocale;    // UI & notification language ('en' | 'vi')
-  chimeEnabled?: boolean;        // Web Audio phase transition chimes (undefined means enabled)
+  soundEnabled: boolean;            // deprecated, ignored, kept for backward compatibility
+  notificationsEnabled: boolean;    // Chrome Notifications
+  language?: SupportedLocale;       // UI & notification language ('en' | 'vi')
+  chimeEnabled?: boolean;           // Web Audio phase transition chimes (undefined means enabled)
+  musicEnabled?: boolean;           // User background Lofi playback intent
+  musicPlayDuringBreak?: boolean;   // Keep playing music during Pomodoro breaks (default false)
+  stopMusicOnSessionEnd?: boolean;  // Stop music when focus session ends (default true)
 }
 
 export interface StorageSchema {

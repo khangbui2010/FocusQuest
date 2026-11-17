@@ -24,7 +24,6 @@ import { PlayerEconomy } from './types/economy.ts';
 import { DailyStatRecord, UserSettings } from './types/storageSchema.ts';
 import { CivilizationEra } from './core/civilization/buildingTypes.ts';
 import { MusicPlayerState, MusicTrack, RepeatMode } from './types/music.ts';
-import { MUSIC_CATALOG } from './data/musicCatalog.ts';
 import { I18nProvider, useTranslation } from './i18n/I18nContext.tsx';
 import { SupportedLocale } from './i18n/types.ts';
 import { resolveLocale, translate } from './i18n/translator.ts';
@@ -52,17 +51,22 @@ interface ProfilesResponseData {
 
 const DEFAULT_MUSIC_STATE: MusicPlayerState = {
   status: 'IDLE',
-  currentTrackId: MUSIC_CATALOG[0]?.id ?? null,
+  currentTrackId: null,
   positionSec: 0,
-  durationSec: MUSIC_CATALOG[0]?.duration ?? null,
+  durationSec: null,
   volume: 0.7,
   muted: false,
   shuffle: false,
   repeatMode: 'off',
-  shuffledOrder: MUSIC_CATALOG.map((t) => t.id),
+  shuffledOrder: [],
   syncWithSession: true,
+  musicEnabled: false,
+  playDuringBreak: false,
+  pausedBySession: false,
+  catalogUpdatedAt: null,
   lastUpdatedAt: 0,
   lastError: null,
+  lastErrorCode: null,
 };
 
 interface PopupShellProps {
@@ -118,6 +122,8 @@ interface PopupShellProps {
   handleToggleMusicShuffle: (enabled: boolean) => Promise<void>;
   handleCycleMusicRepeat: (mode: RepeatMode) => Promise<void>;
   handleToggleMusicSyncWithSession: (enabled: boolean) => Promise<void>;
+  handleToggleMusicPlayDuringBreak: (enabled: boolean) => Promise<void>;
+  handleRefreshMusicCatalog: () => Promise<void>;
 }
 
 const PopupShell: React.FC<PopupShellProps> = ({
@@ -169,6 +175,8 @@ const PopupShell: React.FC<PopupShellProps> = ({
   handleToggleMusicShuffle,
   handleCycleMusicRepeat,
   handleToggleMusicSyncWithSession,
+  handleToggleMusicPlayDuringBreak,
+  handleRefreshMusicCatalog,
 }) => {
   const { t } = useTranslation();
 
@@ -313,6 +321,8 @@ const PopupShell: React.FC<PopupShellProps> = ({
         onToggleShuffle={handleToggleMusicShuffle}
         onCycleRepeat={handleCycleMusicRepeat}
         onToggleSyncWithSession={handleToggleMusicSyncWithSession}
+        onTogglePlayDuringBreak={handleToggleMusicPlayDuringBreak}
+        onRefreshCatalog={handleRefreshMusicCatalog}
       />
 
       <RewardHelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
@@ -337,7 +347,7 @@ export default function App() {
   const [civEra, setCivEra] = useState<CivilizationEra>('STONE_AGE');
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [musicState, setMusicState] = useState<MusicPlayerState>(DEFAULT_MUSIC_STATE);
-  const [musicCatalog, setMusicCatalog] = useState<readonly MusicTrack[]>(MUSIC_CATALOG);
+  const [musicCatalog, setMusicCatalog] = useState<readonly MusicTrack[]>([]);
   const [locationHash, setLocationHash] = useState<string>(() =>
     typeof window !== 'undefined' ? window.location.hash : ''
   );
@@ -680,6 +690,21 @@ export default function App() {
     applyMusicResponse(res);
   };
 
+  const handleToggleMusicPlayDuringBreak = async (enabled: boolean) => {
+    const res = await sendExtensionMessage<MusicStateResponseData>({
+      action: 'MUSIC_SET_PLAY_DURING_BREAK',
+      payload: { enabled },
+    });
+    applyMusicResponse(res);
+  };
+
+  const handleRefreshMusicCatalog = async () => {
+    const res = await sendExtensionMessage<MusicStateResponseData>({
+      action: 'MUSIC_REFRESH_CATALOG',
+    });
+    applyMusicResponse(res);
+  };
+
   const isSessionActive = Boolean(
     session &&
       session.status !== 'COMPLETED' &&
@@ -740,6 +765,8 @@ export default function App() {
       handleToggleMusicShuffle={handleToggleMusicShuffle}
       handleCycleMusicRepeat={handleCycleMusicRepeat}
       handleToggleMusicSyncWithSession={handleToggleMusicSyncWithSession}
+      handleToggleMusicPlayDuringBreak={handleToggleMusicPlayDuringBreak}
+      handleRefreshMusicCatalog={handleRefreshMusicCatalog}
     />
   );
 

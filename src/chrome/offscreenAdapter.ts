@@ -90,7 +90,7 @@ export class ChromeOffscreenAdapter implements IOffscreenAdapter {
       await offscreenApi.createDocument({
         url: OFFSCREEN_DOCUMENT_PATH,
         reasons: [reason],
-        justification: 'Play bundled focus music MP3s cleanly across popup close/reopen.',
+        justification: 'Stream online Lofi background focus music cleanly across popup close and reopen.',
       });
     })();
 
@@ -126,7 +126,7 @@ export class ChromeOffscreenAdapter implements IOffscreenAdapter {
       try {
         chrome.runtime.sendMessage(
           command,
-          (response?: { success?: boolean; data?: T; error?: string }) => {
+          (response?: { success?: boolean; data?: T; error?: string; code?: string }) => {
             if (chrome.runtime.lastError) {
               reject(new Error(chrome.runtime.lastError.message));
               return;
@@ -136,7 +136,13 @@ export class ChromeOffscreenAdapter implements IOffscreenAdapter {
               return;
             }
             if (response.success === false) {
-              reject(new Error(response.error || 'Offscreen audio command failed.'));
+              const err = new Error(response.error || 'Offscreen audio command failed.') as Error & {
+                code?: string;
+              };
+              if (response.code) {
+                err.code = response.code;
+              }
+              reject(err);
               return;
             }
             resolve((response.data ?? null) as T | null);

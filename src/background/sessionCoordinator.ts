@@ -115,7 +115,11 @@ export class SessionCoordinator {
      * the owning system as the single source of truth.
      */
     private coinBonusProvider: () => readonly CoinBonus[] = () => [],
-    private onSessionEndedHook?: (event: SessionEndedHookEvent) => Promise<void> | void
+    private onSessionEndedHook?: (event: SessionEndedHookEvent) => Promise<void> | void,
+    private onSessionSyncHook?: (
+      session: SessionSnapshot | null,
+      reason?: string
+    ) => Promise<void> | void
   ) {}
 
   /** Additive coin bonus factor applied exactly once per reward calculation. */
@@ -210,6 +214,24 @@ export class SessionCoordinator {
       });
     } catch (err) {
       console.warn('[SessionCoordinator] Isolated onSessionEndedHook error:', err);
+    }
+  }
+
+  /**
+   * Notify optional observer (e.g. MusicCoordinator.sync) of active session/phase changes.
+   * Strictly error-isolated so audio/offscreen errors can never disrupt timer transitions.
+   */
+  private async triggerSessionSyncHookInternal(
+    session: SessionSnapshot | null,
+    reason?: string
+  ): Promise<void> {
+    if (!this.onSessionSyncHook) {
+      return;
+    }
+    try {
+      await this.onSessionSyncHook(session, reason);
+    } catch (err) {
+      console.warn('[SessionCoordinator] Isolated onSessionSyncHook error:', err);
     }
   }
 
@@ -460,6 +482,7 @@ export class SessionCoordinator {
       await this.blockingCoordinator.syncBlocking(isWebsiteBlockingActive(newSession), profile);
 
       this.lastProcessedStartupSessionId = null;
+      await this.triggerSessionSyncHookInternal(newSession, 'STARTED');
       return newSession;
     });
   }
@@ -542,6 +565,7 @@ export class SessionCoordinator {
       await this.badge.setBadgeText('PAUSE');
       await this.badge.setBadgeBackgroundColor('#F59E0B'); // Amber/Orange
 
+      await this.triggerSessionSyncHookInternal(updated, 'PAUSED');
       return updated;
     });
   }
@@ -677,6 +701,7 @@ export class SessionCoordinator {
         await this.badge.setBadgeBackgroundColor('#3B82F6');
       }
 
+      await this.triggerSessionSyncHookInternal(updated, 'RESUMED');
       return updated;
     });
   }
@@ -1433,6 +1458,7 @@ export class SessionCoordinator {
             { minutes: breakDurationMinutes }
           );
 
+          await this.triggerSessionSyncHookInternal(updated, 'PHASE_CHANGED');
           return updated;
         }
 
@@ -1517,6 +1543,7 @@ export class SessionCoordinator {
           }
         );
 
+        await this.triggerSessionSyncHookInternal(updated, 'PHASE_CHANGED');
         return updated;
       }
 
@@ -1602,6 +1629,7 @@ export class SessionCoordinator {
         }
       );
 
+      await this.triggerSessionSyncHookInternal(updated, 'PHASE_CHANGED');
       return updated;
     });
   }
@@ -1851,11 +1879,17 @@ export class SessionCoordinator {
    * Execute the lifecycle recovery workflow.
    */
   private async executeLifecycleRecovery(context: LifecycleEventContext): Promise<SessionSnapshot | null> {
+    const reason = context.reason;
+    const isStartup = reason === 'BROWSER_STARTUP' || reason === 'BROWSER_UPDATED' || !!context.isBrowserStartup;
+
     const session = await this.storage.getCurrentSession();
     if (!session) {
       await this.blockingCoordinator.syncBlocking(false, null);
       await this.badge.clearBadge();
       await this.storage.clearSessionLifecycleMarker();
+      if (isStartup) {
+        await this.triggerSessionSyncHookInternal(null, 'STARTUP_NO_SESSION');
+      }
       return null;
     }
 
@@ -1864,11 +1898,11 @@ export class SessionCoordinator {
       await this.blockingCoordinator.syncBlocking(false, null);
       await this.badge.clearBadge();
       await this.storage.clearSessionLifecycleMarker();
+      if (isStartup) {
+        await this.triggerSessionSyncHookInternal(session, reason);
+      }
       return session;
     }
-
-    const reason = context.reason;
-    const isStartup = reason === 'BROWSER_STARTUP' || reason === 'BROWSER_UPDATED' || !!context.isBrowserStartup;
 
     // 2. Explicit Extension Disabled or Reloaded signal
     if (reason === 'EXTENSION_RE_ENABLED') {
@@ -1950,6 +1984,7 @@ export class SessionCoordinator {
       await this.badge.setBadgeText(`${remainingMinutes}m`);
       await this.badge.setBadgeBackgroundColor('#10B981');
       await this.blockingCoordinator.syncBlocking(true, activeProfile);
+      await this.triggerSessionSyncHookInternal(session, 'RECOVERY');
       return session;
     }
 
@@ -1978,6 +2013,7 @@ export class SessionCoordinator {
       await this.badge.setBadgeText('PAUSE');
       await this.badge.setBadgeBackgroundColor('#F59E0B');
       await this.blockingCoordinator.syncBlocking(false, null);
+      await this.triggerSessionSyncHookInternal(session, 'RECOVERY');
       return session;
     }
 
@@ -1986,6 +2022,7 @@ export class SessionCoordinator {
       await this.badge.setBadgeText('RUN');
       await this.badge.setBadgeBackgroundColor('#3B82F6');
       await this.blockingCoordinator.syncBlocking(true, activeProfile);
+      await this.triggerSessionSyncHookInternal(session, 'RECOVERY');
       return session;
     }
 
@@ -2023,6 +2060,7 @@ export class SessionCoordinator {
         const remainingMinutes = Math.max(1, Math.ceil((targetFinishTime - now) / 60000));
         await this.badge.setBadgeText(`${remainingMinutes}m`);
         await this.badge.setBadgeBackgroundColor('#10B981');
+        await this.triggerSessionSyncHookInternal(session, 'RECOVERY');
         return session;
       }
 
@@ -2047,6 +2085,7 @@ export class SessionCoordinator {
       await this.alarms.create(expectedBreakAlarmName, { when: breakFinishTime });
       await this.badge.setBadgeText('REST');
       await this.badge.setBadgeBackgroundColor('#06B6D4');
+      await this.triggerSessionSyncHookInternal(session, 'RECOVERY');
       return session;
     }
 

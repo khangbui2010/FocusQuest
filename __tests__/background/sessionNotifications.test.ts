@@ -17,9 +17,42 @@ import {
   MockNotificationsAdapter,
   MockTabsAdapter,
 } from '../mocks/chromeMock.ts';
-import { MUSIC_CATALOG } from '../../src/data/musicCatalog.ts';
-import { AudioStatusSnapshot, OffscreenMusicCommand } from '../../src/types/music.ts';
+import { parseRemoteCatalog } from '../../src/data/musicCatalog.ts';
+import { AudioStatusSnapshot, MusicTrack, OffscreenMusicCommand } from '../../src/types/music.ts';
 import { playPhaseTransitionChime } from '../../src/ui/services/soundEffects.ts';
+
+function createTestCatalog(): MusicTrack[] {
+  return parseRemoteCatalog({
+    schemaVersion: 1,
+    updatedAt: '2026-11-17',
+    tracks: [
+      {
+        id: 'purrple-cat-twilight-market',
+        title: 'Twilight Market',
+        artist: 'Purrple Cat',
+        album: 'City Nights 2',
+        durationSec: 175,
+        file: 'purrple-cat-city-nights-2-01-twilight-market_afce47e2.mp3',
+        license: 'CC-BY-4.0',
+        licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
+        sourceUrl: 'https://purrplecat.com/',
+        modified: false,
+      },
+      {
+        id: 'holizna-cc0-into-the-mist',
+        title: 'Into The Mist',
+        artist: 'HoliznaCC0',
+        album: 'Public Domain Lofi',
+        durationSec: 130,
+        file: 'holizna-cc0-into-the-mist.mp3',
+        license: 'CC0-1.0',
+        licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/',
+        sourceUrl: 'https://freemusicarchive.org/music/holiznacc0/public-domain-lofi',
+        modified: false,
+      },
+    ],
+  }).tracks;
+}
 
 class StubOffscreen implements IOffscreenAdapter {
   public open = false;
@@ -46,18 +79,18 @@ class StubOffscreen implements IOffscreenAdapter {
     this.open = false;
   }
   async sendCommand<T = unknown>(command: OffscreenMusicCommand): Promise<T | null> {
-    if (command.action === 'LOAD_AND_PLAY') {
+    if (command.action === 'MUSIC_PLAY') {
       this.audioStatus = {
         isPlaying: true,
         paused: false,
-        currentTime: command.payload.positionSec,
+        currentTime: command.startAtSec,
         duration: 180,
-        trackId: command.payload.trackId,
-        src: command.payload.trackUrl,
+        trackId: command.trackId ?? command.url,
+        src: command.url,
       };
       return { ...this.audioStatus } as unknown as T;
     }
-    if (command.action === 'STOP') {
+    if (command.action === 'MUSIC_STOP') {
       if (this.throwOnStop) {
         throw new Error('Simulated offscreen STOP failure');
       }
@@ -79,6 +112,7 @@ async function createHarness(options?: {
   throwOnNotification?: boolean;
   throwOnMusicHook?: boolean;
 }) {
+  const testCatalog = createTestCatalog();
   const adapter = new MemoryStorageAdapter();
   const storage = new StorageManager(adapter);
   const profileManager = new ProfileManager(storage);
@@ -96,7 +130,7 @@ async function createHarness(options?: {
   const tabs = new MockTabsAdapter();
   const blocking = new BlockingCoordinator(dnr, tabs);
   const offscreen = new StubOffscreen();
-  const musicCoordinator = new MusicCoordinator(storage, offscreen, MUSIC_CATALOG);
+  const musicCoordinator = new MusicCoordinator(storage, offscreen, testCatalog);
 
   const sessionCoordinator = new SessionCoordinator(
     storage,
@@ -111,6 +145,12 @@ async function createHarness(options?: {
         throw new Error('Simulated catastrophic music hook error');
       }
       await musicCoordinator.handleFocusSessionEnded(event);
+    },
+    async (session, reason) => {
+      if (options?.throwOnMusicHook) {
+        throw new Error('Simulated catastrophic music sync error');
+      }
+      await musicCoordinator.sync(session, reason);
     }
   );
 
@@ -123,6 +163,7 @@ async function createHarness(options?: {
     offscreen,
     musicCoordinator,
     sessionCoordinator,
+    testCatalog,
   };
 }
 
@@ -131,8 +172,8 @@ test('Notifications 1 & 5: Countdown completion notifies ONCE with duration and 
   await sessionCoordinator.startSession('COUNTDOWN', 25, profile.id);
 
   await sessionCoordinator.completeCountdown();
-  await sessionCoordinator.completeCountdown(); // duplicate call
-  await sessionCoordinator.completeCountdown(); // triplicate call
+  await sessionCoordinator.completeCountdown();
+  await sessionCoordinator.completeCountdown();
 
   assert.equal(notifications.dispatchCount, 1);
   const notif = Array.from(notifications.notifications.values())[0];
@@ -155,7 +196,6 @@ test('Notifications 2 & 7: Pomodoro Countdown distinguishes Break/Focus phase no
     numberOfCycles: 1,
   });
 
-  // Interval 1 Focus -> Short Break (Phase notification, NOT full mission completion)
   const alarm1 = buildPomodoroStageAlarmName(
     session.id,
     1,
@@ -168,7 +208,6 @@ test('Notifications 2 & 7: Pomodoro Countdown distinguishes Break/Focus phase no
   assert.ok(breakNotif.title.includes('Short Break'));
   assert.equal(sBreak?.notificationSent, false);
 
-  // Short Break -> Focus Interval 2 (Phase notification)
   const alarm2 = buildPomodoroStageAlarmName(
     session.id,
     1,
@@ -183,7 +222,6 @@ test('Notifications 2 & 7: Pomodoro Countdown distinguishes Break/Focus phase no
   assert.ok(resumeNotif.title.includes('Break Ended'));
   assert.equal(sFocus2?.notificationSent, false);
 
-  // Interval 2 Focus -> 100% Mission Complete notification
   const alarm3 = buildPomodoroStageAlarmName(
     session.id,
     2,
@@ -202,7 +240,6 @@ test('Notifications 2 & 7: Pomodoro Countdown distinguishes Break/Focus phase no
 });
 
 test('Notifications 3: Stopwatch >= 5m and Pomodoro Stopwatch >= 1 interval notify cleanly on finishStopwatch()', async () => {
-  // 3A. Standard Stopwatch >= 5 minutes
   const h1 = await createHarness();
   await h1.sessionCoordinator.startSession('STOPWATCH', 0, h1.profile.id);
   const now = Date.now();
@@ -210,13 +247,12 @@ test('Notifications 3: Stopwatch >= 5m and Pomodoro Stopwatch >= 1 interval noti
     s ? { ...s, startedAt: now - 12 * 60 * 1000, lastCheckpointAt: now - 60 * 1000 } : s
   );
   await h1.sessionCoordinator.finishStopwatch();
-  await h1.sessionCoordinator.finishStopwatch(); // duplicate check
+  await h1.sessionCoordinator.finishStopwatch();
 
   assert.equal(h1.notifications.dispatchCount, 1);
   const swNotif = Array.from(h1.notifications.notifications.values())[0];
   assert.ok(swNotif.message.includes('12'));
 
-  // 3B. Pomodoro Stopwatch >= 1 completed interval
   const h2 = await createHarness();
   const pSession = await h2.sessionCoordinator.startSession('POMODORO_STOPWATCH', 0, h2.profile.id, {
     focusDurationMinutes: 25,
@@ -248,7 +284,6 @@ test('Notifications 3: Stopwatch >= 5m and Pomodoro Stopwatch >= 1 interval noti
 });
 
 test('Notifications 4: Silent on Pause, Give Up, Stopwatch < 5m, Pomodoro Stopwatch 0 intervals, Reload, Browser Close', async () => {
-  // Pause + Give Up
   const h1 = await createHarness();
   await h1.sessionCoordinator.startSession('COUNTDOWN', 25, h1.profile.id);
   await h1.sessionCoordinator.pauseSession();
@@ -256,7 +291,6 @@ test('Notifications 4: Silent on Pause, Give Up, Stopwatch < 5m, Pomodoro Stopwa
   await h1.sessionCoordinator.giveUpCountdown();
   assert.equal(h1.notifications.dispatchCount, 0);
 
-  // Stopwatch < 5m
   const h2 = await createHarness();
   await h2.sessionCoordinator.startSession('STOPWATCH', 0, h2.profile.id);
   const now = Date.now();
@@ -266,19 +300,16 @@ test('Notifications 4: Silent on Pause, Give Up, Stopwatch < 5m, Pomodoro Stopwa
   await h2.sessionCoordinator.finishStopwatch();
   assert.equal(h2.notifications.dispatchCount, 0);
 
-  // Pomodoro Stopwatch 0 completed intervals
   const h3 = await createHarness();
   await h3.sessionCoordinator.startSession('POMODORO_STOPWATCH', 0, h3.profile.id);
   await h3.sessionCoordinator.finishStopwatch();
   assert.equal(h3.notifications.dispatchCount, 0);
 
-  // Extension Reloaded
   const h4 = await createHarness();
   const sReload = await h4.sessionCoordinator.startSession('COUNTDOWN', 25, h4.profile.id);
   await h4.sessionCoordinator.handleExtensionDisabledRecovery(sReload, 'EXTENSION_RELOADED');
   assert.equal(h4.notifications.dispatchCount, 0);
 
-  // Browser Closed startup recovery
   const h5 = await createHarness();
   await h5.sessionCoordinator.startSession('COUNTDOWN', 25, h5.profile.id);
   await h5.storage.updateCurrentSession((s) =>
@@ -295,12 +326,10 @@ test('Notifications 6: Service Worker wake near Countdown completion dispatches 
   const { storage, profile, notifications, sessionCoordinator } = await createHarness();
   await sessionCoordinator.startSession('COUNTDOWN', 25, profile.id);
 
-  // Simulate SW waking right after target time elapsed while browser remained open
   const pastStart = Date.now() - 25 * 60 * 1000 - 200;
   await storage.updateCurrentSession((s) => (s ? { ...s, startedAt: pastStart } : s));
 
   await sessionCoordinator.handleLifecycleEvent({ reason: 'SERVICE_WORKER_WAKE' });
-  // Follow-up alarm firing shortly after must be deduplicated
   await sessionCoordinator.completeCountdown();
 
   assert.equal(notifications.dispatchCount, 1);
@@ -308,9 +337,8 @@ test('Notifications 6: Service Worker wake near Countdown completion dispatches 
 });
 
 test('Notifications 8 & 9: Bidirectional Error Isolation between Music Player and Session Notifications', async () => {
-  // 8. Normal happy path: Music stops AND notification fires together
   const hOk = await createHarness();
-  await hOk.musicCoordinator.playTrack(MUSIC_CATALOG[0].id);
+  await hOk.musicCoordinator.playTrack(hOk.testCatalog[0].id);
   assert.equal((await hOk.musicCoordinator.getState()).status, 'PLAYING');
 
   await hOk.sessionCoordinator.startSession('COUNTDOWN', 20, hOk.profile.id);
@@ -320,16 +348,14 @@ test('Notifications 8 & 9: Bidirectional Error Isolation between Music Player an
   assert.equal((await hOk.musicCoordinator.getState()).status, 'STOPPED');
   assert.equal(hOk.offscreen.open, false);
 
-  // 9A. Music hook throws catastrophic error -> Notification MUST STILL succeed and session must commit
   const hMusicFail = await createHarness({ throwOnMusicHook: true });
   await hMusicFail.sessionCoordinator.startSession('COUNTDOWN', 15, hMusicFail.profile.id);
   const completed = await hMusicFail.sessionCoordinator.completeCountdown();
   assert.equal(completed?.status, 'COMPLETED');
   assert.equal(hMusicFail.notifications.dispatchCount, 1);
 
-  // 9B. Chrome notifications.create throws error -> Music MUST STILL stop cleanly and session must commit
   const hNotifFail = await createHarness({ throwOnNotification: true });
-  await hNotifFail.musicCoordinator.playTrack(MUSIC_CATALOG[0].id);
+  await hNotifFail.musicCoordinator.playTrack(hNotifFail.testCatalog[0].id);
   await hNotifFail.sessionCoordinator.startSession('COUNTDOWN', 15, hNotifFail.profile.id);
   const completed2 = await hNotifFail.sessionCoordinator.completeCountdown();
   assert.equal(completed2?.status, 'COMPLETED');

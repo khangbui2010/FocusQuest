@@ -1,201 +1,223 @@
-import { MusicLicenseType, MusicTrack } from '../types/music.ts';
+import {
+  CachedMusicCatalog,
+  MusicTrack,
+  RemoteMusicCatalog,
+  RemoteMusicTrackRaw,
+} from '../types/music.ts';
 
-const PURRPLE_CAT_CREDIT =
-  'Music by Purrple Cat (purrplecat.com), licensed under CC BY 4.0: creativecommons.org/licenses/by/4.0/';
+export const LOFI_BASE_URL = 'https://khangbui2010.github.io/FocusQuest-LOFI-archive/tracks/';
+export const LOFI_CATALOG_URL = 'https://khangbui2010.github.io/FocusQuest-LOFI-archive/tracks.json';
+export const LOFI_CATALOG_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
-const HOLIZNA_CC0_CREDIT =
-  'Music by HoliznaCC0 — CC0 1.0 Universal (Public Domain): freemusicarchive.org/music/holiznacc0/public-domain-lofi';
-
-const IKKUN_BARRADEEN_WHISPER_CREDIT =
-  'whisper by ikkun (ex. Barradeen) | https://soundcloud.com/ikkunwastaken — Royalty Free Music by https://www.free-stock-music.com — Creative Commons Attribution-ShareAlike 3.0 Unported (CC BY-SA 3.0): https://creativecommons.org/licenses/by-sa/3.0/deed.en_US';
+export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 /**
- * Internal music catalog bundled inside the Focus Quest Chrome Extension.
- * Supports arbitrary track counts; UI and MusicCoordinator read dynamically from this catalog.
- * Only bundled MP3 assets in `assets/music/` are permitted (no external audio URLs, no user uploads).
+ * Determine if a track's license requires attribution (e.g. CC-BY-4.0, CC-BY-SA-3.0, CC BY, CC BY-SA).
+ * Preserves exact license label semantics from tracks.json; CC0* does not require attribution.
  */
-export const MUSIC_CATALOG: readonly MusicTrack[] = Object.freeze([
-  {
-    id: 'purrple-cat-twilight-market',
-    title: 'Twilight Market',
-    artist: 'Purrple Cat',
-    album: 'City Nights 2',
-    file: 'assets/music/purrple-cat-city-nights-2-01-twilight-market_afce47e2.mp3',
-    duration: 175,
-    license: 'CC BY',
-    licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
-    creator: 'Purrple Cat',
-    sourceUrl: 'https://purrplecat.com',
-    attribution: PURRPLE_CAT_CREDIT,
-    isModified: false,
-  },
-  {
-    id: 'purrple-cat-rooftop-rendezvous',
-    title: 'Rooftop Rendezvous',
-    artist: 'Purrple Cat',
-    album: 'City Nights 2',
-    file: 'assets/music/purrple-cat-city-nights-2-02-rooftop-rendezvous_25a6b224.mp3',
-    duration: 184,
-    license: 'CC BY',
-    licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
-    creator: 'Purrple Cat',
-    sourceUrl: 'https://purrplecat.com',
-    attribution: PURRPLE_CAT_CREDIT,
-    isModified: false,
-  },
-  {
-    id: 'purrple-cat-lonely',
-    title: 'Lonely',
-    artist: 'Purrple Cat',
-    album: 'City Nights 2',
-    file: 'assets/music/purrple-cat-city-nights-2-07-lonely_26f60337.mp3',
-    duration: 176,
-    license: 'CC BY',
-    licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
-    creator: 'Purrple Cat',
-    sourceUrl: 'https://purrplecat.com',
-    attribution: PURRPLE_CAT_CREDIT,
-    isModified: false,
-  },
-  {
-    id: 'purrple-cat-walking-to-the-park-at-3am',
-    title: 'Walking to the Park at 3 A.M.',
-    artist: 'Purrple Cat',
-    album: 'Indigo Dreams',
-    file: 'assets/music/purrple-cat-indigo-dreams-07-walking-to-the-park-at-3-a-m_8fae33b8.mp3',
-    duration: 202,
-    license: 'CC BY',
-    licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
-    creator: 'Purrple Cat',
-    sourceUrl: 'https://purrplecat.com',
-    attribution: PURRPLE_CAT_CREDIT,
-    isModified: false,
-  },
-  {
-    id: 'purrple-cat-starlit-beach',
-    title: 'Starlit Beach',
-    artist: 'Purrple Cat',
-    album: 'Sea of Stars 2',
-    file: 'assets/music/purrple-cat-sea-of-stars-2-10-starlit-beach_715e8b5f.mp3',
-    duration: 174,
-    license: 'CC BY',
-    licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
-    creator: 'Purrple Cat',
-    sourceUrl: 'https://purrplecat.com',
-    attribution: PURRPLE_CAT_CREDIT,
-    isModified: false,
-  },
-  {
-    id: 'holizna-cc0-into-the-mist',
-    title: 'Into The Mist',
-    artist: 'HoliznaCC0',
-    album: 'Public Domain Lofi',
-    file: 'assets/music/holizna-cc0-into-the-mist.mp3',
-    duration: 130,
-    license: 'CC0',
-    licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/',
-    creator: 'HoliznaCC0',
-    sourceUrl: 'https://freemusicarchive.org/music/holiznacc0/public-domain-lofi',
-    attribution: HOLIZNA_CC0_CREDIT,
-    isModified: false,
-  },
-  {
-    id: 'holizna-cc0-before-everything',
-    title: 'Before Everything',
-    artist: 'HoliznaCC0',
-    album: 'Public Domain Lofi',
-    file: 'assets/music/holizna-cc0-before-everything.mp3',
-    duration: 171,
-    license: 'CC0',
-    licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/',
-    creator: 'HoliznaCC0',
-    sourceUrl: 'https://freemusicarchive.org/music/holiznacc0/public-domain-lofi',
-    attribution: HOLIZNA_CC0_CREDIT,
-    isModified: false,
-  },
-  {
-    id: 'holizna-cc0-theta-frequency',
-    title: 'Theta Frequency',
-    artist: 'HoliznaCC0',
-    album: 'Public Domain Lofi',
-    file: 'assets/music/holizna-cc0-theta-frequency.mp3',
-    duration: 127,
-    license: 'CC0',
-    licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/',
-    creator: 'HoliznaCC0',
-    sourceUrl: 'https://freemusicarchive.org/music/holiznacc0/public-domain-lofi',
-    attribution: HOLIZNA_CC0_CREDIT,
-    isModified: false,
-  },
-  {
-    id: 'holizna-cc0-birds',
-    title: 'Birds',
-    artist: 'HoliznaCC0',
-    album: 'Public Domain Lofi',
-    file: 'assets/music/holizna-cc0-birds.mp3',
-    duration: 170,
-    license: 'CC0',
-    licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/',
-    creator: 'HoliznaCC0',
-    sourceUrl: 'https://freemusicarchive.org/music/holiznacc0/public-domain-lofi',
-    attribution: HOLIZNA_CC0_CREDIT,
-    isModified: false,
-  },
-  {
-    id: 'holizna-cc0-when-time-called-me-darling',
-    title: 'When Time Called Me Darling',
-    artist: 'HoliznaCC0',
-    album: 'Public Domain Lofi',
-    file: 'assets/music/holizna-cc0-when-time-called-me-darling.mp3',
-    duration: 215,
-    license: 'CC0',
-    licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/',
-    creator: 'HoliznaCC0',
-    sourceUrl: 'https://freemusicarchive.org/music/holiznacc0/public-domain-lofi',
-    attribution: HOLIZNA_CC0_CREDIT,
-    isModified: false,
-  },
-  {
-    id: 'ikkun-barradeen-whisper',
-    title: 'whisper',
-    artist: 'ikkun (ex. Barradeen)',
-    album: 'Free Stock Music',
-    file: 'assets/music/ikkun-barradeen-whisper.mp3',
-    duration: 66,
-    license: 'CC BY-SA',
-    licenseUrl: 'https://creativecommons.org/licenses/by-sa/3.0/deed.en_US',
-    creator: 'ikkun (ex. Barradeen)',
-    sourceUrl: 'https://soundcloud.com/ikkunwastaken',
-    attribution: IKKUN_BARRADEEN_WHISPER_CREDIT,
-    isModified: false,
-  },
-]);
-
-const VALID_LICENSES: ReadonlySet<MusicLicenseType> = new Set(['CC0', 'CC BY', 'CC BY-SA']);
-
-export function isAttributionRequired(license: MusicLicenseType): boolean {
-  return license === 'CC BY' || license === 'CC BY-SA';
+export function isAttributionRequired(license: string): boolean {
+  if (!license || typeof license !== 'string') return false;
+  const trimmed = license.trim();
+  if (/^cc0\b/i.test(trimmed)) return false;
+  return /^cc[\s-]*by/i.test(trimmed);
 }
 
-export function isBundledMp3Path(filePath: string): boolean {
+/**
+ * Validates that a track file entry is either a clean relative audio filename (e.g. 'track.mp3')
+ * or an explicit HTTPS URL, rejecting local extension paths, traversal, and unsafe URI schemes.
+ */
+export function isValidStreamFileOrUrl(filePath: string): boolean {
   if (!filePath || typeof filePath !== 'string') return false;
   const trimmed = filePath.trim();
-  if (!trimmed.toLowerCase().endsWith('.mp3')) return false;
-  if (!trimmed.startsWith('assets/music/')) return false;
-  if (
-    trimmed.includes('..') ||
-    trimmed.includes('://') ||
-    trimmed.startsWith('/') ||
-    trimmed.startsWith('\\') ||
-    trimmed.includes('\\')
-  ) {
+  if (!trimmed) return false;
+  if (/^(data|blob|file|javascript):/i.test(trimmed)) return false;
+  if (/^http:\/\//i.test(trimmed)) return false;
+  if (trimmed.includes('..') || trimmed.includes('\\') || trimmed.startsWith('/')) {
     return false;
   }
-  return true;
+
+  if (/^https:\/\//i.test(trimmed)) {
+    try {
+      const parsed = new URL(trimmed);
+      return parsed.protocol === 'https:' && parsed.pathname.toLowerCase().endsWith('.mp3');
+    } catch {
+      return false;
+    }
+  }
+
+  if (trimmed.includes('://') || trimmed.startsWith('assets/music/')) {
+    return false;
+  }
+
+  return trimmed.toLowerCase().endsWith('.mp3');
+}
+
+/**
+ * Resolves a track `file` value (or track object) into an HTTPS streaming URL under LOFI_BASE_URL.
+ */
+export function resolveTrackStreamUrl(
+  fileOrTrack: string | Pick<MusicTrack, 'file' | 'streamUrl'>,
+  baseUrl: string = LOFI_BASE_URL
+): string {
+  const file =
+    typeof fileOrTrack === 'string'
+      ? fileOrTrack
+      : fileOrTrack.streamUrl || fileOrTrack.file;
+
+  const trimmed = (file || '').trim();
+  if (!trimmed) {
+    throw new Error('Track file path is empty.');
+  }
+
+  if (/^https:\/\//i.test(trimmed)) {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'https:') {
+      throw new Error('Only HTTPS streaming URLs are supported.');
+    }
+    return parsed.toString();
+  }
+
+  if (!isValidStreamFileOrUrl(trimmed)) {
+    throw new Error(`Invalid track stream file path: '${trimmed}'.`);
+  }
+
+  const normalizedBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+  const cleanRelative = trimmed.replace(/^\/+/, '');
+  return new URL(cleanRelative, normalizedBase).toString();
+}
+
+export function buildTrackAttribution(raw: {
+  title: string;
+  artist: string;
+  license: string;
+  licenseUrl?: string;
+  sourceUrl?: string;
+}): string {
+  const title = raw.title?.trim() || 'Untitled';
+  const artist = raw.artist?.trim() || 'Unknown Artist';
+  const license = raw.license?.trim() || 'Unknown License';
+  const sourcePart = raw.sourceUrl?.trim() ? ` (${raw.sourceUrl.trim()})` : '';
+  const licensePart = raw.licenseUrl?.trim()
+    ? `${license}: ${raw.licenseUrl.trim()}`
+    : license;
+  return `${title} by ${artist}${sourcePart} — ${licensePart}`;
+}
+
+export function normalizeRemoteTrack(
+  raw: RemoteMusicTrackRaw,
+  baseUrl: string = LOFI_BASE_URL
+): MusicTrack {
+  const durationSec =
+    typeof raw.durationSec === 'number' && Number.isFinite(raw.durationSec) && raw.durationSec >= 0
+      ? raw.durationSec
+      : undefined;
+  const modified = Boolean(raw.modified);
+  const artist = String(raw.artist ?? '').trim();
+  const license = String(raw.license ?? '').trim();
+  const licenseUrl = String(raw.licenseUrl ?? '').trim();
+  const sourceUrl = String(raw.sourceUrl ?? '').trim();
+  const file = String(raw.file ?? '').trim();
+
+  return {
+    id: String(raw.id ?? '').trim(),
+    title: String(raw.title ?? '').trim(),
+    artist,
+    album: String(raw.album ?? '').trim(),
+    file,
+    streamUrl: resolveTrackStreamUrl(file, baseUrl),
+    durationSec,
+    duration: durationSec,
+    license,
+    licenseUrl,
+    creator: artist,
+    sourceUrl,
+    attribution: buildTrackAttribution({
+      title: String(raw.title ?? ''),
+      artist,
+      license,
+      licenseUrl,
+      sourceUrl,
+    }),
+    isModified: modified,
+    modified,
+  };
+}
+
+export function parseRemoteCatalog(
+  rawData: unknown,
+  baseUrl: string = LOFI_BASE_URL
+): { schemaVersion: number; updatedAt: string; tracks: MusicTrack[] } {
+  if (!rawData || typeof rawData !== 'object') {
+    throw new Error('Invalid remote music catalog payload.');
+  }
+
+  const record = rawData as Partial<RemoteMusicCatalog>;
+  if (typeof record.schemaVersion !== 'number' || !Number.isFinite(record.schemaVersion)) {
+    throw new Error('Remote music catalog is missing schemaVersion.');
+  }
+  if (record.schemaVersion !== 1) {
+    throw new Error(`Unsupported remote music catalog schemaVersion: ${record.schemaVersion}.`);
+  }
+  if (!Array.isArray(record.tracks)) {
+    throw new Error('Remote music catalog is missing tracks array.');
+  }
+
+  const tracks = record.tracks.map((entry) => normalizeRemoteTrack(entry, baseUrl));
+  const validation = validateMusicCatalog(tracks);
+  if (!validation.valid) {
+    throw new Error(`Invalid remote music catalog entries: ${validation.errors.join('; ')}`);
+  }
+
+  return {
+    schemaVersion: record.schemaVersion,
+    updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : '',
+    tracks,
+  };
+}
+
+export function isCatalogCacheFresh(
+  cache: CachedMusicCatalog | null | undefined,
+  now: number = Date.now(),
+  ttlMs: number = LOFI_CATALOG_CACHE_TTL_MS
+): boolean {
+  if (!cache || !Array.isArray(cache.tracks) || cache.tracks.length === 0) {
+    return false;
+  }
+  if (typeof cache.fetchedAt !== 'number' || !Number.isFinite(cache.fetchedAt)) {
+    return false;
+  }
+  const age = now - cache.fetchedAt;
+  return age >= 0 && age < ttlMs;
+}
+
+export async function fetchRemoteMusicCatalog(
+  fetchFn: FetchLike = (input, init) => fetch(input, init),
+  catalogUrl: string = LOFI_CATALOG_URL,
+  baseUrl: string = LOFI_BASE_URL
+): Promise<CachedMusicCatalog> {
+  if (typeof fetchFn !== 'function') {
+    throw new Error('Fetch API is unavailable to load remote music catalog.');
+  }
+
+  const response = await fetchFn(catalogUrl, { cache: 'no-cache' });
+  if (!response || !response.ok) {
+    const statusText = response ? `HTTP ${response.status}` : 'No response';
+    throw new Error(`Failed to fetch remote music catalog (${statusText}).`);
+  }
+
+  const rawJson = (await response.json()) as unknown;
+  const parsed = parseRemoteCatalog(rawJson, baseUrl);
+  return {
+    schemaVersion: parsed.schemaVersion,
+    updatedAt: parsed.updatedAt,
+    fetchedAt: Date.now(),
+    sourceUrl: catalogUrl,
+    tracks: parsed.tracks,
+  };
 }
 
 export function validateMusicCatalog(
-  catalog: readonly MusicTrack[] = MUSIC_CATALOG
+  catalog: readonly MusicTrack[]
 ): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
   const seenIds = new Set<string>();
@@ -213,21 +235,22 @@ export function validateMusicCatalog(
       errors.push(`Track '${track.id}' is missing title.`);
     }
 
-    if (!isBundledMp3Path(track.file)) {
+    if (!isValidStreamFileOrUrl(track.file)) {
       errors.push(
-        `Track '${track.id}' has invalid bundled MP3 path '${track.file}'. Must start with 'assets/music/' and end with '.mp3'.`
+        `Track '${track.id}' has invalid stream file '${track.file}'. Expected remote filename or HTTPS URL ending with '.mp3'.`
       );
     }
 
+    const dur = track.durationSec ?? track.duration;
     if (
-      track.duration !== undefined &&
-      (typeof track.duration !== 'number' || !Number.isFinite(track.duration) || track.duration < 0)
+      dur !== undefined &&
+      (typeof dur !== 'number' || !Number.isFinite(dur) || dur < 0)
     ) {
-      errors.push(`Track '${track.id}' has invalid duration '${String(track.duration)}'.`);
+      errors.push(`Track '${track.id}' has invalid durationSec '${String(dur)}'.`);
     }
 
-    if (!VALID_LICENSES.has(track.license)) {
-      errors.push(`Track '${track.id}' has unsupported license '${String(track.license)}'.`);
+    if (!track.license || !track.license.trim()) {
+      errors.push(`Track '${track.id}' is missing license label.`);
     }
 
     if (isAttributionRequired(track.license)) {
@@ -251,22 +274,10 @@ export function validateMusicCatalog(
 
 export function getTrackById(
   trackId: string | null | undefined,
-  catalog: readonly MusicTrack[] = MUSIC_CATALOG
+  catalog: readonly MusicTrack[] = []
 ): MusicTrack | null {
   if (!trackId) return null;
   return catalog.find((track) => track.id === trackId) ?? null;
-}
-
-export function resolveTrackAssetUrl(file: string): string {
-  const normalized = file.replace(/^\/+/, '');
-  if (
-    typeof chrome !== 'undefined' &&
-    typeof chrome.runtime !== 'undefined' &&
-    typeof chrome.runtime.getURL === 'function'
-  ) {
-    return chrome.runtime.getURL(normalized);
-  }
-  return `./${normalized}`;
 }
 
 export function formatMusicDuration(totalSeconds: number | null | undefined): string {

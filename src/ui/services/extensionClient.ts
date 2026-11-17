@@ -16,13 +16,24 @@ import {
   MusicSetShufflePayload,
   MusicSetRepeatPayload,
   MusicSetSyncWithSessionPayload,
+  MusicSetPlayDuringBreakPayload,
 } from '../../types/messages.ts';
 import {
-  MUSIC_CATALOG,
+  LOFI_BASE_URL,
+  LOFI_CATALOG_CACHE_TTL_MS,
+  LOFI_CATALOG_URL,
+  fetchRemoteMusicCatalog,
   getTrackById,
-  resolveTrackAssetUrl,
+  isCatalogCacheFresh,
+  resolveTrackStreamUrl,
 } from '../../data/musicCatalog.ts';
-import { MusicPlayerState, MusicTrack, RepeatMode } from '../../types/music.ts';
+import {
+  CachedMusicCatalog,
+  MusicPlayerState,
+  MusicTrack,
+  RepeatMode,
+} from '../../types/music.ts';
+import { deriveMusicIntent } from '../../background/musicCoordinator.ts';
 import { FocusProfile } from '../../types/profiles.ts';
 import { SessionSnapshot } from '../../types/session.ts';
 import { PlayerEconomy } from '../../types/economy.ts';
@@ -112,26 +123,106 @@ let mockProfiles: FocusProfile[] = [
 let mockCivilizationState: CivilizationState = createInitialCivilizationState();
 let mockGridMap: GridMap = GridMap.fromSnapshot(mockCivilizationState.grid);
 
-// Fallback in-memory mock Music Player state + lightweight browser preview audio
+// Fallback in-memory mock Music Player state + dynamic online catalog cache + browser preview audio
+const PREVIEW_CATALOG_CACHE_KEY = 'fq_preview_music_catalog_cache';
+let mockMusicCatalog: readonly MusicTrack[] = [];
+let mockCatalogCache: CachedMusicCatalog | null = null;
 let mockMusicState: MusicPlayerState = {
   status: 'IDLE',
-  currentTrackId: MUSIC_CATALOG[0]?.id ?? null,
+  currentTrackId: null,
   positionSec: 0,
-  durationSec: MUSIC_CATALOG[0]?.duration ?? null,
+  durationSec: null,
   volume: 0.7,
   muted: false,
   shuffle: false,
   repeatMode: 'off',
-  shuffledOrder: MUSIC_CATALOG.map((t) => t.id),
+  shuffledOrder: [],
   syncWithSession: true,
+  musicEnabled: false,
+  playDuringBreak: false,
+  pausedBySession: false,
+  catalogUpdatedAt: null,
   lastUpdatedAt: Date.now(),
   lastError: null,
+  lastErrorCode: null,
 };
 
 let previewAudio: HTMLAudioElement | null = null;
 
+function readPreviewCatalogStorage(): CachedMusicCatalog | null {
+  if (mockCatalogCache) return mockCatalogCache;
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(PREVIEW_CATALOG_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CachedMusicCatalog;
+    mockCatalogCache = parsed;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writePreviewCatalogStorage(cache: CachedMusicCatalog): void {
+  mockCatalogCache = cache;
+  if (typeof localStorage !== 'undefined') {
+    try {
+      localStorage.setItem(PREVIEW_CATALOG_CACHE_KEY, JSON.stringify(cache));
+    } catch {
+      // Ignore storage quota errors in preview
+    }
+  }
+}
+
+function applyMockCatalog(catalog: readonly MusicTrack[], updatedAt?: string): void {
+  mockMusicCatalog = catalog;
+  const ids = catalog.map((t) => t.id);
+  const current =
+    mockMusicState.currentTrackId && ids.includes(mockMusicState.currentTrackId)
+      ? getTrackById(mockMusicState.currentTrackId, catalog)
+      : catalog[0] ?? null;
+
+  mockMusicState = {
+    ...mockMusicState,
+    currentTrackId: current ? current.id : null,
+    durationSec:
+      mockMusicState.durationSec ?? current?.durationSec ?? current?.duration ?? null,
+    shuffledOrder: mockMusicState.shuffle
+      ? mockMusicState.shuffledOrder.filter((id) => ids.includes(id))
+      : ids,
+    catalogUpdatedAt: updatedAt ?? mockMusicState.catalogUpdatedAt ?? null,
+  };
+}
+
+async function ensureMockCatalogLoaded(forceRefresh = false): Promise<void> {
+  const cached = readPreviewCatalogStorage();
+  if (!forceRefresh && cached && isCatalogCacheFresh(cached, Date.now(), LOFI_CATALOG_CACHE_TTL_MS)) {
+    applyMockCatalog(cached.tracks, cached.updatedAt);
+    return;
+  }
+  if (typeof fetch !== 'function') {
+    if (cached?.tracks?.length) {
+      applyMockCatalog(cached.tracks, cached.updatedAt);
+    }
+    return;
+  }
+  try {
+    const fresh = await fetchRemoteMusicCatalog(
+      (input, init) => fetch(input, init),
+      LOFI_CATALOG_URL,
+      LOFI_BASE_URL
+    );
+    writePreviewCatalogStorage(fresh);
+    applyMockCatalog(fresh.tracks, fresh.updatedAt);
+  } catch {
+    if (cached?.tracks?.length) {
+      applyMockCatalog(cached.tracks, cached.updatedAt);
+    }
+  }
+}
+
 function buildPreviewShuffledOrder(anchorTrackId: string | null, seed: number): string[] {
-  const ids = MUSIC_CATALOG.map((t) => t.id);
+  const ids = mockMusicCatalog.map((t) => t.id);
   if (ids.length <= 1) return ids;
   const remaining = anchorTrackId ? ids.filter((id) => id !== anchorTrackId) : [...ids];
   let state = Math.abs(Math.floor(seed)) || 1337;
@@ -148,10 +239,10 @@ function buildPreviewShuffledOrder(anchorTrackId: string | null, seed: number): 
 }
 
 function getPreviewQueueIds(): string[] {
-  if (!mockMusicState.shuffle) return MUSIC_CATALOG.map((t) => t.id);
-  const catalogIds = new Set(MUSIC_CATALOG.map((t) => t.id));
+  if (!mockMusicState.shuffle) return mockMusicCatalog.map((t) => t.id);
+  const catalogIds = new Set(mockMusicCatalog.map((t) => t.id));
   const valid = mockMusicState.shuffledOrder.filter((id) => catalogIds.has(id));
-  const missing = MUSIC_CATALOG.map((t) => t.id).filter((id) => !valid.includes(id));
+  const missing = mockMusicCatalog.map((t) => t.id).filter((id) => !valid.includes(id));
   return [...valid, ...missing];
 }
 
@@ -168,22 +259,72 @@ function stopPreviewAudioAndState(): void {
     ...mockMusicState,
     status: 'STOPPED',
     positionSec: 0,
+    musicEnabled: false,
+    pausedBySession: false,
     lastUpdatedAt: Date.now(),
     lastError: null,
+    lastErrorCode: null,
   };
 }
 
-function stopSimulatedMusicIfSynced(): void {
-  if (
-    mockMusicState.syncWithSession &&
-    (mockMusicState.status === 'PLAYING' || mockMusicState.status === 'PAUSED')
-  ) {
-    stopPreviewAudioAndState();
+function pausePreviewAudio(bySession: boolean): void {
+  const currentPos =
+    previewAudio && Number.isFinite(previewAudio.currentTime)
+      ? previewAudio.currentTime
+      : mockMusicState.positionSec;
+  if (previewAudio) {
+    try {
+      previewAudio.pause();
+    } catch {
+      // ignore
+    }
+  }
+  mockMusicState = {
+    ...mockMusicState,
+    status: 'PAUSED',
+    positionSec: currentPos,
+    musicEnabled: bySession ? Boolean(mockMusicState.musicEnabled) : false,
+    pausedBySession: bySession && Boolean(mockMusicState.musicEnabled),
+    lastUpdatedAt: Date.now(),
+  };
+}
+
+function syncSimulatedMusicWithSession(): void {
+  const intent = deriveMusicIntent(mockState.currentSession, {
+    musicEnabled: Boolean(mockMusicState.musicEnabled ?? mockMusicState.status === 'PLAYING'),
+    playDuringBreak: Boolean(mockMusicState.playDuringBreak),
+    stopMusicOnSessionEnd: Boolean(mockMusicState.syncWithSession),
+  });
+
+  if (intent === 'stop') {
+    if (
+      mockMusicState.status === 'PLAYING' ||
+      mockMusicState.status === 'PAUSED' ||
+      mockMusicState.musicEnabled
+    ) {
+      stopPreviewAudioAndState();
+    }
+    return;
+  }
+
+  if (intent === 'pause') {
+    if (mockMusicState.status === 'PLAYING') {
+      pausePreviewAudio(true);
+    }
+    return;
+  }
+
+  if (mockMusicState.musicEnabled && mockMusicState.status !== 'PLAYING') {
+    const track =
+      getTrackById(mockMusicState.currentTrackId, mockMusicCatalog) ?? mockMusicCatalog[0];
+    if (track) {
+      startPreviewAudioTrack(track, mockMusicState.positionSec);
+    }
   }
 }
 
 function startPreviewAudioTrack(track: MusicTrack, positionSec: number): void {
-  const duration = track.duration ?? null;
+  const duration = track.durationSec ?? track.duration ?? null;
   const clampedPos =
     duration !== null ? Math.max(0, Math.min(duration, positionSec)) : Math.max(0, positionSec);
 
@@ -198,7 +339,7 @@ function startPreviewAudioTrack(track: MusicTrack, positionSec: number): void {
             return;
           }
           if (mockMusicState.repeatMode === 'one') {
-            const cur = getTrackById(mockMusicState.currentTrackId);
+            const cur = getTrackById(mockMusicState.currentTrackId, mockMusicCatalog);
             if (cur) startPreviewAudioTrack(cur, 0);
             return;
           }
@@ -209,13 +350,13 @@ function startPreviewAudioTrack(track: MusicTrack, positionSec: number): void {
             stopPreviewAudioAndState();
             return;
           }
-          const nextTrack = getTrackById(queue[(idx + 1) % queue.length]);
+          const nextTrack = getTrackById(queue[(idx + 1) % queue.length], mockMusicCatalog);
           if (nextTrack) {
             startPreviewAudioTrack(nextTrack, 0);
           }
         });
       }
-      const nextUrl = resolveTrackAssetUrl(track.file);
+      const nextUrl = resolveTrackStreamUrl(track, LOFI_BASE_URL);
       if (previewAudio.dataset.trackId !== track.id) {
         previewAudio.src = nextUrl;
         previewAudio.dataset.trackId = track.id;
@@ -235,8 +376,11 @@ function startPreviewAudioTrack(track: MusicTrack, positionSec: number): void {
     currentTrackId: track.id,
     positionSec: clampedPos,
     durationSec: duration,
+    musicEnabled: true,
+    pausedBySession: false,
     lastUpdatedAt: Date.now(),
     lastError: null,
+    lastErrorCode: null,
   };
 }
 
@@ -257,7 +401,7 @@ function makeMusicResponse<T>(): MessageResponse<T> {
   }
   const data: MusicStateResponseData = {
     state: { ...mockMusicState },
-    catalog: MUSIC_CATALOG,
+    catalog: mockMusicCatalog,
   };
   return { success: true, data: data as unknown as T };
 }
@@ -289,6 +433,10 @@ export async function sendExtensionMessage<T = unknown>(
         });
       }
     });
+  }
+
+  if (message.action.startsWith('MUSIC_')) {
+    await ensureMockCatalogLoaded(message.action === 'MUSIC_REFRESH_CATALOG');
   }
 
   // Fallback simulator for non-extension preview
@@ -421,6 +569,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
       };
       mockState.currentSession = newSession;
       mockState.isBlockingActive = true;
+      syncSimulatedMusicWithSession();
       return { success: true, data: newSession as unknown as T };
     }
 
@@ -499,7 +648,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
             mockState.economy.level = calculatePlayerLevel(mockState.economy.totalXP);
             mockState.lifetimeFocusMinutes =
               (mockState.lifetimeFocusMinutes ?? 0) + plannedFocusMinutes;
-            stopSimulatedMusicIfSynced();
+            syncSimulatedMusicWithSession();
             return { success: true, data: completedSession as unknown as T };
           }
 
@@ -568,6 +717,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         };
         mockState.isBlockingActive = true;
       }
+      syncSimulatedMusicWithSession();
       return { success: true, data: s as unknown as T };
     }
 
@@ -594,6 +744,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         accumulatedFocusMs: newAccumulated,
       };
       mockState.isBlockingActive = false;
+      syncSimulatedMusicWithSession();
       return { success: true, data: mockState.currentSession as unknown as T };
     }
 
@@ -611,6 +762,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         lastHeartbeatAt: now,
         lastCheckpointAt: now,
       };
+      syncSimulatedMusicWithSession();
       return { success: true, data: mockState.currentSession as unknown as T };
     }
 
@@ -651,7 +803,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         rewardProcessed: true,
       };
       mockState.isBlockingActive = false;
-      stopSimulatedMusicIfSynced();
+      syncSimulatedMusicWithSession();
       return { success: true, data: mockState.currentSession as unknown as T };
     }
 
@@ -805,7 +957,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         }
       }
 
-      stopSimulatedMusicIfSynced();
+      syncSimulatedMusicWithSession();
 
       return {
         success: true,
@@ -1259,23 +1411,29 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
       return makeMusicResponse<T>();
     }
 
+    case 'MUSIC_REFRESH_CATALOG': {
+      return makeMusicResponse<T>();
+    }
+
     case 'MUSIC_PLAY': {
-      if (MUSIC_CATALOG.length === 0) {
+      if (mockMusicCatalog.length === 0) {
         mockMusicState = {
           ...mockMusicState,
-          status: 'IDLE',
+          status: 'ERROR',
           currentTrackId: null,
           positionSec: 0,
           durationSec: null,
+          musicEnabled: false,
           lastUpdatedAt: now,
-          lastError: 'No bundled MP3 tracks declared in catalog.',
+          lastError: 'Unable to load online Lofi catalog. Check your internet connection and retry.',
+          lastErrorCode: 'network',
         };
         return makeMusicResponse<T>();
       }
       const payload = (message as { payload?: MusicPlayPayload }).payload;
       const targetTrack = payload?.trackId
-        ? getTrackById(payload.trackId)
-        : getTrackById(mockMusicState.currentTrackId) ?? MUSIC_CATALOG[0];
+        ? getTrackById(payload.trackId, mockMusicCatalog)
+        : getTrackById(mockMusicState.currentTrackId, mockMusicCatalog) ?? mockMusicCatalog[0];
       if (!targetTrack) {
         return { success: false, error: `Track '${payload?.trackId}' not found.` };
       }
@@ -1289,31 +1447,15 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
     }
 
     case 'MUSIC_PAUSE': {
-      if (mockMusicState.status === 'PLAYING') {
-        const currentPos =
-          previewAudio && Number.isFinite(previewAudio.currentTime)
-            ? previewAudio.currentTime
-            : mockMusicState.positionSec;
-        if (previewAudio) {
-          try {
-            previewAudio.pause();
-          } catch {
-            // ignore
-          }
-        }
-        mockMusicState = {
-          ...mockMusicState,
-          status: 'PAUSED',
-          positionSec: currentPos,
-          lastUpdatedAt: now,
-        };
+      if (mockMusicState.status === 'PLAYING' || mockMusicState.musicEnabled) {
+        pausePreviewAudio(false);
       }
       return makeMusicResponse<T>();
     }
 
     case 'MUSIC_RESUME': {
       const targetTrack =
-        getTrackById(mockMusicState.currentTrackId) ?? MUSIC_CATALOG[0] ?? null;
+        getTrackById(mockMusicState.currentTrackId, mockMusicCatalog) ?? mockMusicCatalog[0] ?? null;
       if (targetTrack) {
         startPreviewAudioTrack(targetTrack, mockMusicState.positionSec);
       }
@@ -1331,7 +1473,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         const idx = mockMusicState.currentTrackId
           ? queue.indexOf(mockMusicState.currentTrackId)
           : -1;
-        const nextTrack = getTrackById(queue[(idx + 1) % queue.length]);
+        const nextTrack = getTrackById(queue[(idx + 1) % queue.length], mockMusicCatalog);
         if (nextTrack) startPreviewAudioTrack(nextTrack, 0);
       }
       return makeMusicResponse<T>();
@@ -1344,7 +1486,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
           ? queue.indexOf(mockMusicState.currentTrackId)
           : 0;
         const prevIdx = idx > 0 ? idx - 1 : queue.length - 1;
-        const prevTrack = getTrackById(queue[prevIdx]);
+        const prevTrack = getTrackById(queue[prevIdx], mockMusicCatalog);
         if (prevTrack) startPreviewAudioTrack(prevTrack, 0);
       }
       return makeMusicResponse<T>();
@@ -1396,7 +1538,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         shuffle: Boolean(enabled),
         shuffledOrder: enabled
           ? buildPreviewShuffledOrder(mockMusicState.currentTrackId, now)
-          : MUSIC_CATALOG.map((t) => t.id),
+          : mockMusicCatalog.map((t) => t.id),
         lastUpdatedAt: now,
       };
       return makeMusicResponse<T>();
@@ -1421,6 +1563,18 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         syncWithSession: Boolean(enabled),
         lastUpdatedAt: now,
       };
+      syncSimulatedMusicWithSession();
+      return makeMusicResponse<T>();
+    }
+
+    case 'MUSIC_SET_PLAY_DURING_BREAK': {
+      const { enabled } = (message as { payload: MusicSetPlayDuringBreakPayload }).payload;
+      mockMusicState = {
+        ...mockMusicState,
+        playDuringBreak: Boolean(enabled),
+        lastUpdatedAt: now,
+      };
+      syncSimulatedMusicWithSession();
       return makeMusicResponse<T>();
     }
 

@@ -42,6 +42,9 @@ const sessionCoordinator = new SessionCoordinator(
   () => civilizationCoordinator.getActiveCoinBonuses(),
   async (event) => {
     await musicCoordinator.handleFocusSessionEnded(event);
+  },
+  async (session, reason) => {
+    await musicCoordinator.sync(session, reason);
   }
 );
 
@@ -73,7 +76,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     if (!hasOnExtensionLoaded && details?.reason === 'update') {
       await sessionCoordinator.handleLifecycleEvent({ reason: 'EXTENSION_UPDATED' });
     }
-    await musicCoordinator.ensureInitialized().catch(() => undefined);
+    await musicCoordinator.sync(undefined, 'ON_INSTALLED').catch(() => undefined);
   } catch (err) {
     console.error('Focus Quest: Migration failure on install:', err);
   }
@@ -82,8 +85,13 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 chrome.runtime.onStartup.addListener(async () => {
   try {
     await civilizationCoordinator.ensureInitialized();
-    await sessionCoordinator.handleLifecycleEvent({ reason: 'BROWSER_STARTUP', isBrowserStartup: true });
-    await musicCoordinator.ensureInitialized().catch(() => undefined);
+    const session = await sessionCoordinator.handleLifecycleEvent({
+      reason: 'BROWSER_STARTUP',
+      isBrowserStartup: true,
+    });
+    await musicCoordinator
+      .sync(session, session ? 'BROWSER_STARTUP' : 'STARTUP_NO_SESSION')
+      .catch(() => undefined);
     console.log('Focus Quest: Session & civilization state rehydrated successfully on startup.');
   } catch (err) {
     console.error('Focus Quest: Error recovering session on startup:', err);
@@ -100,7 +108,10 @@ if (typeof runtimeWithLifecycle.onEnabled?.addListener === 'function') {
   runtimeWithLifecycle.onEnabled.addListener(async () => {
     try {
       await civilizationCoordinator.ensureInitialized();
-      await sessionCoordinator.handleLifecycleEvent({ reason: 'EXTENSION_RE_ENABLED' });
+      const session = await sessionCoordinator.handleLifecycleEvent({
+        reason: 'EXTENSION_RE_ENABLED',
+      });
+      await musicCoordinator.sync(session, 'EXTENSION_RE_ENABLED').catch(() => undefined);
     } catch (err) {
       console.error('Focus Quest: Error handling onEnabled event:', err);
     }
@@ -133,11 +144,15 @@ if (typeof runtimeWithLifecycle.onExtensionLoaded?.addListener === 'function') {
         default:
           reason = 'UNKNOWN';
       }
+      const isStartup = reason === 'BROWSER_STARTUP' || reason === 'BROWSER_UPDATED';
       await civilizationCoordinator.ensureInitialized();
-      await sessionCoordinator.handleLifecycleEvent({
+      const session = await sessionCoordinator.handleLifecycleEvent({
         reason,
-        isBrowserStartup: reason === 'BROWSER_STARTUP' || reason === 'BROWSER_UPDATED',
+        isBrowserStartup: isStartup,
       });
+      await musicCoordinator
+        .sync(session, isStartup && !session ? 'STARTUP_NO_SESSION' : reason)
+        .catch(() => undefined);
     } catch (err) {
       console.error('Focus Quest: Error handling onExtensionLoaded event:', err);
     }
@@ -170,7 +185,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (
     message &&
     typeof message === 'object' &&
-    (message as { scope?: string }).scope === 'FQ_OFFSCREEN_MUSIC'
+    (message as { target?: string }).target === 'offscreen'
   ) {
     return false;
   }
@@ -178,7 +193,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (
     message &&
     typeof message === 'object' &&
-    (message as { scope?: string }).scope === 'FQ_MUSIC_EVENT'
+    (message as { target?: string }).target === 'background'
   ) {
     musicCoordinator
       .handleOffscreenEvent(message as OffscreenMusicEvent)

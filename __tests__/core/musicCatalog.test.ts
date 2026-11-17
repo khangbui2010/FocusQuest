@@ -3,158 +3,359 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  MUSIC_CATALOG,
+  LOFI_BASE_URL,
+  LOFI_CATALOG_CACHE_TTL_MS,
+  LOFI_CATALOG_URL,
+  buildTrackAttribution,
+  fetchRemoteMusicCatalog,
   formatMusicDuration,
   getTrackById,
   isAttributionRequired,
-  isBundledMp3Path,
-  resolveTrackAssetUrl,
+  isCatalogCacheFresh,
+  isValidStreamFileOrUrl,
+  parseRemoteCatalog,
+  resolveTrackStreamUrl,
   validateMusicCatalog,
 } from '../../src/data/musicCatalog.ts';
-import { MusicTrack } from '../../src/types/music.ts';
+import { CachedMusicCatalog, MusicTrack, RemoteMusicCatalog } from '../../src/types/music.ts';
 
-test('MusicCatalog: default bundled catalog passes full schema & license validation', () => {
-  assert.ok(
-    MUSIC_CATALOG.length >= 11,
-    'Must contain 5 Purrple Cat tracks, 5 HoliznaCC0 tracks, and whisper by ikkun (ex. Barradeen)'
+function buildFixtureRemoteCatalog(): RemoteMusicCatalog {
+  return {
+    schemaVersion: 1,
+    updatedAt: '2026-11-17',
+    tracks: [
+      {
+        id: 'purrple-cat-twilight-market',
+        title: 'Twilight Market',
+        artist: 'Purrple Cat',
+        album: 'City Nights 2',
+        durationSec: 175,
+        file: 'purrple-cat-city-nights-2-01-twilight-market_afce47e2.mp3',
+        license: 'CC-BY-4.0',
+        licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
+        sourceUrl: 'https://purrplecat.com/',
+        modified: false,
+      },
+      {
+        id: 'purrple-cat-rooftop-rendezvous',
+        title: 'Rooftop Rendezvous',
+        artist: 'Purrple Cat',
+        album: 'City Nights 2',
+        durationSec: 184,
+        file: 'purrple-cat-city-nights-2-02-rooftop-rendezvous_25a6b224.mp3',
+        license: 'CC-BY-4.0',
+        licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
+        sourceUrl: 'https://purrplecat.com/',
+        modified: false,
+      },
+      {
+        id: 'purrple-cat-lonely',
+        title: 'Lonely',
+        artist: 'Purrple Cat',
+        album: 'City Nights 2',
+        durationSec: 176,
+        file: 'purrple-cat-city-nights-2-07-lonely_26f60337.mp3',
+        license: 'CC-BY-4.0',
+        licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
+        sourceUrl: 'https://purrplecat.com/',
+        modified: false,
+      },
+      {
+        id: 'purrple-cat-walking-to-the-park-at-3am',
+        title: 'Walking to the Park at 3 A.M.',
+        artist: 'Purrple Cat',
+        album: 'Indigo Dreams',
+        durationSec: 202,
+        file: 'purrple-cat-indigo-dreams-07-walking-to-the-park-at-3-a-m_8fae33b8.mp3',
+        license: 'CC-BY-4.0',
+        licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
+        sourceUrl: 'https://purrplecat.com/',
+        modified: false,
+      },
+      {
+        id: 'purrple-cat-starlit-beach',
+        title: 'Starlit Beach',
+        artist: 'Purrple Cat',
+        album: 'Sea of Stars 2',
+        durationSec: 174,
+        file: 'purrple-cat-sea-of-stars-2-10-starlit-beach_715e8b5f.mp3',
+        license: 'CC-BY-4.0',
+        licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
+        sourceUrl: 'https://purrplecat.com/',
+        modified: false,
+      },
+      {
+        id: 'holizna-cc0-into-the-mist',
+        title: 'Into The Mist',
+        artist: 'HoliznaCC0',
+        album: 'Public Domain Lofi',
+        durationSec: 130,
+        file: 'holizna-cc0-into-the-mist.mp3',
+        license: 'CC0-1.0',
+        licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/',
+        sourceUrl: 'https://freemusicarchive.org/music/holiznacc0/public-domain-lofi',
+        modified: false,
+      },
+      {
+        id: 'holizna-cc0-before-everything',
+        title: 'Before Everything',
+        artist: 'HoliznaCC0',
+        album: 'Public Domain Lofi',
+        durationSec: 171,
+        file: 'holizna-cc0-before-everything.mp3',
+        license: 'CC0-1.0',
+        licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/',
+        sourceUrl: 'https://freemusicarchive.org/music/holiznacc0/public-domain-lofi',
+        modified: false,
+      },
+      {
+        id: 'holizna-cc0-theta-frequency',
+        title: 'Theta Frequency',
+        artist: 'HoliznaCC0',
+        album: 'Public Domain Lofi',
+        durationSec: 127,
+        file: 'holizna-cc0-theta-frequency.mp3',
+        license: 'CC0-1.0',
+        licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/',
+        sourceUrl: 'https://freemusicarchive.org/music/holiznacc0/public-domain-lofi',
+        modified: false,
+      },
+      {
+        id: 'holizna-cc0-birds',
+        title: 'Birds',
+        artist: 'HoliznaCC0',
+        album: 'Public Domain Lofi',
+        durationSec: 170,
+        file: 'holizna-cc0-birds.mp3',
+        license: 'CC0-1.0',
+        licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/',
+        sourceUrl: 'https://freemusicarchive.org/music/holiznacc0/public-domain-lofi',
+        modified: false,
+      },
+      {
+        id: 'holizna-cc0-when-time-called-me-darling',
+        title: 'When Time Called Me Darling',
+        artist: 'HoliznaCC0',
+        album: 'Public Domain Lofi',
+        durationSec: 215,
+        file: 'holizna-cc0-when-time-called-me-darling.mp3',
+        license: 'CC0-1.0',
+        licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/',
+        sourceUrl: 'https://freemusicarchive.org/music/holiznacc0/public-domain-lofi',
+        modified: false,
+      },
+      {
+        id: 'ikkun-barradeen-whisper',
+        title: 'whisper',
+        artist: 'ikkun (ex. Barradeen)',
+        album: 'Free Stock Music',
+        durationSec: 66,
+        file: 'ikkun-barradeen-whisper.mp3',
+        license: 'CC-BY-SA-3.0',
+        licenseUrl: 'https://creativecommons.org/licenses/by-sa/3.0/deed.en_US',
+        sourceUrl: 'https://soundcloud.com/ikkunwastaken',
+        modified: false,
+      },
+    ],
+  };
+}
+
+test('MusicCatalog: online endpoints and remote catalog schema parsing work cleanly for SPDX tracks', () => {
+  assert.equal(LOFI_BASE_URL, 'https://khangbui2010.github.io/FocusQuest-LOFI-archive/tracks/');
+  assert.equal(LOFI_CATALOG_URL, 'https://khangbui2010.github.io/FocusQuest-LOFI-archive/tracks.json');
+
+  const raw = buildFixtureRemoteCatalog();
+  const parsed = parseRemoteCatalog(raw);
+
+  assert.equal(parsed.schemaVersion, 1);
+  assert.equal(parsed.updatedAt, '2026-11-17');
+  assert.equal(parsed.tracks.length, 11);
+
+  const first = parsed.tracks[0];
+  assert.equal(first.id, 'purrple-cat-twilight-market');
+  assert.equal(
+    first.streamUrl,
+    `${LOFI_BASE_URL}purrple-cat-city-nights-2-01-twilight-market_afce47e2.mp3`
+  );
+  assert.equal(first.license, 'CC-BY-4.0');
+  assert.equal(first.durationSec, 175);
+  assert.equal(first.isModified, false);
+  assert.ok(first.attribution.includes('Purrple Cat'));
+  assert.ok(first.attribution.includes('CC-BY-4.0'));
+
+  const whisper = parsed.tracks[10];
+  assert.equal(whisper.id, 'ikkun-barradeen-whisper');
+  assert.equal(whisper.license, 'CC-BY-SA-3.0');
+  assert.equal(whisper.durationSec, 66);
+});
+
+test('MusicCatalog: validates online stream files/URLs and rejects local asset paths or unsafe schemes', () => {
+  assert.equal(isValidStreamFileOrUrl('holizna-cc0-into-the-mist.mp3'), true);
+  assert.equal(
+    isValidStreamFileOrUrl('https://khangbui2010.github.io/FocusQuest-LOFI-archive/tracks/sample.mp3'),
+    true
   );
 
-  const result = validateMusicCatalog(MUSIC_CATALOG);
-  assert.equal(result.valid, true, `Catalog validation errors: ${result.errors.join('; ')}`);
+  // Reject local bundled paths, insecure HTTP, traversal, and non-mp3 extensions
+  assert.equal(isValidStreamFileOrUrl('assets/music/sample.mp3'), false);
+  assert.equal(isValidStreamFileOrUrl('http://example.com/sample.mp3'), false);
+  assert.equal(isValidStreamFileOrUrl('data:audio/mp3;base64,AAA'), false);
+  assert.equal(isValidStreamFileOrUrl('blob:https://example.com/123'), false);
+  assert.equal(isValidStreamFileOrUrl('../secret.mp3'), false);
+  assert.equal(isValidStreamFileOrUrl('/Users/dev/music.mp3'), false);
+  assert.equal(isValidStreamFileOrUrl('track.wav'), false);
 
-  const purrpleTracks = MUSIC_CATALOG.filter((t) => t.artist === 'Purrple Cat');
-  const holiznaTracks = MUSIC_CATALOG.filter((t) => t.artist === 'HoliznaCC0');
-  const ikkunTracks = MUSIC_CATALOG.filter((t) => t.artist === 'ikkun (ex. Barradeen)');
-  assert.equal(purrpleTracks.length, 5);
-  assert.equal(holiznaTracks.length, 5);
-  assert.equal(ikkunTracks.length, 1);
-
-  for (const track of MUSIC_CATALOG) {
-    assert.ok(track.id.length > 0);
-    assert.ok(track.title.length > 0);
-    assert.ok(track.artist.length > 0);
-    assert.ok(track.album.length > 0);
-    assert.ok(isBundledMp3Path(track.file), `Invalid bundled MP3 path: ${track.file}`);
-    assert.equal(track.isModified, false);
-  }
-
-  for (const track of purrpleTracks) {
-    assert.equal(track.license, 'CC BY');
-    assert.ok(track.attribution.includes('Purrple Cat'));
-    assert.ok(track.attribution.includes('purrplecat.com'));
-    assert.ok(track.attribution.includes('creativecommons.org/licenses/by/4.0/'));
-  }
-
-  for (const track of holiznaTracks) {
-    assert.equal(track.license, 'CC0');
-    assert.equal(track.sourceUrl, 'https://freemusicarchive.org/music/holiznacc0/public-domain-lofi');
-    assert.equal(track.licenseUrl, 'https://creativecommons.org/publicdomain/zero/1.0/');
-  }
-
-  const whisperTrack = ikkunTracks[0];
-  assert.equal(whisperTrack.id, 'ikkun-barradeen-whisper');
-  assert.equal(whisperTrack.title, 'whisper');
-  assert.equal(whisperTrack.duration, 66);
-  assert.equal(whisperTrack.license, 'CC BY-SA');
-  assert.equal(whisperTrack.sourceUrl, 'https://soundcloud.com/ikkunwastaken');
-  assert.equal(whisperTrack.licenseUrl, 'https://creativecommons.org/licenses/by-sa/3.0/deed.en_US');
-  assert.ok(whisperTrack.attribution.includes('ikkun (ex. Barradeen)'));
-  assert.ok(whisperTrack.attribution.includes('free-stock-music.com'));
-  assert.ok(whisperTrack.attribution.includes('CC BY-SA 3.0'));
+  assert.equal(
+    resolveTrackStreamUrl('holizna-cc0-into-the-mist.mp3'),
+    `${LOFI_BASE_URL}holizna-cc0-into-the-mist.mp3`
+  );
+  assert.equal(
+    resolveTrackStreamUrl('https://cdn.example.org/lofi/custom.mp3'),
+    'https://cdn.example.org/lofi/custom.mp3'
+  );
+  assert.throws(() => resolveTrackStreamUrl('assets/music/legacy.mp3'));
+  assert.throws(() =>
+    parseRemoteCatalog({
+      schemaVersion: 2,
+      updatedAt: '2026-11-17',
+      tracks: [],
+    })
+  );
 });
 
-test('MusicCatalog: zero external URLs or developer filesystem paths in track files', () => {
-  for (const track of MUSIC_CATALOG) {
-    assert.ok(!/^https?:\/\//i.test(track.file), 'Track file must not be an HTTP/HTTPS URL');
-    assert.ok(!/^data:|^blob:|^file:/i.test(track.file), 'Track file must not be data/blob/file URI');
-    assert.ok(!track.file.includes('/Users/') && !track.file.includes('C:\\'));
-    assert.ok(!track.file.includes('aistudio'), 'Track file must not reference assets/aistudio');
-    assert.ok(track.file.startsWith('assets/music/') && track.file.endsWith('.mp3'));
-  }
+test('MusicCatalog: enforces attribution for SPDX CC-BY-4.0 / CC-BY-SA-3.0 while exempting CC0-1.0', () => {
+  assert.equal(isAttributionRequired('CC0-1.0'), false);
+  assert.equal(isAttributionRequired('CC0'), false);
+  assert.equal(isAttributionRequired('CC-BY-4.0'), true);
+  assert.equal(isAttributionRequired('CC-BY-SA-3.0'), true);
+  assert.equal(isAttributionRequired('CC BY'), true);
+  assert.equal(isAttributionRequired('CC BY-SA'), true);
 
-  assert.equal(isBundledMp3Path('https://youtube.com/watch?v=123.mp3'), false);
-  assert.equal(isBundledMp3Path('/Users/dev/music.mp3'), false);
-  assert.equal(isBundledMp3Path('assets/music/../secret.mp3'), false);
-  assert.equal(isBundledMp3Path('assets/music/sample.wav'), false);
-  assert.equal(isBundledMp3Path('assets/music/valid-track.mp3'), true);
-});
-
-test('MusicCatalog: enforces attribution for CC BY and CC BY-SA while supporting CC0', () => {
   const validCc0: MusicTrack = {
     id: 'cc0-sample',
     title: 'CC0 Sample',
-    artist: 'Unknown Public',
-    album: 'Public Domain',
-    file: 'assets/music/cc0-sample.mp3',
-    license: 'CC0',
+    artist: 'HoliznaCC0',
+    album: 'Public Domain Lofi',
+    file: 'cc0-sample.mp3',
+    streamUrl: `${LOFI_BASE_URL}cc0-sample.mp3`,
+    license: 'CC0-1.0',
     licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/',
-    creator: 'Public Domain',
+    creator: 'HoliznaCC0',
     sourceUrl: '',
     attribution: '',
     isModified: false,
   };
-  assert.equal(isAttributionRequired('CC0'), false);
   assert.equal(validateMusicCatalog([validCc0]).valid, true);
 
-  assert.equal(isAttributionRequired('CC BY'), true);
-  assert.equal(isAttributionRequired('CC BY-SA'), true);
-
-  const missingAttributionCcBySa: MusicTrack = {
+  const brokenCcBySa: MusicTrack = {
     id: 'cc-by-sa-broken',
     title: 'Missing Attribution',
     artist: 'Artist',
     album: 'Album',
-    file: 'assets/music/broken.mp3',
-    license: 'CC BY-SA',
+    file: 'broken.mp3',
+    license: 'CC-BY-SA-3.0',
     licenseUrl: '',
     creator: '',
     sourceUrl: '',
     attribution: '',
     isModified: true,
   };
-  const check = validateMusicCatalog([missingAttributionCcBySa]);
+  const check = validateMusicCatalog([brokenCcBySa]);
   assert.equal(check.valid, false);
   assert.ok(check.errors.length >= 4);
 });
 
-test('MusicCatalog: dynamically supports arbitrary N tracks without hardcoded count', () => {
+test('MusicCatalog: dynamically supports arbitrary N tracks, cache TTL checks, and remote fetch', async () => {
+  const raw = buildFixtureRemoteCatalog();
+  const parsed = parseRemoteCatalog(raw);
   const dynamicCatalog: MusicTrack[] = [
-    ...MUSIC_CATALOG,
+    ...parsed.tracks,
     {
-      id: 'extra-dynamic-track-6',
+      id: 'extra-dynamic-track-12',
       title: 'Dawn Horizon',
       artist: 'Focus Composer',
       album: 'Extra Pack',
-      file: 'assets/music/dawn-horizon.mp3',
-      duration: 215,
-      license: 'CC BY-SA',
-      licenseUrl: 'https://creativecommons.org/licenses/by-sa/4.0/',
+      file: 'dawn-horizon.mp3',
+      streamUrl: `${LOFI_BASE_URL}dawn-horizon.mp3`,
+      durationSec: 215,
+      license: 'CC-BY-SA-3.0',
+      licenseUrl: 'https://creativecommons.org/licenses/by-sa/3.0/',
       creator: 'Focus Composer',
       sourceUrl: 'https://example.org/music',
-      attribution: 'Music by Focus Composer, CC BY-SA 4.0',
+      attribution: buildTrackAttribution({
+        title: 'Dawn Horizon',
+        artist: 'Focus Composer',
+        license: 'CC-BY-SA-3.0',
+        licenseUrl: 'https://creativecommons.org/licenses/by-sa/3.0/',
+        sourceUrl: 'https://example.org/music',
+      }),
       isModified: false,
     },
   ];
 
   assert.equal(validateMusicCatalog(dynamicCatalog).valid, true);
-  assert.equal(getTrackById('extra-dynamic-track-6', dynamicCatalog)?.title, 'Dawn Horizon');
+  assert.equal(getTrackById('extra-dynamic-track-12', dynamicCatalog)?.title, 'Dawn Horizon');
   assert.equal(getTrackById('missing-track', dynamicCatalog), null);
   assert.equal(validateMusicCatalog([]).valid, true);
   assert.equal(formatMusicDuration(202), '3:22');
   assert.equal(formatMusicDuration(null), '0:00');
-  assert.equal(resolveTrackAssetUrl('/assets/music/test.mp3'), './assets/music/test.mp3');
+
+  const now = 1_700_000_000_000;
+  const freshCache: CachedMusicCatalog = {
+    schemaVersion: 1,
+    updatedAt: '2026-11-17',
+    fetchedAt: now - LOFI_CATALOG_CACHE_TTL_MS + 10_000,
+    sourceUrl: LOFI_CATALOG_URL,
+    tracks: parsed.tracks,
+  };
+  const expiredCache: CachedMusicCatalog = {
+    ...freshCache,
+    fetchedAt: now - LOFI_CATALOG_CACHE_TTL_MS - 1,
+  };
+  assert.equal(isCatalogCacheFresh(freshCache, now), true);
+  assert.equal(isCatalogCacheFresh(expiredCache, now), false);
+  assert.equal(isCatalogCacheFresh(null, now), false);
+
+  const fetched = await fetchRemoteMusicCatalog(async () => {
+    return new Response(JSON.stringify(raw), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  });
+  assert.equal(fetched.tracks.length, 11);
+  assert.equal(fetched.sourceUrl, LOFI_CATALOG_URL);
+
+  await assert.rejects(() =>
+    fetchRemoteMusicCatalog(async () => new Response('Not Found', { status: 404 }))
+  );
 });
 
-test('MusicCatalog: public/assets/aistudio directory does not exist and public/assets/music matches catalog', () => {
+test('MusicCatalog: public/ contains zero local audio files and zero public/assets/aistudio directory', () => {
   const root = process.cwd();
+  const publicDir = path.join(root, 'public');
   assert.equal(
-    fs.existsSync(path.join(root, 'public', 'assets', 'aistudio')),
+    fs.existsSync(path.join(publicDir, 'assets', 'aistudio')),
     false,
     'public/assets/aistudio must not exist'
   );
-  for (const track of MUSIC_CATALOG) {
-    const absPath = path.join(root, 'public', track.file);
-    assert.ok(fs.existsSync(absPath), `Missing MP3 file at ${absPath}`);
-    assert.ok(fs.statSync(absPath).size > 1024, `MP3 file unexpectedly small: ${absPath}`);
-  }
+  assert.equal(
+    fs.existsSync(path.join(root, '_music_source')),
+    false,
+    '_music_source must not exist'
+  );
+
+  const audioExts = new Set(['.mp3', '.ogg', '.wav', '.m4a', '.flac']);
+  const foundAudio: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(full);
+      } else if (audioExts.has(path.extname(entry.name).toLowerCase())) {
+        foundAudio.push(path.relative(root, full));
+      }
+    }
+  };
+  walk(publicDir);
+  assert.deepEqual(foundAudio, [], `public/ must not contain local audio files: ${foundAudio.join(', ')}`);
 });

@@ -1,21 +1,64 @@
-export type MusicLicenseType = 'CC0' | 'CC BY' | 'CC BY-SA';
+export type MusicLicenseType =
+  | 'CC-BY-4.0'
+  | 'CC0-1.0'
+  | 'CC-BY-SA-3.0'
+  | 'CC0'
+  | 'CC BY'
+  | 'CC BY-SA'
+  | (string & {});
+
+export type MusicErrorCode = 'autoplay_blocked' | 'network' | 'decode' | 'unknown';
+
+export type MusicIntent = 'play' | 'pause' | 'stop';
+
+export interface RemoteMusicTrackRaw {
+  readonly id: string;
+  readonly title: string;
+  readonly artist: string;
+  readonly album: string;
+  readonly durationSec: number;
+  readonly file: string;
+  readonly license: string;
+  readonly licenseUrl: string;
+  readonly sourceUrl: string;
+  readonly modified: boolean;
+}
+
+export interface RemoteMusicCatalog {
+  readonly schemaVersion: number;
+  readonly updatedAt: string;
+  readonly tracks: readonly RemoteMusicTrackRaw[];
+}
 
 export interface MusicTrack {
   readonly id: string;
   readonly title: string;
   readonly artist: string;
   readonly album: string;
-  /** Relative asset path packaged with the extension, e.g. 'assets/music/track.mp3'. */
+  /** Filename or HTTPS stream path from remote catalog, e.g. 'holizna-cc0-into-the-mist.mp3'. */
   readonly file: string;
-  /** Duration in seconds (optional if determined at runtime from audio metadata). */
+  /** Full HTTPS stream URL resolved against LOFI_BASE_URL. */
+  readonly streamUrl?: string;
+  /** Duration in seconds from catalog or audio metadata. */
+  readonly durationSec?: number;
+  /** Alias preserved for UI/consumer ergonomics. */
   readonly duration?: number;
   readonly license: MusicLicenseType;
   readonly licenseUrl: string;
   readonly creator: string;
   readonly sourceUrl: string;
-  /** Required full attribution string for CC BY / CC BY-SA tracks. */
+  /** Attribution string built from track metadata / license. */
   readonly attribution: string;
   readonly isModified: boolean;
+  readonly modified?: boolean;
+}
+
+export interface CachedMusicCatalog {
+  readonly schemaVersion: number;
+  readonly updatedAt: string;
+  readonly fetchedAt: number;
+  readonly sourceUrl: string;
+  readonly tracks: readonly MusicTrack[];
 }
 
 export type RepeatMode = 'off' | 'all' | 'one';
@@ -33,8 +76,13 @@ export interface MusicPlayerState {
   repeatMode: RepeatMode;
   shuffledOrder: string[];
   syncWithSession: boolean;
+  musicEnabled?: boolean;
+  playDuringBreak?: boolean;
+  pausedBySession?: boolean;
+  catalogUpdatedAt?: string | null;
   lastUpdatedAt: number;
   lastError?: string | null;
+  lastErrorCode?: MusicErrorCode | null;
 }
 
 export interface AudioStatusSnapshot {
@@ -48,41 +96,37 @@ export interface AudioStatusSnapshot {
 
 export type OffscreenMusicCommand =
   | {
-      scope: 'FQ_OFFSCREEN_MUSIC';
-      action: 'LOAD_AND_PLAY';
-      payload: {
-        trackId: string;
-        trackUrl: string;
-        positionSec: number;
-        volume: number;
-        muted: boolean;
-      };
+      target: 'offscreen';
+      action: 'MUSIC_PLAY';
+      url: string;
+      volume: number;
+      startAtSec: number;
+      trackId?: string;
+      muted?: boolean;
     }
-  | { scope: 'FQ_OFFSCREEN_MUSIC'; action: 'PAUSE' }
-  | { scope: 'FQ_OFFSCREEN_MUSIC'; action: 'RESUME' }
-  | { scope: 'FQ_OFFSCREEN_MUSIC'; action: 'STOP' }
-  | { scope: 'FQ_OFFSCREEN_MUSIC'; action: 'SEEK'; payload: { positionSec: number } }
-  | { scope: 'FQ_OFFSCREEN_MUSIC'; action: 'SET_VOLUME'; payload: { volume: number; muted: boolean } }
-  | { scope: 'FQ_OFFSCREEN_MUSIC'; action: 'GET_AUDIO_STATUS' };
+  | { target: 'offscreen'; action: 'MUSIC_PAUSE' }
+  | { target: 'offscreen'; action: 'MUSIC_STOP' }
+  | { target: 'offscreen'; action: 'MUSIC_SEEK'; positionSec: number }
+  | { target: 'offscreen'; action: 'MUSIC_SET_VOLUME'; volume: number; muted?: boolean }
+  | { target: 'offscreen'; action: 'MUSIC_GET_STATUS' };
 
 export type OffscreenMusicEvent =
   | {
-      scope: 'FQ_MUSIC_EVENT';
-      action: 'OFFSCREEN_TRACK_LOADED';
-      payload: { trackId: string; durationSec: number | null };
+      target: 'background';
+      action: 'MUSIC_POSITION';
+      trackId: string;
+      positionSec: number;
+      durationSec?: number | null;
     }
   | {
-      scope: 'FQ_MUSIC_EVENT';
-      action: 'OFFSCREEN_TIME_UPDATE';
-      payload: { trackId: string; positionSec: number; durationSec: number | null };
+      target: 'background';
+      action: 'MUSIC_ENDED';
+      trackId: string;
     }
   | {
-      scope: 'FQ_MUSIC_EVENT';
-      action: 'OFFSCREEN_TRACK_ENDED';
-      payload: { trackId: string };
-    }
-  | {
-      scope: 'FQ_MUSIC_EVENT';
-      action: 'OFFSCREEN_AUDIO_ERROR';
-      payload: { trackId: string | null; message: string };
+      target: 'background';
+      action: 'MUSIC_ERROR';
+      code: MusicErrorCode;
+      trackId?: string | null;
+      message?: string;
     };

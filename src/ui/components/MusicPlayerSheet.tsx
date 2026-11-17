@@ -5,6 +5,7 @@ import {
   Music,
   Pause,
   Play,
+  RefreshCw,
   Repeat,
   Repeat1,
   Shuffle,
@@ -41,6 +42,8 @@ export interface MusicPlayerSheetProps {
   onToggleShuffle: (enabled: boolean) => Promise<void> | void;
   onCycleRepeat: (nextMode: RepeatMode) => Promise<void> | void;
   onToggleSyncWithSession: (enabled: boolean) => Promise<void> | void;
+  onTogglePlayDuringBreak?: (enabled: boolean) => Promise<void> | void;
+  onRefreshCatalog?: () => Promise<void> | void;
 }
 
 const NEXT_REPEAT_MODE: Record<RepeatMode, RepeatMode> = {
@@ -65,6 +68,8 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
   onToggleShuffle,
   onCycleRepeat,
   onToggleSyncWithSession,
+  onTogglePlayDuringBreak,
+  onRefreshCatalog,
 }) => {
   const { locale, t } = useTranslation();
   const [scrubSec, setScrubSec] = useState<number | null>(null);
@@ -97,7 +102,7 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
   const hasTracks = safeCatalog.length > 0;
 
   const effectiveDuration =
-    musicState.durationSec ?? activeTrack?.duration ?? 0;
+    musicState.durationSec ?? activeTrack?.durationSec ?? activeTrack?.duration ?? 0;
   const displayedPosition =
     scrubSec !== null ? scrubSec : Math.min(musicState.positionSec, effectiveDuration || musicState.positionSec);
 
@@ -176,7 +181,7 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
                 {t('music.sheetTitle')}
               </h2>
               <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
-                {t('music.bundledSubtitle')} · {statusLabel}
+                {t('music.streamedSubtitle')} · {statusLabel}
               </p>
             </div>
           </div>
@@ -195,14 +200,22 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
         {/* Scrollable Content */}
         <div className="flex-1 min-h-0 overflow-y-auto p-3.5 space-y-3">
           {/* Audio Error Alert */}
-          {musicState.lastError && (
+          {(musicState.lastError || musicState.lastErrorCode) && (
             <div
               data-testid="music-player-error"
               role="alert"
               className="flex items-start gap-2 p-2.5 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/70 rounded-lg text-[11px] text-rose-700 dark:text-rose-200"
             >
               <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400 mt-0.5" />
-              <span>{localizeErrorMessage(locale, musicState.lastError)}</span>
+              <span>
+                {localizeErrorMessage(
+                  locale,
+                  musicState.lastError ||
+                    (musicState.lastErrorCode
+                      ? `Audio playback failed (${musicState.lastErrorCode}).`
+                      : '')
+                )}
+              </span>
             </div>
           )}
 
@@ -415,24 +428,49 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
             </div>
           </section>
 
-          {/* Session Sync Option */}
-          <label className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 text-xs text-slate-700 dark:text-slate-200 cursor-pointer">
-            <span className="font-medium">{t('music.syncWithSessionLabel')}</span>
-            <input
-              type="checkbox"
-              data-testid="music-sync-session-toggle"
-              checked={musicState.syncWithSession}
-              onChange={(e) => void onToggleSyncWithSession(e.target.checked)}
-              className="w-4 h-4 accent-indigo-600 rounded cursor-pointer shrink-0"
-            />
-          </label>
+          {/* Session Sync Options */}
+          <div className="space-y-1.5">
+            <label className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 text-xs text-slate-700 dark:text-slate-200 cursor-pointer">
+              <span className="font-medium">{t('music.syncWithSessionLabel')}</span>
+              <input
+                type="checkbox"
+                data-testid="music-sync-session-toggle"
+                checked={musicState.syncWithSession}
+                onChange={(e) => void onToggleSyncWithSession(e.target.checked)}
+                className="w-4 h-4 accent-indigo-600 rounded cursor-pointer shrink-0"
+              />
+            </label>
 
-          {/* Dynamic Playlist from MUSIC_CATALOG */}
+            <label className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 text-xs text-slate-700 dark:text-slate-200 cursor-pointer">
+              <span className="font-medium">{t('music.playDuringBreakLabel')}</span>
+              <input
+                type="checkbox"
+                data-testid="music-play-during-break-toggle"
+                checked={Boolean(musicState.playDuringBreak)}
+                onChange={(e) => void onTogglePlayDuringBreak?.(e.target.checked)}
+                className="w-4 h-4 accent-indigo-600 rounded cursor-pointer shrink-0"
+              />
+            </label>
+          </div>
+
+          {/* Dynamic Playlist from online Lofi catalog */}
           <section className="space-y-1.5">
             <div className="flex items-center justify-between">
               <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                 {t('music.playlistHeading', { count: safeCatalog.length })}
               </h3>
+              {onRefreshCatalog && (
+                <button
+                  type="button"
+                  data-testid="music-refresh-catalog-btn"
+                  aria-label={t('music.refreshCatalogAria')}
+                  onClick={() => void onRefreshCatalog()}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 cursor-pointer"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  <span>{t('music.refreshCatalogLabel')}</span>
+                </button>
+              )}
             </div>
 
             {safeCatalog.length === 0 ? (
@@ -482,8 +520,8 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
                         </div>
                       </div>
                       <span className="text-[11px] font-mono tabular-nums text-slate-500 dark:text-slate-400 shrink-0">
-                        {track.duration !== undefined
-                          ? formatMusicDuration(track.duration)
+                        {(track.durationSec ?? track.duration) !== undefined
+                          ? formatMusicDuration(track.durationSec ?? track.duration)
                           : '--:--'}
                       </span>
                     </button>
@@ -522,7 +560,9 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
                   <div className="text-[10px] text-slate-500 dark:text-slate-400">
                     {t('music.licenseLabel')}: {entry.license} · {t('music.creatorLabel')}:{' '}
                     {entry.creator} ·{' '}
-                    {entry.isModified ? t('music.modifiedYes') : t('music.modifiedNo')}
+                    {(entry.isModified ?? entry.modified)
+                      ? t('music.modifiedYes')
+                      : t('music.modifiedNo')}
                   </div>
                   <div className="flex items-center gap-3 pt-0.5 text-[10px]">
                     {entry.sourceUrl && (

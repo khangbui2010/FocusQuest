@@ -46,7 +46,9 @@ export type MessageAction =
   | 'MUSIC_SET_VOLUME'
   | 'MUSIC_SET_SHUFFLE'
   | 'MUSIC_SET_REPEAT'
-  | 'MUSIC_SET_SYNC_WITH_SESSION';
+  | 'MUSIC_SET_SYNC_WITH_SESSION'
+  | 'MUSIC_SET_PLAY_DURING_BREAK'
+  | 'MUSIC_REFRESH_CATALOG';
 
 export interface StartSessionPayload {
   mode: SessionMode;
@@ -125,6 +127,10 @@ export interface MusicSetSyncWithSessionPayload {
   enabled: boolean;
 }
 
+export interface MusicSetPlayDuringBreakPayload {
+  enabled: boolean;
+}
+
 export interface MusicStateResponseData {
   state: MusicPlayerState;
   catalog: readonly MusicTrack[];
@@ -186,7 +192,9 @@ export type ExtensionMessage =
   | { action: 'MUSIC_SET_VOLUME'; payload: MusicSetVolumePayload }
   | { action: 'MUSIC_SET_SHUFFLE'; payload: MusicSetShufflePayload }
   | { action: 'MUSIC_SET_REPEAT'; payload: MusicSetRepeatPayload }
-  | { action: 'MUSIC_SET_SYNC_WITH_SESSION'; payload: MusicSetSyncWithSessionPayload };
+  | { action: 'MUSIC_SET_SYNC_WITH_SESSION'; payload: MusicSetSyncWithSessionPayload }
+  | { action: 'MUSIC_SET_PLAY_DURING_BREAK'; payload: MusicSetPlayDuringBreakPayload }
+  | { action: 'MUSIC_REFRESH_CATALOG' };
 
 export interface MessageResponse<T = unknown> {
   success: boolean;

@@ -13,6 +13,7 @@ export const STORAGE_KEYS = {
   SESSION_MARKER: 'fq_session_active_marker',
   CIVILIZATION: 'fq_civilization',
   MUSIC_STATE: 'fq_music_state',
+  MUSIC_CATALOG_CACHE: 'fq_music_catalog_cache',
 } as const;
 
 export type StorageKey = typeof STORAGE_KEYS[keyof typeof STORAGE_KEYS];

@@ -475,6 +475,24 @@ export class MessageHandler {
           return { success: true, data: { state, catalog: mc.getCatalog() } };
         }
 
+        case 'MUSIC_SET_PLAY_DURING_BREAK': {
+          if (!msg.payload || typeof msg.payload.enabled !== 'boolean') {
+            return {
+              success: false,
+              error: 'MUSIC_SET_PLAY_DURING_BREAK requires boolean enabled flag.',
+            };
+          }
+          const mc = this.getMusicCoordinator();
+          const state = await mc.setPlayDuringBreak(msg.payload.enabled);
+          return { success: true, data: { state, catalog: mc.getCatalog() } };
+        }
+
+        case 'MUSIC_REFRESH_CATALOG': {
+          const mc = this.getMusicCoordinator();
+          const state = await mc.refreshCatalog(true);
+          return { success: true, data: { state, catalog: mc.getCatalog() } };
+        }
+
         default:
           return {
             success: false,

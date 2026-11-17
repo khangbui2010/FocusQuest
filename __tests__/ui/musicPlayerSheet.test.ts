@@ -4,23 +4,76 @@ import React from 'react';
 import { renderToString } from 'react-dom/server';
 import { I18nProvider } from '../../src/i18n/I18nContext.tsx';
 import { MusicPlayerSheet } from '../../src/ui/components/MusicPlayerSheet.tsx';
-import { MUSIC_CATALOG } from '../../src/data/musicCatalog.ts';
+import { LOFI_BASE_URL, parseRemoteCatalog } from '../../src/data/musicCatalog.ts';
 import { MusicPlayerState, MusicTrack } from '../../src/types/music.ts';
 
-function makeMusicState(overrides: Partial<MusicPlayerState> = {}): MusicPlayerState {
+function getUiFixtureCatalog(): MusicTrack[] {
+  return parseRemoteCatalog({
+    schemaVersion: 1,
+    updatedAt: '2026-11-17',
+    tracks: [
+      {
+        id: 'purrple-cat-twilight-market',
+        title: 'Twilight Market',
+        artist: 'Purrple Cat',
+        album: 'City Nights 2',
+        durationSec: 175,
+        file: 'purrple-cat-city-nights-2-01-twilight-market_afce47e2.mp3',
+        license: 'CC-BY-4.0',
+        licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
+        sourceUrl: 'https://purrplecat.com/',
+        modified: false,
+      },
+      {
+        id: 'holizna-cc0-into-the-mist',
+        title: 'Into The Mist',
+        artist: 'HoliznaCC0',
+        album: 'Public Domain Lofi',
+        durationSec: 130,
+        file: 'holizna-cc0-into-the-mist.mp3',
+        license: 'CC0-1.0',
+        licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/',
+        sourceUrl: 'https://freemusicarchive.org/music/holiznacc0/public-domain-lofi',
+        modified: false,
+      },
+      {
+        id: 'ikkun-barradeen-whisper',
+        title: 'whisper',
+        artist: 'ikkun (ex. Barradeen)',
+        album: 'Free Stock Music',
+        durationSec: 66,
+        file: 'ikkun-barradeen-whisper.mp3',
+        license: 'CC-BY-SA-3.0',
+        licenseUrl: 'https://creativecommons.org/licenses/by-sa/3.0/deed.en_US',
+        sourceUrl: 'https://soundcloud.com/ikkunwastaken',
+        modified: false,
+      },
+    ],
+  }).tracks;
+}
+
+function makeMusicState(
+  catalog: readonly MusicTrack[],
+  overrides: Partial<MusicPlayerState> = {}
+): MusicPlayerState {
   return {
     status: 'IDLE',
-    currentTrackId: MUSIC_CATALOG[0]?.id ?? null,
+    currentTrackId: catalog[0]?.id ?? null,
     positionSec: 0,
-    durationSec: MUSIC_CATALOG[0]?.duration ?? null,
+    durationSec: catalog[0]?.durationSec ?? null,
     volume: 0.7,
     muted: false,
     shuffle: false,
     repeatMode: 'off',
-    shuffledOrder: MUSIC_CATALOG.map((t) => t.id),
+    shuffledOrder: catalog.map((t) => t.id),
     syncWithSession: true,
+    musicEnabled: false,
+    playDuringBreak: false,
+    pausedBySession: false,
+    catalogUpdatedAt: '2026-11-17',
     lastUpdatedAt: 1700000000000,
     lastError: null,
+    lastErrorCode: null,
     ...overrides,
   };
 }
@@ -50,99 +103,134 @@ function renderSheet(
         onToggleShuffle: () => {},
         onCycleRepeat: () => {},
         onToggleSyncWithSession: () => {},
+        onTogglePlayDuringBreak: () => {},
+        onRefreshCatalog: () => {},
       })
     )
   );
 }
 
-test('MusicPlayerSheet UI: renders EN & VI cleanly, displays full CC BY attribution, and has ZERO upload controls', () => {
-  const htmlEn = renderSheet('en', MUSIC_CATALOG, makeMusicState({ status: 'PLAYING', positionSec: 45 }));
-  const htmlVi = renderSheet('vi', MUSIC_CATALOG, makeMusicState({ status: 'PAUSED', positionSec: 12 }));
+test('MusicPlayerSheet UI: renders streamed EN & VI UI, SPDX attribution, break toggle, refresh button, and ZERO upload controls', () => {
+  const catalog = getUiFixtureCatalog();
+  const htmlEn = renderSheet(
+    'en',
+    catalog,
+    makeMusicState(catalog, { status: 'PLAYING', positionSec: 45 })
+  );
+  const htmlVi = renderSheet(
+    'vi',
+    catalog,
+    makeMusicState(catalog, { status: 'PAUSED', positionSec: 12 })
+  );
 
   assert.ok(htmlEn.includes('Focus Music Player'));
+  assert.ok(htmlEn.includes('Streamed Lofi library'));
+  assert.equal(htmlEn.includes('Bundled offline MP3 library'), false);
   assert.ok(htmlEn.includes('Twilight Market'));
-  assert.ok(htmlEn.includes('Music by Purrple Cat (purrplecat.com), licensed under CC BY 4.0: creativecommons.org/licenses/by/4.0/'));
-  assert.ok(htmlEn.includes('CC BY'));
+  assert.ok(htmlEn.includes('CC-BY-4.0'));
+  assert.ok(htmlEn.includes('Purrple Cat'));
+  assert.ok(htmlEn.includes('Attribution Required'));
   assert.ok(htmlEn.includes('0:45'));
+  assert.ok(htmlEn.includes('data-testid="music-play-during-break-toggle"'));
+  assert.ok(htmlEn.includes('data-testid="music-refresh-catalog-btn"'));
 
   assert.ok(htmlVi.includes('Trình Phát Nhạc Tập Trung'));
+  assert.ok(htmlVi.includes('Thư viện nhạc Lofi trực tuyến'));
   assert.ok(htmlVi.includes('Tạm dừng'));
   assert.ok(htmlVi.includes('Bản quyền &amp; Ghi công'));
+  assert.ok(htmlVi.includes('Tiếp tục phát nhạc trong giờ nghỉ Pomodoro'));
 
   // Zero upload UI invariant
   assert.equal(htmlEn.includes('type="file"'), false, 'Must never render file upload input');
   assert.equal(htmlVi.includes('type="file"'), false, 'Must never render file upload input');
-  assert.equal(htmlEn.toLowerCase().includes('youtube'), false);
 
-  // Verify CC0 track (HoliznaCC0) renders cleanly without forcing CC BY "Attribution Required"
-  const cc0Track = MUSIC_CATALOG.find((t) => t.id === 'holizna-cc0-into-the-mist');
-  assert.ok(cc0Track, 'holizna-cc0-into-the-mist must exist in MUSIC_CATALOG');
+  // Verify CC0-1.0 track renders cleanly without forcing "Attribution Required"
+  const cc0Track = catalog.find((t) => t.id === 'holizna-cc0-into-the-mist')!;
   const cc0Html = renderSheet(
     'en',
-    MUSIC_CATALOG,
-    makeMusicState({
+    catalog,
+    makeMusicState(catalog, {
       currentTrackId: cc0Track.id,
-      durationSec: cc0Track.duration ?? 130,
+      durationSec: cc0Track.durationSec ?? 130,
       status: 'PLAYING',
       positionSec: 15,
     })
   );
   assert.ok(cc0Html.includes('Into The Mist'));
   assert.ok(cc0Html.includes('HoliznaCC0'));
-  assert.ok(cc0Html.includes('CC0'));
+  assert.ok(cc0Html.includes('CC0-1.0'));
   assert.equal(cc0Html.includes('Attribution Required'), false);
 
-  // Verify CC BY-SA 3.0 track (ikkun / ex. Barradeen) displays Attribution Required and full credit
-  const ccBySaTrack = MUSIC_CATALOG.find((t) => t.id === 'ikkun-barradeen-whisper');
-  assert.ok(ccBySaTrack, 'ikkun-barradeen-whisper must exist in MUSIC_CATALOG');
+  // Verify CC-BY-SA-3.0 track displays Attribution Required and full credit
+  const ccBySaTrack = catalog.find((t) => t.id === 'ikkun-barradeen-whisper')!;
   const ccBySaHtml = renderSheet(
     'en',
-    MUSIC_CATALOG,
-    makeMusicState({
+    catalog,
+    makeMusicState(catalog, {
       currentTrackId: ccBySaTrack.id,
-      durationSec: ccBySaTrack.duration ?? 66,
+      durationSec: ccBySaTrack.durationSec ?? 66,
       status: 'PLAYING',
       positionSec: 10,
     })
   );
   assert.ok(ccBySaHtml.includes('whisper'));
   assert.ok(ccBySaHtml.includes('ikkun (ex. Barradeen)'));
-  assert.ok(ccBySaHtml.includes('CC BY-SA'));
-  assert.ok(ccBySaHtml.includes('free-stock-music.com'));
+  assert.ok(ccBySaHtml.includes('CC-BY-SA-3.0'));
+  assert.ok(ccBySaHtml.includes('soundcloud.com/ikkunwastaken'));
   assert.ok(ccBySaHtml.includes('Attribution Required'));
 });
 
-test('MusicPlayerSheet UI: dynamically renders arbitrary N tracks and handles empty catalog gracefully', () => {
+test('MusicPlayerSheet UI: handles empty catalog, dynamic extra tracks, and bilingual playback errors cleanly', () => {
+  const catalog = getUiFixtureCatalog();
   const emptyHtml = renderSheet(
     'en',
     [],
-    makeMusicState({ currentTrackId: null, durationSec: null })
+    makeMusicState([], {
+      currentTrackId: null,
+      durationSec: null,
+      status: 'ERROR',
+      lastErrorCode: 'network',
+      lastError: 'Unable to load online Lofi catalog. Check your internet connection and retry.',
+    })
   );
   assert.ok(emptyHtml.includes('data-testid="music-empty-catalog"'));
-  assert.ok(emptyHtml.includes('No bundled tracks available'));
+  assert.ok(emptyHtml.includes('No Lofi tracks loaded yet'));
+  assert.ok(emptyHtml.includes('data-testid="music-player-error"'));
+
+  const errorViHtml = renderSheet(
+    'vi',
+    catalog,
+    makeMusicState(catalog, {
+      status: 'ERROR',
+      lastErrorCode: 'autoplay_blocked',
+      lastError: 'Audio playback failed (autoplay_blocked).',
+    })
+  );
+  assert.ok(errorViHtml.includes('Trình duyệt chặn tự động phát âm thanh'));
 
   const extraTrack: MusicTrack = {
     id: 'dynamic-bonus-track',
     title: 'Dynamic Bonus Track',
     artist: 'Studio Test',
     album: 'Dynamic Pack',
-    file: 'assets/music/dynamic-bonus.mp3',
-    duration: 95,
-    license: 'CC BY-SA',
-    licenseUrl: 'https://creativecommons.org/licenses/by-sa/4.0/',
+    file: 'dynamic-bonus.mp3',
+    streamUrl: `${LOFI_BASE_URL}dynamic-bonus.mp3`,
+    durationSec: 95,
+    license: 'CC-BY-SA-3.0',
+    licenseUrl: 'https://creativecommons.org/licenses/by-sa/3.0/',
     creator: 'Studio Test',
     sourceUrl: 'https://example.org',
-    attribution: 'Music by Studio Test, CC BY-SA 4.0',
+    attribution: 'Dynamic Bonus Track by Studio Test — CC-BY-SA-3.0',
     isModified: true,
+    modified: true,
   };
-  const extendedCatalog = [...MUSIC_CATALOG, extraTrack];
+  const extendedCatalog = [...catalog, extraTrack];
   const extendedHtml = renderSheet(
     'en',
     extendedCatalog,
-    makeMusicState({ currentTrackId: extraTrack.id, durationSec: 95 })
+    makeMusicState(extendedCatalog, { currentTrackId: extraTrack.id, durationSec: 95 })
   );
-  assert.ok(extendedHtml.includes(`Bundled Tracks (${extendedCatalog.length})`));
+  assert.ok(extendedHtml.includes(`Tracks (${extendedCatalog.length})`));
   assert.ok(extendedHtml.includes('Dynamic Bonus Track'));
-  assert.ok(extendedHtml.includes('Music by Studio Test, CC BY-SA 4.0'));
   assert.ok(extendedHtml.includes('Modified'));
 });

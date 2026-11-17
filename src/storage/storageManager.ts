@@ -13,7 +13,7 @@ import {
 } from '../core/civilization/civilizationState.ts';
 import { GridMap } from '../core/civilization/gridMap.ts';
 import { calculatePlayerLevel } from '../core/economy/levelSystem.ts';
-import { MusicPlayerState } from '../types/music.ts';
+import { CachedMusicCatalog, MusicPlayerState } from '../types/music.ts';
 
 export class StorageManager {
   private mutex = new StorageMutex();
@@ -496,6 +496,19 @@ export class StorageManager {
 
   async setMusicState(state: MusicPlayerState): Promise<void> {
     await this.adapter.set(STORAGE_KEYS.MUSIC_STATE, state);
+  }
+
+  async getMusicCatalogCache(): Promise<CachedMusicCatalog | null> {
+    const cache = await this.adapter.get<CachedMusicCatalog>(STORAGE_KEYS.MUSIC_CATALOG_CACHE);
+    return cache ?? null;
+  }
+
+  async setMusicCatalogCache(cache: CachedMusicCatalog): Promise<void> {
+    await this.adapter.set(STORAGE_KEYS.MUSIC_CATALOG_CACHE, cache);
+  }
+
+  async clearMusicCatalogCache(): Promise<void> {
+    await this.adapter.remove(STORAGE_KEYS.MUSIC_CATALOG_CACHE);
   }
 }
 
