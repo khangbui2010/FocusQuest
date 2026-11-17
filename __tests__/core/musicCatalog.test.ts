@@ -359,3 +359,113 @@ test('MusicCatalog: public/ contains zero local audio files and zero public/asse
   walk(publicDir);
   assert.deepEqual(foundAudio, [], `public/ must not contain local audio files: ${foundAudio.join(', ')}`);
 });
+
+test('MusicCatalog: rejects untrusted catalog envelopes (schemaVersion != 1, > 200 tracks, malformed JSON)', async () => {
+  assert.throws(() => parseRemoteCatalog(null), /Invalid remote music catalog/);
+  assert.throws(() => parseRemoteCatalog({ schemaVersion: 0, tracks: [] }), /schemaVersion/);
+  assert.throws(() => parseRemoteCatalog({ schemaVersion: 2, tracks: [] }), /schemaVersion/);
+  assert.throws(() => parseRemoteCatalog({ schemaVersion: '1', tracks: [] }), /schemaVersion/);
+  assert.throws(() => parseRemoteCatalog({ schemaVersion: 1 }), /tracks array/);
+
+  const tooManyTracks = Array.from({ length: 201 }, (_, idx) => ({
+    id: `track-${idx}`,
+    title: `Track ${idx}`,
+    artist: 'Artist',
+    album: 'Album',
+    durationSec: 120,
+    file: `track-${idx}.mp3`,
+    license: 'CC0-1.0',
+    licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/',
+    sourceUrl: 'https://example.org/music',
+    modified: false,
+  }));
+  assert.throws(
+    () =>
+      parseRemoteCatalog({
+        schemaVersion: 1,
+        updatedAt: '2026-11-17',
+        tracks: tooManyTracks,
+      }),
+    /maximum allowed track count/
+  );
+
+  await assert.rejects(
+    () =>
+      fetchRemoteMusicCatalog(
+        async () =>
+          new Response('{not-valid-json', {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })
+      ),
+    /Malformed JSON/
+  );
+});
+
+test('MusicCatalog: skips and counts malformed, duplicate, overlong, unsafe-path, non-HTTPS, and disallowed-license tracks', () => {
+  const baseValid = {
+    id: 'valid-cc-by-sa-4',
+    title: 'Valid Track',
+    artist: 'Valid Artist',
+    album: 'Valid Album',
+    durationSec: 180,
+    file: 'valid-track.mp3',
+    license: 'CC-BY-SA-4.0',
+    licenseUrl: 'https://creativecommons.org/licenses/by-sa/4.0/',
+    sourceUrl: 'https://example.org/artist',
+    modified: false,
+  };
+
+  const mixedPayload = {
+    schemaVersion: 1,
+    updatedAt: '2026-11-17',
+    tracks: [
+      baseValid,
+      // Duplicate id
+      { ...baseValid, title: 'Duplicate Track' },
+      // Invalid id format (uppercase & space)
+      { ...baseValid, id: 'Invalid Track Id' },
+      // Oversized title (> 200 chars)
+      { ...baseValid, id: 'overlong-title', title: 'A'.repeat(201) },
+      // Disallowed license (CC-BY-NC-4.0)
+      { ...baseValid, id: 'nc-license', license: 'CC-BY-NC-4.0' },
+      // Missing required artist
+      { ...baseValid, id: 'missing-artist', artist: '   ' },
+      // Missing required title
+      { ...baseValid, id: 'missing-title', title: '' },
+      // Missing required license
+      { ...baseValid, id: 'missing-license', license: '' },
+      // Missing required licenseUrl
+      { ...baseValid, id: 'missing-license-url', licenseUrl: '' },
+      // Missing required sourceUrl
+      { ...baseValid, id: 'missing-source-url', sourceUrl: '' },
+      // Non-HTTPS licenseUrl
+      { ...baseValid, id: 'http-license-url', licenseUrl: 'http://creativecommons.org/licenses/by/4.0/' },
+      // Non-HTTPS sourceUrl
+      { ...baseValid, id: 'js-source-url', sourceUrl: 'javascript:alert(1)' },
+      // Path traversal / slashes in file
+      { ...baseValid, id: 'traversal-dotdot', file: '../secret.mp3' },
+      { ...baseValid, id: 'traversal-slash', file: 'subdir/track.mp3' },
+      { ...baseValid, id: 'traversal-backslash', file: 'subdir\\track.mp3' },
+      // Valid CC-BY-3.0 track to confirm multiple valid tracks survive
+      {
+        ...baseValid,
+        id: 'valid-cc-by-3',
+        title: 'Valid Three',
+        file: 'valid-three.mp3',
+        license: 'CC-BY-3.0',
+        licenseUrl: 'https://creativecommons.org/licenses/by/3.0/',
+      },
+    ],
+  };
+
+  const parsed = parseRemoteCatalog(mixedPayload);
+  assert.equal(parsed.tracks.length, 2);
+  assert.equal(parsed.skippedCount, 14);
+  assert.deepEqual(
+    parsed.tracks.map((t) => t.id),
+    ['valid-cc-by-sa-4', 'valid-cc-by-3']
+  );
+  assert.equal(parsed.skippedReasons.length, 14);
+});
+

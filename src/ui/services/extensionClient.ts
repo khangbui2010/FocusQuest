@@ -156,6 +156,15 @@ function readPreviewCatalogStorage(): CachedMusicCatalog | null {
     const raw = localStorage.getItem(PREVIEW_CATALOG_CACHE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as CachedMusicCatalog;
+    if (
+      !parsed ||
+      typeof parsed !== 'object' ||
+      parsed.schemaVersion !== 1 ||
+      !Array.isArray(parsed.tracks) ||
+      parsed.tracks.length === 0
+    ) {
+      return null;
+    }
     mockCatalogCache = parsed;
     return parsed;
   } catch {
@@ -181,16 +190,29 @@ function applyMockCatalog(catalog: readonly MusicTrack[], updatedAt?: string): v
     mockMusicState.currentTrackId && ids.includes(mockMusicState.currentTrackId)
       ? getTrackById(mockMusicState.currentTrackId, catalog)
       : catalog[0] ?? null;
+  const trackChanged = Boolean(
+    catalog.length > 0 && mockMusicState.currentTrackId && current?.id !== mockMusicState.currentTrackId
+  );
 
   mockMusicState = {
     ...mockMusicState,
+    status:
+      mockMusicState.status === 'ERROR' && mockMusicState.lastErrorCode === 'network'
+        ? 'IDLE'
+        : mockMusicState.status,
     currentTrackId: current ? current.id : null,
-    durationSec:
-      mockMusicState.durationSec ?? current?.durationSec ?? current?.duration ?? null,
+    positionSec: trackChanged ? 0 : mockMusicState.positionSec,
+    durationSec: trackChanged
+      ? current?.durationSec ?? current?.duration ?? null
+      : mockMusicState.durationSec ?? current?.durationSec ?? current?.duration ?? null,
     shuffledOrder: mockMusicState.shuffle
       ? mockMusicState.shuffledOrder.filter((id) => ids.includes(id))
       : ids,
     catalogUpdatedAt: updatedAt ?? mockMusicState.catalogUpdatedAt ?? null,
+    lastError:
+      mockMusicState.lastErrorCode === 'network' ? null : mockMusicState.lastError,
+    lastErrorCode:
+      mockMusicState.lastErrorCode === 'network' ? null : mockMusicState.lastErrorCode,
   };
 }
 
@@ -203,6 +225,16 @@ async function ensureMockCatalogLoaded(forceRefresh = false): Promise<void> {
   if (typeof fetch !== 'function') {
     if (cached?.tracks?.length) {
       applyMockCatalog(cached.tracks, cached.updatedAt);
+    } else {
+      mockMusicCatalog = [];
+      mockMusicState = {
+        ...mockMusicState,
+        status: 'ERROR',
+        currentTrackId: null,
+        lastError: 'Unable to load online Lofi catalog. Check your internet connection and retry.',
+        lastErrorCode: 'network',
+        lastUpdatedAt: Date.now(),
+      };
     }
     return;
   }
@@ -217,6 +249,20 @@ async function ensureMockCatalogLoaded(forceRefresh = false): Promise<void> {
   } catch {
     if (cached?.tracks?.length) {
       applyMockCatalog(cached.tracks, cached.updatedAt);
+    } else {
+      mockMusicCatalog = [];
+      mockMusicState = {
+        ...mockMusicState,
+        status: 'ERROR',
+        currentTrackId: null,
+        positionSec: 0,
+        durationSec: null,
+        musicEnabled: false,
+        pausedBySession: false,
+        lastError: 'Unable to load online Lofi catalog. Check your internet connection and retry.',
+        lastErrorCode: 'network',
+        lastUpdatedAt: Date.now(),
+      };
     }
   }
 }

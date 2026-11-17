@@ -21,6 +21,7 @@ import {
   deriveMusicIntent,
 } from '../../src/background/musicCoordinator.ts';
 import { SessionCoordinator } from '../../src/background/sessionCoordinator.ts';
+import { MessageHandler } from '../../src/background/messageHandler.ts';
 import { ProfileManager } from '../../src/core/profiles/profileManager.ts';
 import { BlockingCoordinator } from '../../src/background/blockingCoordinator.ts';
 import { buildPomodoroStageAlarmName } from '../../src/background/sessionCoordinator.ts';
@@ -768,3 +769,334 @@ test('ChromeOffscreenAdapter single-flight guard + createOffscreenAudioControlle
 
   ctrl.dispose();
 });
+
+test('MusicCoordinator: preserves cache on malformed JSON / invalid schema, handles disappeared track, and supports offline first-open Retry', async () => {
+  const adapter = new MemoryStorageAdapter();
+  const storage = new StorageManager(adapter);
+  const offscreen = new MockOffscreenAdapter();
+
+  let serverPayload: unknown = new Error('Offline on first boot');
+  const mc = new MusicCoordinator(storage, offscreen, {
+    fetchFn: async () => {
+      if (serverPayload instanceof Error) {
+        throw serverPayload;
+      }
+      if (typeof serverPayload === 'string') {
+        return new Response(serverPayload, {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify(serverPayload), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    },
+  });
+
+  // 1. First open offline & no cache -> clean ERROR/network state, zero crash, 0 tracks
+  const offlineInit = await mc.ensureInitialized();
+  assert.equal(mc.getCatalog().length, 0);
+  assert.equal(offlineInit.status, 'ERROR');
+  assert.equal(offlineInit.lastErrorCode, 'network');
+  assert.ok(offlineInit.lastError?.includes('Unable to load online Lofi catalog'));
+
+  // 2. User clicks Retry once network recovers -> loads full catalog & clears error
+  serverPayload = buildFixtureRawCatalog(false);
+  const recovered = await mc.refreshCatalog(true);
+  assert.equal(mc.getCatalog().length, 4);
+  assert.equal(recovered.status, 'IDLE');
+  assert.equal(recovered.lastError, null);
+  assert.equal(recovered.lastErrorCode, null);
+
+  // 3. Play track[1], then refresh with malformed JSON and schemaVersion != 1 -> stale cache stays intact
+  await mc.playTrack('purrple-cat-rooftop-rendezvous');
+  await mc.seek(45);
+
+  serverPayload = '{corrupted json!!!';
+  await mc.refreshCatalog(true);
+  assert.equal(mc.getCatalog().length, 4);
+  assert.equal((await mc.getState()).currentTrackId, 'purrple-cat-rooftop-rendezvous');
+  assert.equal((await mc.getState()).status, 'PLAYING');
+
+  serverPayload = { schemaVersion: 99, updatedAt: '2026-11-19', tracks: [] };
+  await mc.refreshCatalog(true);
+  assert.equal(mc.getCatalog().length, 4);
+  assert.equal((await mc.getState()).currentTrackId, 'purrple-cat-rooftop-rendezvous');
+
+  // 4. Refresh succeeds cleanly without the currently playing track -> falls back to track #1 at 0s
+  const trimmed = buildFixtureRawCatalog(false);
+  serverPayload = {
+    ...trimmed,
+    updatedAt: '2026-11-20',
+    tracks: trimmed.tracks.filter((t) => t.id !== 'purrple-cat-rooftop-rendezvous'),
+  };
+  const switched = await mc.refreshCatalog(true);
+  assert.equal(switched.currentTrackId, 'purrple-cat-twilight-market');
+  assert.equal(switched.positionSec, 0);
+  assert.equal(switched.status, 'PLAYING');
+  const lastCmd = offscreen.commands.at(-1);
+  assert.equal(lastCmd?.action, 'MUSIC_PLAY');
+  if (lastCmd?.action === 'MUSIC_PLAY') {
+    assert.equal(lastCmd.trackId, 'purrple-cat-twilight-market');
+    assert.equal(lastCmd.startAtSec, 0);
+  }
+});
+
+test('Session + Music Sync: full SessionCoordinator transition matrix honors stopMusicOnSessionEnd and missing recovery/reset hooks', async () => {
+  const tracks = getFixtureTracks();
+
+  const createHarness = async () => {
+    const adapter = new MemoryStorageAdapter();
+    const storage = new StorageManager(adapter);
+    const profileManager = new ProfileManager(storage);
+    const alarms = new MockAlarmsAdapter();
+    const notifications = new MockNotificationsAdapter();
+    const badge = new MockBadgeAdapter();
+    const blocking = new BlockingCoordinator(new MockDNRAdapter(), new MockTabsAdapter());
+    const offscreen = new MockOffscreenAdapter();
+    const musicCoordinator = new MusicCoordinator(storage, offscreen, tracks);
+
+    const sessionCoordinator = new SessionCoordinator(
+      storage,
+      profileManager,
+      alarms,
+      notifications,
+      badge,
+      blocking,
+      () => [],
+      (event) => musicCoordinator.handleFocusSessionEnded(event),
+      async (session, reason) => {
+        await musicCoordinator.sync(session, reason);
+      }
+    );
+    const messageHandler = new MessageHandler(
+      sessionCoordinator,
+      profileManager,
+      storage,
+      undefined,
+      musicCoordinator
+    );
+    const profile = await profileManager.createProfile('MatrixProfile', ['example.com']);
+    return {
+      storage,
+      sessionCoordinator,
+      musicCoordinator,
+      messageHandler,
+      offscreen,
+      profile,
+    };
+  };
+
+  // Scenario A: Countdown Start -> Auto-Resume -> Complete Countdown (stopMusicOnSessionEnd = true vs false)
+  {
+    const h = await createHarness();
+    await h.sessionCoordinator.startSession('COUNTDOWN', 25, h.profile.id);
+    await h.musicCoordinator.playTrack(tracks[0].id);
+    await h.sessionCoordinator.pauseSession();
+    assert.equal((await h.musicCoordinator.getState()).status, 'PAUSED');
+
+    // Auto-resume resumes music
+    await h.sessionCoordinator.resumeSession(true);
+    assert.equal((await h.musicCoordinator.getState()).status, 'PLAYING');
+
+    // Complete countdown stops music when stopMusicOnSessionEnd = true
+    await h.sessionCoordinator.completeCountdown();
+    assert.equal((await h.musicCoordinator.getState()).status, 'STOPPED');
+    assert.equal(h.offscreen.documentOpen, false);
+
+    // Reset back to IDLE preserves STOPPED
+    await h.sessionCoordinator.resetSession();
+    assert.equal((await h.musicCoordinator.getState()).status, 'STOPPED');
+
+    // Repeat with stopMusicOnSessionEnd = false -> stays PLAYING across completion and resetSession
+    await h.musicCoordinator.setSyncWithSession(false);
+    await h.sessionCoordinator.startSession('COUNTDOWN', 25, h.profile.id);
+    await h.musicCoordinator.playTrack(tracks[0].id);
+    await h.sessionCoordinator.completeCountdown();
+    assert.equal((await h.musicCoordinator.getState()).status, 'PLAYING');
+    await h.sessionCoordinator.resetSession();
+    assert.equal((await h.musicCoordinator.getState()).status, 'PLAYING');
+  }
+
+  // Scenario B: Stopwatch Finish & GiveUp (Countdown) & SKIP_POMODORO_BREAK
+  {
+    const h = await createHarness();
+    await h.sessionCoordinator.startSession('STOPWATCH', 0, h.profile.id);
+    await h.musicCoordinator.playTrack(tracks[0].id);
+    await h.sessionCoordinator.finishStopwatch();
+    assert.equal((await h.musicCoordinator.getState()).status, 'STOPPED');
+    await h.sessionCoordinator.resetSession();
+
+    // Countdown Give Up stops music when stopMusicOnSessionEnd = true
+    await h.sessionCoordinator.startSession('COUNTDOWN', 25, h.profile.id);
+    await h.musicCoordinator.playTrack(tracks[0].id);
+    await h.sessionCoordinator.giveUpCountdown();
+    assert.equal((await h.musicCoordinator.getState()).status, 'STOPPED');
+    await h.sessionCoordinator.resetSession();
+
+    // Pomodoro Break -> SKIP_POMODORO_BREAK via MessageHandler -> immediately resumes music
+    const pomo = await h.sessionCoordinator.startSession('POMODORO_COUNTDOWN', 25, h.profile.id, {
+      focusDurationMinutes: 25,
+      focusIntervalDurationMinutes: 25,
+      shortBreakDurationMinutes: 5,
+      longBreakDurationMinutes: 15,
+      focusIntervalsPerCycle: 2,
+      targetFocusSessions: 2,
+      numberOfCycles: 1,
+    });
+    await h.musicCoordinator.playTrack(tracks[0].id);
+    const alarmFocusEnd = buildPomodoroStageAlarmName(
+      pomo.id,
+      1,
+      'FOCUS',
+      pomo.pomodoroState!.phaseStartedAt
+    );
+    await h.sessionCoordinator.advancePomodoroStage(alarmFocusEnd);
+    assert.equal((await h.musicCoordinator.getState()).status, 'PAUSED');
+
+    const skipResp = await h.messageHandler.handleMessage({ action: 'SKIP_POMODORO_BREAK' });
+    assert.equal(skipResp.success, true);
+    assert.equal((await h.musicCoordinator.getState()).status, 'PLAYING');
+
+    // POMODORO_STOPWATCH Finish stops music cleanly
+    await h.sessionCoordinator.giveUpCountdown();
+    await h.sessionCoordinator.resetSession();
+    await h.sessionCoordinator.startSession('POMODORO_STOPWATCH', 0, h.profile.id, {
+      focusDurationMinutes: 25,
+      focusIntervalDurationMinutes: 25,
+      shortBreakDurationMinutes: 5,
+      longBreakDurationMinutes: 15,
+      focusIntervalsPerCycle: 2,
+      targetFocusSessions: 2,
+      numberOfCycles: 1,
+    });
+    await h.musicCoordinator.playTrack(tracks[0].id);
+    await h.sessionCoordinator.finishStopwatch();
+    assert.equal((await h.musicCoordinator.getState()).status, 'STOPPED');
+  }
+
+  // Scenario C: Extension Disabled, Browser Startup (<1s active & >=1s interrupted), Non-startup terminal recovery
+  {
+    const h = await createHarness();
+    // 1. Extension disabled interrupts & stops music
+    const s1 = await h.sessionCoordinator.startSession('COUNTDOWN', 25, h.profile.id);
+    await h.musicCoordinator.playTrack(tracks[0].id);
+    await h.sessionCoordinator.handleExtensionDisabledRecovery(s1, 'EXTENSION_DISABLED');
+    assert.equal((await h.musicCoordinator.getState()).status, 'STOPPED');
+
+    // Non-startup recovery on terminal session when stale music somehow active also stops it
+    await h.musicCoordinator.playTrack(tracks[0].id);
+    assert.equal((await h.musicCoordinator.getState()).status, 'PLAYING');
+    await h.sessionCoordinator.handleLifecycleEvent({ reason: 'SERVICE_WORKER_WAKE' });
+    assert.equal((await h.musicCoordinator.getState()).status, 'STOPPED');
+    await h.sessionCoordinator.resetSession();
+
+    // 2. Browser startup with active COUNTDOWN (< 1s downtime) invokes BROWSER_STARTUP_ACTIVE sync
+    const now = Date.now();
+    const s2 = await h.sessionCoordinator.startSession('COUNTDOWN', 25, h.profile.id);
+    await h.musicCoordinator.playTrack(tracks[0].id);
+    await h.storage.setCurrentSession({
+      ...s2,
+      startedAt: now - 500,
+      lastHeartbeatAt: now - 100,
+      lastCheckpointAt: now - 100,
+    });
+    await h.sessionCoordinator.handleBrowserStartupRecovery(s2);
+    assert.equal((await h.musicCoordinator.getState()).status, 'PLAYING');
+
+    // 3. Browser startup with >= 10s downtime interrupts Countdown & stops music
+    await h.storage.setCurrentSession({
+      ...s2,
+      startedAt: now - 120_000,
+      lastHeartbeatAt: now - 60_000,
+      lastCheckpointAt: now - 60_000,
+    });
+    await h.sessionCoordinator.handleBrowserStartupRecovery(s2);
+    assert.equal((await h.musicCoordinator.getState()).status, 'STOPPED');
+  }
+});
+
+test('SessionCoordinator Hook Isolation: music hooks never hold StorageMutex and errors never alter session rewards', async () => {
+  const tracks = getFixtureTracks();
+
+  const runSessionWithHook = async (
+    syncHook?: (session: SessionSnapshot | null, reason?: string) => Promise<void> | void,
+    endedHook?: (event: { sessionId: string; status: 'COMPLETED' | 'ABANDONED' | 'INTERRUPTED'; mode: SessionSnapshot['mode'] }) => Promise<void> | void
+  ) => {
+    const adapter = new MemoryStorageAdapter();
+    const storage = new StorageManager(adapter);
+    const profileManager = new ProfileManager(storage);
+    const alarms = new MockAlarmsAdapter();
+    const notifications = new MockNotificationsAdapter();
+    const badge = new MockBadgeAdapter();
+    const blocking = new BlockingCoordinator(new MockDNRAdapter(), new MockTabsAdapter());
+
+    const sc = new SessionCoordinator(
+      storage,
+      profileManager,
+      alarms,
+      notifications,
+      badge,
+      blocking,
+      () => [],
+      endedHook,
+      syncHook
+    );
+    const profile = await profileManager.createProfile('RewardCheck', ['example.com']);
+    await sc.startSession('COUNTDOWN', 25, profile.id);
+    await sc.completeCountdown();
+    return storage.getEconomy();
+  };
+
+  // 1. Slow async sync/ended hook does NOT hold StorageMutex
+  const adapter = new MemoryStorageAdapter();
+  const storage = new StorageManager(adapter);
+  const profileManager = new ProfileManager(storage);
+  let mutexResolvedWhileHookSleeping = false;
+  let releaseHook!: () => void;
+  const hookEntered = new Promise<void>((resolve) => {
+    releaseHook = resolve;
+  });
+
+  const sc = new SessionCoordinator(
+    storage,
+    profileManager,
+    new MockAlarmsAdapter(),
+    new MockNotificationsAdapter(),
+    new MockBadgeAdapter(),
+    new BlockingCoordinator(new MockDNRAdapter(), new MockTabsAdapter()),
+    () => [],
+    undefined,
+    async () => {
+      releaseHook();
+      await new Promise((r) => setTimeout(r, 80));
+    }
+  );
+  const profile = await profileManager.createProfile('MutexFreeProfile', ['example.com']);
+  const startPromise = sc.startSession('COUNTDOWN', 25, profile.id);
+  await hookEntered;
+  // While sync hook is mid-await (80ms), storage.runExclusive must be free immediately!
+  await Promise.race([
+    storage.runExclusive(async () => {
+      mutexResolvedWhileHookSleeping = true;
+    }),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('StorageMutex was still held by hook!')), 30)),
+  ]);
+  assert.equal(mutexResolvedWhileHookSleeping, true);
+  await startPromise;
+
+  // 2. Throwing hooks produce the exact same Coins & XP as healthy/absent hooks
+  const baselineEconomy = await runSessionWithHook();
+  const brokenHookEconomy = await runSessionWithHook(
+    async () => {
+      throw new Error(`Boom ${tracks[0].id}`);
+    },
+    async () => {
+      throw new Error('Ended hook boom');
+    }
+  );
+  assert.equal(brokenHookEconomy.focusCoins, baselineEconomy.focusCoins);
+  assert.equal(brokenHookEconomy.totalXP, baselineEconomy.totalXP);
+});
+

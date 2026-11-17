@@ -9,7 +9,31 @@ export const LOFI_BASE_URL = 'https://khangbui2010.github.io/FocusQuest-LOFI-arc
 export const LOFI_CATALOG_URL = 'https://khangbui2010.github.io/FocusQuest-LOFI-archive/tracks.json';
 export const LOFI_CATALOG_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
+export const MAX_CATALOG_TRACKS = 200;
+export const MAX_TRACK_STRING_LENGTH = 200;
+export const MAX_TRACK_URL_LENGTH = 500;
+export const MAX_TRACK_DURATION_SEC = 86400;
+export const VALID_TRACK_ID_REGEX = /^[a-z0-9-]+$/;
+
+export const ALLOWED_REMOTE_LICENSES = [
+  'CC0-1.0',
+  'CC-BY-4.0',
+  'CC-BY-3.0',
+  'CC-BY-SA-3.0',
+  'CC-BY-SA-4.0',
+] as const;
+
+const ALLOWED_REMOTE_LICENSE_SET = new Set<string>(ALLOWED_REMOTE_LICENSES);
+
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+
+export interface ParsedRemoteCatalogResult {
+  schemaVersion: number;
+  updatedAt: string;
+  tracks: MusicTrack[];
+  skippedCount: number;
+  skippedReasons: string[];
+}
 
 /**
  * Determine if a track's license requires attribution (e.g. CC-BY-4.0, CC-BY-SA-3.0, CC BY, CC BY-SA).
@@ -23,11 +47,54 @@ export function isAttributionRequired(license: string): boolean {
 }
 
 /**
+ * Validates that a remote license SPDX identifier belongs strictly to the approved commercial-friendly CC allowlist.
+ */
+export function isAllowedRemoteLicense(license: unknown): license is string {
+  if (typeof license !== 'string') return false;
+  return ALLOWED_REMOTE_LICENSE_SET.has(license.trim());
+}
+
+/**
+ * Validates an HTTPS URL within strict length bounds. Rejects http:, javascript:, data:, file:, etc.
+ */
+export function isValidHttpsUrl(urlValue: unknown): urlValue is string {
+  if (typeof urlValue !== 'string') return false;
+  if (urlValue.length > MAX_TRACK_URL_LENGTH) return false;
+  const trimmed = urlValue.trim();
+  if (!trimmed || !/^https:\/\//i.test(trimmed)) return false;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === 'https:' && Boolean(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Strict validator for a remote track `file` field inside untrusted tracks.json:
+ * rejects empty strings, oversized names, traversal ('..'), slashes ('/', '\'), URI schemes, or non-.mp3 files.
+ */
+export function isSafeRemoteTrackFilename(filePath: unknown): filePath is string {
+  if (typeof filePath !== 'string') return false;
+  if (filePath.length > MAX_TRACK_STRING_LENGTH) return false;
+  const trimmed = filePath.trim();
+  if (!trimmed) return false;
+  if (trimmed.includes('..') || trimmed.includes('/') || trimmed.includes('\\')) {
+    return false;
+  }
+  if (trimmed.includes(':') || trimmed.includes('?') || trimmed.includes('#')) {
+    return false;
+  }
+  return trimmed.toLowerCase().endsWith('.mp3') && trimmed.length > 4;
+}
+
+/**
  * Validates that a track file entry is either a clean relative audio filename (e.g. 'track.mp3')
  * or an explicit HTTPS URL, rejecting local extension paths, traversal, and unsafe URI schemes.
  */
 export function isValidStreamFileOrUrl(filePath: string): boolean {
   if (!filePath || typeof filePath !== 'string') return false;
+  if (filePath.length > MAX_TRACK_URL_LENGTH) return false;
   const trimmed = filePath.trim();
   if (!trimmed) return false;
   if (/^(data|blob|file|javascript):/i.test(trimmed)) return false;
@@ -45,11 +112,11 @@ export function isValidStreamFileOrUrl(filePath: string): boolean {
     }
   }
 
-  if (trimmed.includes('://') || trimmed.startsWith('assets/music/')) {
+  if (trimmed.includes('/') || trimmed.includes(':') || trimmed.startsWith('assets/')) {
     return false;
   }
 
-  return trimmed.toLowerCase().endsWith('.mp3');
+  return isSafeRemoteTrackFilename(trimmed);
 }
 
 /**
@@ -77,13 +144,12 @@ export function resolveTrackStreamUrl(
     return parsed.toString();
   }
 
-  if (!isValidStreamFileOrUrl(trimmed)) {
+  if (!isSafeRemoteTrackFilename(trimmed)) {
     throw new Error(`Invalid track stream file path: '${trimmed}'.`);
   }
 
   const normalizedBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
-  const cleanRelative = trimmed.replace(/^\/+/, '');
-  return new URL(cleanRelative, normalizedBase).toString();
+  return new URL(trimmed, normalizedBase).toString();
 }
 
 export function buildTrackAttribution(raw: {
@@ -143,11 +209,73 @@ export function normalizeRemoteTrack(
   };
 }
 
+function validateRawRemoteTrackEntry(
+  entry: unknown,
+  seenIds: Set<string>
+): string | null {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    return 'entry is not an object';
+  }
+  const raw = entry as Record<string, unknown>;
+
+  if (typeof raw.id !== 'string' || raw.id.length > MAX_TRACK_STRING_LENGTH) {
+    return 'invalid or oversized track id';
+  }
+  const id = raw.id.trim();
+  if (!id || !VALID_TRACK_ID_REGEX.test(id)) {
+    return `id '${id}' does not match ^[a-z0-9-]+$`;
+  }
+  if (seenIds.has(id)) {
+    return `duplicate track id '${id}'`;
+  }
+
+  if (typeof raw.title !== 'string' || !raw.title.trim() || raw.title.length > MAX_TRACK_STRING_LENGTH) {
+    return `track '${id}' has missing or oversized title`;
+  }
+  if (typeof raw.artist !== 'string' || !raw.artist.trim() || raw.artist.length > MAX_TRACK_STRING_LENGTH) {
+    return `track '${id}' has missing or oversized artist`;
+  }
+  if (raw.album !== undefined && (typeof raw.album !== 'string' || raw.album.length > MAX_TRACK_STRING_LENGTH)) {
+    return `track '${id}' has invalid or oversized album`;
+  }
+
+  if (typeof raw.license !== 'string' || !raw.license.trim() || raw.license.length > MAX_TRACK_STRING_LENGTH) {
+    return `track '${id}' has missing or oversized license`;
+  }
+  const trimmedLicense = raw.license.trim();
+  if (!isAllowedRemoteLicense(trimmedLicense)) {
+    return `track '${id}' has disallowed license '${trimmedLicense}'`;
+  }
+
+  if (!isValidHttpsUrl(raw.licenseUrl)) {
+    return `track '${id}' has missing, oversized, or non-HTTPS licenseUrl`;
+  }
+  if (!isValidHttpsUrl(raw.sourceUrl)) {
+    return `track '${id}' has missing, oversized, or non-HTTPS sourceUrl`;
+  }
+
+  if (!isSafeRemoteTrackFilename(raw.file)) {
+    return `track '${id}' has unsafe or invalid file '${String(raw.file ?? '')}'`;
+  }
+
+  if (
+    raw.durationSec !== undefined &&
+    (typeof raw.durationSec !== 'number' ||
+      !Number.isFinite(raw.durationSec) ||
+      raw.durationSec < 0 ||
+      raw.durationSec > MAX_TRACK_DURATION_SEC)
+  ) {
+    return `track '${id}' has invalid durationSec`;
+  }
+
+  return null;
+}
+
 export function parseRemoteCatalog(
   rawData: unknown,
   baseUrl: string = LOFI_BASE_URL
-): { schemaVersion: number; updatedAt: string; tracks: MusicTrack[] } {
-  if (!rawData || typeof rawData !== 'object') {
+): ParsedRemoteCatalogResult {
+  if (!rawData || typeof rawData !== 'object' || Array.isArray(rawData)) {
     throw new Error('Invalid remote music catalog payload.');
   }
 
@@ -161,17 +289,50 @@ export function parseRemoteCatalog(
   if (!Array.isArray(record.tracks)) {
     throw new Error('Remote music catalog is missing tracks array.');
   }
+  if (record.tracks.length > MAX_CATALOG_TRACKS) {
+    throw new Error(
+      `Remote music catalog exceeds maximum allowed track count (${MAX_CATALOG_TRACKS}).`
+    );
+  }
+  if (
+    record.updatedAt !== undefined &&
+    (typeof record.updatedAt !== 'string' || record.updatedAt.length > MAX_TRACK_STRING_LENGTH)
+  ) {
+    throw new Error('Remote music catalog updatedAt is invalid or exceeds maximum length.');
+  }
 
-  const tracks = record.tracks.map((entry) => normalizeRemoteTrack(entry, baseUrl));
-  const validation = validateMusicCatalog(tracks);
-  if (!validation.valid) {
-    throw new Error(`Invalid remote music catalog entries: ${validation.errors.join('; ')}`);
+  const tracks: MusicTrack[] = [];
+  const seenIds = new Set<string>();
+  const skippedReasons: string[] = [];
+
+  for (const entry of record.tracks) {
+    const rejectionReason = validateRawRemoteTrackEntry(entry, seenIds);
+    if (rejectionReason) {
+      skippedReasons.push(rejectionReason);
+      continue;
+    }
+
+    try {
+      const normalized = normalizeRemoteTrack(entry as RemoteMusicTrackRaw, baseUrl);
+      seenIds.add(normalized.id);
+      tracks.push(normalized);
+    } catch (err) {
+      skippedReasons.push(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  if (skippedReasons.length > 0) {
+    console.warn(
+      `[MusicCatalog] Skipped ${skippedReasons.length} invalid track(s): ${skippedReasons.join('; ')}`
+    );
   }
 
   return {
     schemaVersion: record.schemaVersion,
-    updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : '',
+    updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt.trim() : '',
     tracks,
+    skippedCount: skippedReasons.length,
+    skippedReasons,
   };
 }
 
@@ -205,7 +366,13 @@ export async function fetchRemoteMusicCatalog(
     throw new Error(`Failed to fetch remote music catalog (${statusText}).`);
   }
 
-  const rawJson = (await response.json()) as unknown;
+  let rawJson: unknown;
+  try {
+    rawJson = (await response.json()) as unknown;
+  } catch {
+    throw new Error('Malformed JSON in remote music catalog.');
+  }
+
   const parsed = parseRemoteCatalog(rawJson, baseUrl);
   return {
     schemaVersion: parsed.schemaVersion,
@@ -213,6 +380,7 @@ export async function fetchRemoteMusicCatalog(
     fetchedAt: Date.now(),
     sourceUrl: catalogUrl,
     tracks: parsed.tracks,
+    skippedCount: parsed.skippedCount,
   };
 }
 
@@ -222,9 +390,17 @@ export function validateMusicCatalog(
   const errors: string[] = [];
   const seenIds = new Set<string>();
 
+  if (catalog.length > MAX_CATALOG_TRACKS) {
+    errors.push(`Catalog exceeds maximum allowed track count (${MAX_CATALOG_TRACKS}).`);
+  }
+
   for (const track of catalog) {
     if (!track.id || !track.id.trim()) {
       errors.push('Track is missing a non-empty id.');
+    } else if (!VALID_TRACK_ID_REGEX.test(track.id.trim())) {
+      errors.push(`Track '${track.id}' has invalid id format (expected ^[a-z0-9-]+$).`);
+    } else if (track.id.length > MAX_TRACK_STRING_LENGTH) {
+      errors.push(`Track '${track.id}' id exceeds maximum length.`);
     } else if (seenIds.has(track.id)) {
       errors.push(`Duplicate track id '${track.id}'.`);
     } else {
@@ -233,6 +409,14 @@ export function validateMusicCatalog(
 
     if (!track.title || !track.title.trim()) {
       errors.push(`Track '${track.id}' is missing title.`);
+    } else if (track.title.length > MAX_TRACK_STRING_LENGTH) {
+      errors.push(`Track '${track.id}' title exceeds maximum length.`);
+    }
+
+    if (!track.artist || !track.artist.trim()) {
+      errors.push(`Track '${track.id}' is missing artist.`);
+    } else if (track.artist.length > MAX_TRACK_STRING_LENGTH) {
+      errors.push(`Track '${track.id}' artist exceeds maximum length.`);
     }
 
     if (!isValidStreamFileOrUrl(track.file)) {
@@ -244,13 +428,20 @@ export function validateMusicCatalog(
     const dur = track.durationSec ?? track.duration;
     if (
       dur !== undefined &&
-      (typeof dur !== 'number' || !Number.isFinite(dur) || dur < 0)
+      (typeof dur !== 'number' || !Number.isFinite(dur) || dur < 0 || dur > MAX_TRACK_DURATION_SEC)
     ) {
       errors.push(`Track '${track.id}' has invalid durationSec '${String(dur)}'.`);
     }
 
     if (!track.license || !track.license.trim()) {
       errors.push(`Track '${track.id}' is missing license label.`);
+    }
+
+    if (track.licenseUrl && !isValidHttpsUrl(track.licenseUrl)) {
+      errors.push(`Track '${track.id}' has non-HTTPS or oversized licenseUrl.`);
+    }
+    if (track.sourceUrl && !isValidHttpsUrl(track.sourceUrl)) {
+      errors.push(`Track '${track.id}' has non-HTTPS or oversized sourceUrl.`);
     }
 
     if (isAttributionRequired(track.license)) {

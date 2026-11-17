@@ -73,6 +73,17 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
 }) => {
   const { locale, t } = useTranslation();
   const [scrubSec, setScrubSec] = useState<number | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefreshClick = async () => {
+    if (!onRefreshCatalog || isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      await onRefreshCatalog();
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   useEffect(() => {
     setScrubSec(null);
@@ -464,11 +475,12 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
                   type="button"
                   data-testid="music-refresh-catalog-btn"
                   aria-label={t('music.refreshCatalogAria')}
-                  onClick={() => void onRefreshCatalog()}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 cursor-pointer"
+                  disabled={isRefreshing}
+                  onClick={() => void handleRefreshClick()}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 cursor-pointer disabled:opacity-50"
                 >
-                  <RefreshCw className="w-3 h-3" />
-                  <span>{t('music.refreshCatalogLabel')}</span>
+                  <RefreshCw className={`w-3 h-3 ${isRefreshing ? 'animate-spin' : ''}`} />
+                  <span>{isRefreshing ? t('music.retryingCatalogBtn') : t('music.refreshCatalogLabel')}</span>
                 </button>
               )}
             </div>
@@ -476,7 +488,7 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
             {safeCatalog.length === 0 ? (
               <div
                 data-testid="music-empty-catalog"
-                className="p-4 text-center rounded-lg border border-dashed border-slate-200 dark:border-slate-700 space-y-1"
+                className="p-4 text-center rounded-lg border border-dashed border-slate-200 dark:border-slate-700 space-y-2"
               >
                 <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                   {t('music.emptyCatalogTitle')}
@@ -484,6 +496,20 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
                 <p className="text-[11px] text-slate-500 dark:text-slate-400">
                   {t('music.emptyCatalogDesc')}
                 </p>
+                {onRefreshCatalog && (
+                  <button
+                    type="button"
+                    data-testid="music-retry-catalog-btn"
+                    disabled={isRefreshing}
+                    onClick={() => void handleRefreshClick()}
+                    className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+                    <span>
+                      {isRefreshing ? t('music.retryingCatalogBtn') : t('music.retryCatalogBtn')}
+                    </span>
+                  </button>
+                )}
               </div>
             ) : (
               <div data-testid="music-playlist-list" className="space-y-1">

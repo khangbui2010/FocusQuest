@@ -172,6 +172,7 @@ export function createDefaultMusicPlayerState(
     playDuringBreak: settings?.musicPlayDuringBreak ?? false,
     pausedBySession: false,
     catalogUpdatedAt: null,
+    catalogSkippedCount: 0,
     lastUpdatedAt: Date.now(),
     lastError: null,
     lastErrorCode: null,
@@ -324,6 +325,10 @@ export class MusicCoordinator {
         typeof raw.catalogUpdatedAt === 'string'
           ? raw.catalogUpdatedAt
           : defaults.catalogUpdatedAt ?? null,
+      catalogSkippedCount:
+        typeof raw.catalogSkippedCount === 'number'
+          ? raw.catalogSkippedCount
+          : defaults.catalogSkippedCount ?? 0,
       lastUpdatedAt: typeof raw.lastUpdatedAt === 'number' ? raw.lastUpdatedAt : this.nowFn(),
       lastError: typeof raw.lastError === 'string' ? raw.lastError : null,
       lastErrorCode: raw.lastErrorCode ?? null,
@@ -349,12 +354,24 @@ export class MusicCoordinator {
     }
 
     const now = this.nowFn();
-    const cached = await this.storage.getMusicCatalogCache().catch(() => null);
+    const rawCached = await this.storage.getMusicCatalogCache().catch(() => null);
+    const cached =
+      rawCached &&
+      typeof rawCached === 'object' &&
+      rawCached.schemaVersion === 1 &&
+      Array.isArray(rawCached.tracks) &&
+      rawCached.tracks.length > 0
+        ? rawCached
+        : null;
 
     if (!forceRefresh && cached && isCatalogCacheFresh(cached, now, this.cacheTtlMs)) {
       this.catalog = cached.tracks;
       if (!this.state.catalogUpdatedAt && cached.updatedAt) {
-        this.state = { ...this.state, catalogUpdatedAt: cached.updatedAt };
+        this.state = {
+          ...this.state,
+          catalogUpdatedAt: cached.updatedAt,
+          catalogSkippedCount: cached.skippedCount ?? this.state.catalogSkippedCount ?? 0,
+        };
       }
       return { catalog: this.catalog, fetched: false };
     }
@@ -378,6 +395,7 @@ export class MusicCoordinator {
         {
           ...this.state,
           catalogUpdatedAt: stamped.updatedAt,
+          catalogSkippedCount: stamped.skippedCount ?? 0,
         },
         null
       );
@@ -469,8 +487,35 @@ export class MusicCoordinator {
         this.storage.getSettings().catch(() => null),
       ]);
 
-      await this.ensureCatalogLoaded(false);
+      const catalogResult = await this.ensureCatalogLoaded(false);
       this.state = this.normalizeStateAgainstCatalog(persisted, settings, persisted === null);
+
+      if (catalogResult.error && this.catalog.length === 0) {
+        this.state = await this.persistState({
+          ...this.state,
+          status: 'ERROR',
+          currentTrackId: null,
+          positionSec: 0,
+          durationSec: null,
+          musicEnabled: false,
+          pausedBySession: false,
+          lastError:
+            'Unable to load online Lofi catalog. Check your internet connection and retry.',
+          lastErrorCode: 'network',
+        });
+      } else if (
+        !catalogResult.error &&
+        this.catalog.length > 0 &&
+        this.state.status === 'ERROR' &&
+        this.state.lastErrorCode === 'network'
+      ) {
+        this.state = await this.persistState({
+          ...this.state,
+          status: 'IDLE',
+          lastError: null,
+          lastErrorCode: null,
+        });
+      }
 
       const hasOffscreen = await this.offscreen.hasDocument().catch(() => false);
       if (hasOffscreen) {
@@ -545,22 +590,75 @@ export class MusicCoordinator {
   async refreshCatalog(force: boolean = true): Promise<MusicPlayerState> {
     await this.ensureInitialized();
     return this.runExclusive(async () => {
+      const prevTrackId = this.state.currentTrackId;
+      const wasPlaying = this.state.status === 'PLAYING';
+      const wasPaused = this.state.status === 'PAUSED';
       const prevCatalogLen = this.catalog.length;
       const result = await this.ensureCatalogLoaded(force);
+
       if (result.error && result.catalog.length === 0) {
         return this.persistState({
           ...this.state,
           status: 'ERROR',
-          lastError: result.error,
+          currentTrackId: null,
+          positionSec: 0,
+          durationSec: null,
+          musicEnabled: false,
+          pausedBySession: false,
+          lastError:
+            'Unable to load online Lofi catalog. Check your internet connection and retry.',
           lastErrorCode: 'network',
         });
       }
+
       if (result.fetched || this.catalog.length !== prevCatalogLen) {
-        return this.persistState({
-          ...this.normalizeStateAgainstCatalog(this.state, null),
-          lastError: null,
-          lastErrorCode: null,
-        });
+        const normalized = this.normalizeStateAgainstCatalog(this.state, null);
+        const clearedState: MusicPlayerState = {
+          ...normalized,
+          status:
+            normalized.status === 'ERROR' && this.state.lastErrorCode === 'network'
+              ? 'IDLE'
+              : normalized.status,
+          lastError:
+            normalized.status === 'ERROR' && this.state.lastErrorCode === 'network'
+              ? null
+              : normalized.lastError,
+          lastErrorCode:
+            normalized.status === 'ERROR' && this.state.lastErrorCode === 'network'
+              ? null
+              : normalized.lastErrorCode,
+        };
+
+        const currentTrackDisappeared = Boolean(
+          prevTrackId && !this.catalog.some((t) => t.id === prevTrackId)
+        );
+
+        if (currentTrackDisappeared) {
+          const fallbackTrack = this.catalog[0] ?? null;
+          if (!fallbackTrack) {
+            return this.stopInternal();
+          }
+          if (wasPlaying) {
+            this.state = {
+              ...clearedState,
+              currentTrackId: fallbackTrack.id,
+              positionSec: 0,
+              durationSec: getTrackDurationSec(fallbackTrack),
+            };
+            return this.startPlaybackInOffscreen(fallbackTrack, 0, {
+              musicEnabled: true,
+              pausedBySession: false,
+            });
+          }
+          if (wasPaused) {
+            const hasDoc = await this.offscreen.hasDocument().catch(() => false);
+            if (hasDoc) {
+              await this.offscreen.closeDocument().catch(() => undefined);
+            }
+          }
+        }
+
+        return this.persistState(clearedState);
       }
       return { ...this.state };
     });
@@ -571,10 +669,30 @@ export class MusicCoordinator {
     return this.runExclusive(async () => {
       if (!this.hasPinnedCatalog) {
         const result = await this.ensureCatalogLoaded(false);
-        if (result.fetched) {
-          this.state = await this.persistState(
-            this.normalizeStateAgainstCatalog(this.state, null)
-          );
+        if (result.error && result.catalog.length === 0) {
+          this.state = await this.persistState({
+            ...this.state,
+            status: 'ERROR',
+            currentTrackId: null,
+            positionSec: 0,
+            durationSec: null,
+            musicEnabled: false,
+            pausedBySession: false,
+            lastError:
+              'Unable to load online Lofi catalog. Check your internet connection and retry.',
+            lastErrorCode: 'network',
+          });
+        } else if (result.fetched) {
+          const normalized = this.normalizeStateAgainstCatalog(this.state, null);
+          this.state = await this.persistState({
+            ...normalized,
+            status:
+              normalized.status === 'ERROR' && this.state.lastErrorCode === 'network'
+                ? 'IDLE'
+                : normalized.status,
+            lastError: null,
+            lastErrorCode: null,
+          });
         }
       }
 

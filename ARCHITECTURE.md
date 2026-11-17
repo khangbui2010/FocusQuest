@@ -1,9 +1,9 @@
 # Focus Quest — Technical Architecture Specification (Manifest V3)
 
-**Version:** 1.4.0  
-**Status:** MV3 Background, Civilization Engine & Full Bilingual Architecture  
-**Target Platform:** Google Chrome Extension (Manifest V3)  
-**Language & Stack:** TypeScript 7, React 19 (Popup & Blocked UI), Tailwind CSS 4, Chrome Extension APIs (`declarativeNetRequest`, `alarms`, `storage`, `notifications`, `runtime`, `action`, `i18n`)  
+**Version:** 1.5.0  
+**Status:** MV3 Background, Offscreen LOFI Streaming, Civilization Engine & Full Bilingual Architecture  
+**Target Platform:** Google Chrome Extension (Manifest V3, Chrome >= 116)  
+**Language & Stack:** TypeScript, React 19 (Popup & Blocked UI), Tailwind CSS 4, Chrome Extension APIs (`declarativeNetRequest`, `alarms`, `notifications`, `offscreen`, `storage`, `runtime`, `action`, `i18n`)  
 
 ---
 
@@ -34,14 +34,15 @@ File cấu hình Manifest V3 (`public/manifest.json`):
   "manifest_version": 3,
   "name": "__MSG_extName__",
   "version": "1.0.0",
-  "minimum_chrome_version": "102",
+  "minimum_chrome_version": "116",
   "default_locale": "en",
   "description": "__MSG_extDescription__",
   "permissions": [
     "storage",
     "alarms",
     "notifications",
-    "declarativeNetRequest"
+    "declarativeNetRequest",
+    "offscreen"
   ],
   "host_permissions": [
     "http://*/*",
@@ -63,14 +64,15 @@ File cấu hình Manifest V3 (`public/manifest.json`):
   ]
 }
 ```
-*Ghi chú:* Vite đóng gói 3 entrypoint (`index.html` → popup, `src/background/index.ts` → `dist/background.js`, `src/blocked/blocked.ts` → `dist/blocked.js` không có inline script theo CSP MV3) cùng thư mục `public/_locales/{en,vi}/messages.json`.
+*Ghi chú:* Vite đóng gói **4 entrypoint** (`index.html` → popup, `src/background/index.ts` → `dist/background.js`, `src/blocked/blocked.ts` → `dist/blocked.js`, `public/offscreen.html` + `src/offscreen/offscreen.ts` → `dist/offscreen.js` không có inline script theo CSP MV3) cùng thư mục `public/_locales/{en,vi}/messages.json`.
 
 ### Phân tích và Biện minh Quyền (Permissions Justification):
-- `"storage"`: Lưu trữ bền vững dữ liệu session, profiles, ví kinh tế và thống kê ngày trên máy người dùng.
+- `"storage"`: Lưu trữ bền vững dữ liệu session, profiles, ví kinh tế, thống kê ngày, trạng thái nhạc và cache danh mục bài hát trên máy người dùng.
 - `"alarms"`: Đánh thức Service Worker khi Countdown chạm đích (`FQ_ALARM_COUNTDOWN_FINISH`) hoặc khi Pause chạm mốc 5 phút (`FQ_ALARM_PAUSE_AUTO_RESUME`).
-- `"notifications"`: Phát Chrome Notification hệ thống khi hoàn thành phiên Countdown hoặc Pomodoro. (Hiệu ứng âm thanh chuông chuyển phase được thực hiện riêng bằng Web Audio API khi Popup mở, không phụ thuộc file âm thanh ngoài hay quyền notification).
-- `"declarativeNetRequest"`: Chặn hoặc chuyển hướng các truy cập web không nằm trong Allowlist ở cấp độ network của trình duyệt.
-- `"host_permissions": ["*://*/*"]`: Yêu cầu kỹ thuật bắt buộc của Chrome Manifest V3 đối với `declarativeNetRequest` khi sử dụng action `redirect` chuyển hướng trang web sang trang extension nội bộ (`blocked.html`). Nếu không có host permissions, DNR chỉ có thể thực hiện action `block` (hiển thị trang lỗi trình duyệt `ERR_BLOCKED_BY_CLIENT`) thay vì chuyển hướng sang giao diện Focus Shield thân thiện.
+- `"notifications"`: Phát Chrome Notification hệ thống khi hoàn thành phiên Countdown, Stopwatch (>= 5m), Pomodoro hoặc chuyển pha. (Hiệu ứng âm thanh chuông chuyển phase được thực hiện riêng bằng Web Audio API trong `soundEffects.ts` khi Popup mở).
+- `"declarativeNetRequest"`: Chặn hoặc chuyển hướng các điều hướng `main_frame` không nằm trong Allowlist ở cấp độ network của trình duyệt.
+- `"offscreen"`: Tạo Offscreen Document ẩn với reason `['AUDIO_PLAYBACK']` (Chrome >= 116 để hỗ trợ `chrome.runtime.getContexts`) nhằm duy trì phát nhạc nền `<audio>` liên tục ngay cả khi Popup đóng.
+- `"host_permissions": ["http://*/*", "https://*/*"]`: Đã tồn tại sẵn cho `declarativeNetRequest` `redirect` sang `blocked.html`. **Không thêm bất kỳ `host_permissions` mới nào cho LOFI-1.** Việc tải `tracks.json` từ GitHub Pages chỉ thực hiện HTTPS `fetch()` tới CDN công khai hỗ trợ CORS.
 
 ---
 
@@ -132,6 +134,8 @@ Các action được hỗ trợ:
 - Economy & Stats: `GET_ECONOMY`, `GET_DAILY_STATS`.
 - Civilization (`CURRENT_SCHEMA_VERSION = 2`, lưới `8×8` / chunk `4×4` mở rộng theo tọa độ `origin` và điều kiện `Level >= k + 2`): `GET_CIVILIZATION_STATE`, `PLACE_BUILDING`, `REMOVE_BUILDING`, `EXPAND_LAND`.
 - Preferences: `SET_LANGUAGE`, `SET_CHIME_ENABLED`.
+- Focus Music Player: `MUSIC_GET_STATE`, `MUSIC_GET_CATALOG`, `MUSIC_REFRESH_CATALOG`, `MUSIC_PLAY_TRACK`, `MUSIC_PAUSE`, `MUSIC_RESUME`, `MUSIC_STOP`, `MUSIC_NEXT`, `MUSIC_PREVIOUS`, `MUSIC_SEEK`, `MUSIC_SET_VOLUME`, `MUSIC_SET_SHUFFLE`, `MUSIC_SET_REPEAT`, `MUSIC_SET_SYNC`, `MUSIC_SET_PLAY_DURING_BREAK`.
+- SW ↔ Offscreen Document (lọc bằng `target: 'offscreen' | 'background'`): `MUSIC_PLAY`, `MUSIC_PAUSE`, `MUSIC_STOP`, `MUSIC_SEEK`, `MUSIC_SET_VOLUME`, `MUSIC_GET_STATUS` ↔ `MUSIC_POSITION`, `MUSIC_ENDED`, `MUSIC_ERROR`.
 - UI hiển thị lỗi qua `src/i18n/errorTranslator.ts` để giữ nguyên thông điệp chuẩn khi dùng EN và dịch tự nhiên khi dùng VI.
 
 ### 3.2. Idempotent Reward Processing & Session Persistence
@@ -158,8 +162,7 @@ Các action được hỗ trợ:
 
 ### 4.2. Ranh giới & Giới hạn Kỹ thuật của Trình duyệt (DNR Boundaries)
 1. **Các trang bảo vệ của Chrome:** Chrome tuyệt đối cấm extension can thiệp vào `chrome://*`, `chrome-extension://*`, `about:*` và Chrome Web Store (`chromewebstore.google.com`).
-2. **Sub-resources:** Cơ chế chặn chỉ áp dụng cho `resourceTypes: ['main_frame']`. Tài nguyên CDN nhúng (ảnh, css, fonts) của trang học tập được phép tải bình thường.
-3. **Độ trễ cập nhật Dynamic Rules:** API `chrome.declarativeNetRequest.updateDynamicRules` là bất đồng bộ. Hệ thống luôn `await` việc cập nhật hoàn tất trước khi xác nhận phiên đã kích hoạt.
+2. **Sub-resources & LOFI Streaming Non-Interference:** Cơ chế chặn chỉ áp dụng nghiêm ngặt cho `resourceTypes: ['main_frame']` (chỉ chặn điều hướng tab). Yêu cầu `fetch(LOFI_CATALOG_URL)` từ Background Service Worker và luồng `<audio>` HTTPS từ Offscreen Document thuộc `xmlhttprequest`/`media` trong context extension (`chrome-extension://*`), hoàn toàn **không bao giờ bị DNR chặn** ngay cả khi Allowlist của người dùng đang rỗng (`allowedDomains: []`).
 
 ---
 
@@ -168,14 +171,31 @@ Các action được hỗ trợ:
 1. **Alarms:**
    - Chrome Alarms có độ trễ nhỏ (không cam kết chính xác đến từng mili-giây, thông thường sai số từ 1–10 giây tùy tải của hệ điều hành). Do đó, khi Alarm kích hoạt, hệ thống luôn lấy `Date.now()` và chạy qua `TimeCalculator` để tính toán chính xác, không dùng Alarm làm thước đo thời gian có thẩm quyền.
 2. **Notifications:**
-   - Sử dụng cho thông báo hoàn thành Countdown / Pomodoro Countdown, chuyển sang giờ nghỉ (Short / Long Break), và hết giờ nghỉ quay lại pha Focus.
-   - `SessionCoordinator.getActiveLocale()` đọc `settings.language` từ storage (`resolveLocale`) và gọi `translate(...)` để phát thông báo song ngữ EN/VI nhất quán.
+   - Sử dụng cho thông báo hoàn thành Countdown / Stopwatch (>= 5m) / Pomodoro, chuyển sang giờ nghỉ (Short / Long Break), và hết giờ nghỉ quay lại pha Focus.
+   - `SessionCoordinator` đọc `settings.language` từ storage (`resolveLocale`) và gọi `translate(...)` để phát thông báo song ngữ EN/VI nhất quán.
    - Bọc trong try/catch an toàn; nếu người dùng tắt quyền thông báo hoặc bật Do Not Disturb, lỗi notification chỉ được ghi log và **không làm gián đoạn** giao dịch trao thưởng trong storage.
    - Cờ `notificationSent: true` đảm bảo notification hoàn thành chỉ được bắn đúng một lần duy nhất cho mỗi session ID.
 
 ---
 
 ## 6. Giao diện Popup, Cảnh quan UI & Blocked Page (Stages B–E)
-- **Điều hướng Popup 400×600px:** `Navbar.tsx` dùng 5 tab đáy (`Quests | Focus | Map | Awards | Stats`), mặc định mở `map` (`CivilizationScreen`), hỗ trợ đóng/mở `ProfileBottomSheet`, `RewardHelpModal` và `SpriteGallery` (`#sprites` chỉ ở Web Preview).
+- **Điều hướng Popup 400×600px:** `Navbar.tsx` dùng 5 tab đáy (`Quests | Focus | Map | Awards | Stats`), mặc định mở `map` (`CivilizationScreen`), hỗ trợ đóng/mở `ProfileBottomSheet`, `RewardHelpModal`, `MusicPlayerSheet` và `SpriteGallery` (`#sprites` chỉ ở Web Preview).
 - **Cảnh quan & Hiệu ứng mở đất (thuần UI):** `terrainDecor.ts` dựng cảnh quan mở & rừng tối chunk `4×4` xác định (không lưu trong storage, không cản đặt công trình); `ExpansionRevealOverlay.tsx` + `expansionReveal.ts` chạy rìu chém rừng `127` + rung nhẹ lớp bản đồ trong `1150ms` sau commit, tôn trọng `prefers-reduced-motion`.
 - **Blocked Page CSP-Safe:** `public/blocked.html` ẩn thẻ bằng opacity anti-flash cho tới khi `blocked.js` (`src/blocked/blocked.ts`) đọc `fq_settings` từ `chrome.storage.local` để áp dụng ngôn ngữ EN/VI và lắng nghe `chrome.storage.onChanged`.
+
+---
+
+## 7. Milestone LOFI — Kiến trúc Offscreen Streaming & Đồng bộ Phiên (LOFI-1 / LOFI-1b)
+
+### 7.1. Kiến trúc Offscreen & Quy tắc 30 giây của Chrome
+- `ChromeOffscreenAdapter` quản lý single-flight (`creatingPromise`) cho `chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] })` (Chrome >= 116) và `chrome.offscreen.createDocument({ url: 'offscreen.html', reasons: ['AUDIO_PLAYBACK'] })`.
+- `public/offscreen.html` + `src/offscreen/offscreen.ts` chạy `<audio id="lofi-audio" preload="metadata">` ngoài vòng đời Popup, tuân thủ CSP MV3 (không inline script).
+- **Xử lý tự đóng sau 30 giây im lặng (`AUDIO_PLAYBACK`):** Hệ thống **không** dùng âm thanh im lặng giả hay mẹo keepalive. Trong khi phát, Offscreen gửi `MUSIC_POSITION` mỗi `5s` và khi pause/seek/ended về `MusicCoordinator` lưu bền vững vào `STORAGE_KEYS.MUSIC_STATE`. Nếu Chrome đóng Offscreen Document khi pause quá 30 giây, lần `Resume` hoặc `Sync` tiếp theo tự kiểm tra `hasDocument()`, tái tạo document qua `ensureDocument()` và gửi `MUSIC_PLAY { startAtSec: savedPosition }` (được áp dụng ngay khi `<audio>` bắn `loadedmetadata`).
+
+### 7.2. Catalog Online Động, Kiểm tra An toàn & Đồng bộ `SessionCoordinator`
+- **Không đóng gói audio trong repo/extension:** `LOFI_CATALOG_URL` (`https://khangbui2010.github.io/FocusQuest-LOFI-archive/tracks.json`) được `MusicCoordinator` fetch từ Background Service Worker (cache TTL `6` giờ ở `STORAGE_KEYS.MUSIC_CATALOG_CACHE`), dựng URL HTTPS từ `LOFI_BASE_URL`, và fallback cache cũ nếu mạng lỗi hoặc JSON hỏng.
+- **Phòng vệ Catalog không đáng tin cậy:** `parseRemoteCatalog` từ chối payload không phải object, `schemaVersion !== 1`, mảng `tracks > 200`, chuỗi/URL quá dài; bỏ qua và đếm (`skippedCount`) các bài thiếu `title`/`artist`/`license`/`licenseUrl`/`sourceUrl`, sai định dạng/trùng `id` (`^[a-z0-9-]+$`), URL không phải `https://`, `file` chứa `..`/`/`/`\`, hoặc giấy phép ngoài danh sách SPDX cho phép (`CC0-1.0`, `CC-BY-4.0`, `CC-BY-3.0`, `CC-BY-SA-3.0`, `CC-BY-SA-4.0`). Nếu bài đang chọn biến mất khi refresh, tự động chuyển về bài đầu tiên (`positionSec: 0`). Nếu lần đầu mở offline chưa có cache, UI hiển thị thông báo song ngữ EN/VI + nút Retry (`music-retry-catalog-btn`) mà không crash.
+- **Đồng bộ `SessionCoordinator` & Cô lập Mutex:** Mọi điểm chuyển trạng thái phiên (`startSession`, `pauseSession`, `resumeSession`, `advancePomodoroStage`, `SKIP_POMODORO_BREAK`, `completeCountdown`, `finishStopwatch`, `giveUpCountdown`, `handleExtensionDisabledRecovery`, `handleBrowserStartupRecovery`, `executeLifecycleRecovery`, `resetSession`) gọi `onSessionSyncHook` / `onSessionEndedHook` **sau khi giải phóng `StorageMutex`** và bọc `try/catch` để không bao giờ giữ lock khi gọi Offscreen IPC hay làm sai lệch Coin/XP/commit thưởng.
+
+### 7.3. Ghi chú Quyền riêng tư (Privacy Note)
+- Khi fetch `tracks.json` hoặc stream file `.mp3` từ `https://khangbui2010.github.io/FocusQuest-LOFI-archive/`, kết nối HTTPS trực tiếp từ trình duyệt người dùng tới GitHub Pages CDN sẽ để lộ **địa chỉ IP và HTTP headers chuẩn (như `User-Agent`)** cho máy chủ host tĩnh (`github.io`). Extension không gửi cookie theo dõi, không gửi telemetry và không gửi bất kỳ dữ liệu phiên tập trung nào ra ngoài.

@@ -38,8 +38,8 @@ test('MV3 Music Packaging: dist/ contains valid manifest, CSP-safe offscreen.htm
     permissions?: string[];
   };
   assert.ok(
-    Number(manifest.minimum_chrome_version) >= 109,
-    `minimum_chrome_version must be >= 109 for offscreen API, got ${manifest.minimum_chrome_version}`
+    Number(manifest.minimum_chrome_version) >= 116,
+    `minimum_chrome_version must be >= 116 for chrome.runtime.getContexts + offscreen API, got ${manifest.minimum_chrome_version}`
   );
   assert.ok(
     Array.isArray(manifest.permissions) && manifest.permissions.includes('offscreen'),

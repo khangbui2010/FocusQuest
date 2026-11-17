@@ -59,6 +59,7 @@ export interface CachedMusicCatalog {
   readonly fetchedAt: number;
   readonly sourceUrl: string;
   readonly tracks: readonly MusicTrack[];
+  readonly skippedCount?: number;
 }
 
 export type RepeatMode = 'off' | 'all' | 'one';
@@ -80,6 +81,7 @@ export interface MusicPlayerState {
   playDuringBreak?: boolean;
   pausedBySession?: boolean;
   catalogUpdatedAt?: string | null;
+  catalogSkippedCount?: number;
   lastUpdatedAt: number;
   lastError?: string | null;
   lastErrorCode?: MusicErrorCode | null;

@@ -110,6 +110,8 @@ const EXACT_VI_ERROR_MAP: Record<string, string> = {
   // Music Player backend messages
   'Unable to load online Lofi catalog. Check your internet connection and retry.':
     'Không thể tải danh sách nhạc Lofi trực tuyến. Hãy kiểm tra kết nối mạng và thử lại.',
+  'Malformed JSON in remote music catalog.':
+    'Dữ liệu danh sách nhạc trực tuyến bị lỗi định dạng JSON.',
   'Audio playback failed (autoplay_blocked).':
     'Trình duyệt chặn tự động phát âm thanh. Hãy bấm Phát để bắt đầu nghe nhạc.',
   'Audio playback failed (network).':

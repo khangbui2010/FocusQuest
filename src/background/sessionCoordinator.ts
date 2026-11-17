@@ -369,7 +369,7 @@ export class SessionCoordinator {
     profileId: string,
     pomodoroConfig?: PomodoroConfig
   ): Promise<SessionSnapshot> {
-    return this.storage.runExclusive(async () => {
+    const newSession = await this.storage.runExclusive(async () => {
       const current = await this.storage.getCurrentSession();
       if (current && TimerStateMachine.isActive(current.status)) {
         throw new Error(`Cannot start session: a session is already in status '${current.status}'.`);
@@ -413,7 +413,7 @@ export class SessionCoordinator {
           ? validatedPomoConfig.focusIntervalDurationMinutes ?? validatedPomoConfig.focusDurationMinutes
           : 0;
 
-      const newSession: SessionSnapshot = {
+      const created: SessionSnapshot = {
         id: `sess_${now}_${Math.random().toString(36).slice(2, 7)}`,
         mode,
         profileId,
@@ -451,8 +451,8 @@ export class SessionCoordinator {
             : undefined,
       };
 
-      await this.storage.setCurrentSession(newSession);
-      await this.storage.setSessionLifecycleMarker(newSession.id);
+      await this.storage.setCurrentSession(created);
+      await this.storage.setSessionLifecycleMarker(created.id);
 
       // Schedule alarms and set badge
       if (mode === 'COUNTDOWN') {
@@ -464,7 +464,7 @@ export class SessionCoordinator {
         const intervalDuration =
           validatedPomoConfig.focusIntervalDurationMinutes ?? validatedPomoConfig.focusDurationMinutes;
         const finishTime = now + intervalDuration * 60 * 1000;
-        const alarmName = buildPomodoroStageAlarmName(newSession.id, 1, 'FOCUS', now);
+        const alarmName = buildPomodoroStageAlarmName(created.id, 1, 'FOCUS', now);
         await this.alarms.create(alarmName, { when: finishTime });
         console.log(`[POMODORO] Stage alarm scheduled: name=${alarmName}, when=${finishTime}`);
 
@@ -479,19 +479,21 @@ export class SessionCoordinator {
       await this.alarms.create(ALARM_NAMES.HEARTBEAT, { periodInMinutes: 1 });
 
       // Activate declarativeNetRequest blocking and redirect any already-open blocked tabs
-      await this.blockingCoordinator.syncBlocking(isWebsiteBlockingActive(newSession), profile);
+      await this.blockingCoordinator.syncBlocking(isWebsiteBlockingActive(created), profile);
 
       this.lastProcessedStartupSessionId = null;
-      await this.triggerSessionSyncHookInternal(newSession, 'STARTED');
-      return newSession;
+      return created;
     });
+
+    await this.triggerSessionSyncHookInternal(newSession, 'STARTED');
+    return newSession;
   }
 
   /**
    * Pause the active session.
    */
   async pauseSession(): Promise<SessionSnapshot> {
-    return this.storage.runExclusive(async () => {
+    const updated = await this.storage.runExclusive(async () => {
       const session = await this.storage.getCurrentSession();
       if (!session) {
         throw new Error('No active session to pause.');
@@ -524,7 +526,7 @@ export class SessionCoordinator {
         newAccumulated += deltaMs;
       }
 
-      const updated: SessionSnapshot = {
+      const nextSession: SessionSnapshot = {
         ...session,
         status: 'PAUSED',
         currentPauseStartedAt: now,
@@ -535,7 +537,7 @@ export class SessionCoordinator {
         accumulatedFocusMs: newAccumulated,
       };
 
-      await this.storage.setCurrentSession(updated);
+      await this.storage.setCurrentSession(nextSession);
 
       // Set dynamic Auto-resume alarm after 5 minutes
       const dynamicAlarmName = buildPauseAlarmName(session.id, now);
@@ -565,16 +567,18 @@ export class SessionCoordinator {
       await this.badge.setBadgeText('PAUSE');
       await this.badge.setBadgeBackgroundColor('#F59E0B'); // Amber/Orange
 
-      await this.triggerSessionSyncHookInternal(updated, 'PAUSED');
-      return updated;
+      return nextSession;
     });
+
+    await this.triggerSessionSyncHookInternal(updated, 'PAUSED');
+    return updated;
   }
 
   /**
    * Resume a paused session (manual user click or auto-resume).
    */
   async resumeSession(isAutoResume: boolean = false, fromAlarmName?: string): Promise<SessionSnapshot> {
-    return this.storage.runExclusive(async () => {
+    const result = await this.storage.runExclusive(async () => {
       const session = await this.storage.getCurrentSession();
       if (!session) {
         throw new Error('No session to resume.');
@@ -586,13 +590,13 @@ export class SessionCoordinator {
         if (parsed) {
           if (parsed.sessionId !== session.id || parsed.pauseStartedAt !== session.currentPauseStartedAt) {
             console.warn(`Ignoring stale pause auto-resume alarm '${fromAlarmName}' for session '${session.id}'`);
-            return session;
+            return { session, didTransition: false };
           }
         }
       }
 
       if (session.status !== 'PAUSED') {
-        return session;
+        return { session, didTransition: false };
       }
 
       const event = isAutoResume ? 'AUTO_RESUME' : 'RESUME';
@@ -701,9 +705,13 @@ export class SessionCoordinator {
         await this.badge.setBadgeBackgroundColor('#3B82F6');
       }
 
-      await this.triggerSessionSyncHookInternal(updated, 'RESUMED');
-      return updated;
+      return { session: updated, didTransition: true };
     });
+
+    if (result.didTransition) {
+      await this.triggerSessionSyncHookInternal(result.session, 'RESUMED');
+    }
+    return result.session;
   }
 
   /**
@@ -712,7 +720,7 @@ export class SessionCoordinator {
    * For Pomodoro: Preserves all previously completed intervals and adds current elapsed focus minutes.
    */
   async giveUpCountdown(): Promise<SessionSnapshot> {
-    return this.storage.runExclusive(async () => {
+    const updated = await this.storage.runExclusive(async () => {
       const session = await this.storage.getCurrentSession();
       if (!session) {
         throw new Error('No session to give up.');
@@ -769,7 +777,7 @@ export class SessionCoordinator {
         focusMinutesToRecord = elapsed.actualFocusMinutes;
       }
 
-      const updated: SessionSnapshot = {
+      const nextSession: SessionSnapshot = {
         ...session,
         status: 'ABANDONED',
         currentPauseStartedAt: null,
@@ -780,7 +788,7 @@ export class SessionCoordinator {
       };
 
       await this.storage.commitSessionOutcomeInternal({
-        session: updated,
+        session: nextSession,
         dailyStatDelta:
           focusMinutesToRecord > 0
             ? {
@@ -799,10 +807,12 @@ export class SessionCoordinator {
       await this.blockingCoordinator.syncBlocking(false, null);
       await this.badge.clearBadge();
       await this.storage.clearSessionLifecycleMarker();
-      await this.triggerSessionEndedHookInternal(updated, 'ABANDONED');
 
-      return updated;
+      return nextSession;
     });
+
+    await this.triggerSessionEndedHookInternal(updated, 'ABANDONED');
+    return updated;
   }
 
   /**
@@ -810,7 +820,7 @@ export class SessionCoordinator {
    * Applies threshold (>= 5 mins), calculates multiplier tier, awards rewards.
    */
   async finishStopwatch(): Promise<{ session: SessionSnapshot; coinsEarned: number; xpEarned: number }> {
-    return this.storage.runExclusive(async () => {
+    const result = await this.storage.runExclusive(async () => {
       const session = await this.storage.getCurrentSession();
       if (!session) {
         throw new Error('No active stopwatch session to finish.');
@@ -826,6 +836,7 @@ export class SessionCoordinator {
           session,
           coinsEarned: 0,
           xpEarned: 0,
+          didTransition: false,
         };
       }
 
@@ -975,12 +986,11 @@ export class SessionCoordinator {
           });
         }
 
-        await this.triggerSessionEndedHookInternal(updated, 'COMPLETED');
-
         return {
           session: updated,
           coinsEarned: finalCoins,
           xpEarned: finalXp,
+          didTransition: true,
         };
       }
 
@@ -1061,14 +1071,23 @@ export class SessionCoordinator {
         });
       }
 
-      await this.triggerSessionEndedHookInternal(updated, 'COMPLETED');
-
       return {
         session: updated,
         coinsEarned: rewardResult.coinsEarned,
         xpEarned: rewardResult.xpEarned,
+        didTransition: true,
       };
     });
+
+    if (result.didTransition) {
+      await this.triggerSessionEndedHookInternal(result.session, 'COMPLETED');
+    }
+
+    return {
+      session: result.session,
+      coinsEarned: result.coinsEarned,
+      xpEarned: result.xpEarned,
+    };
   }
 
   /**
@@ -1077,15 +1096,15 @@ export class SessionCoordinator {
    * Guaranteed idempotent.
    */
   async completeCountdown(): Promise<SessionSnapshot | null> {
-    return this.storage.runExclusive(async () => {
+    const result = await this.storage.runExclusive(async () => {
       const session = await this.storage.getCurrentSession();
       if (!session || session.mode !== 'COUNTDOWN') {
-        return null;
+        return { session: null, didTransition: false };
       }
 
       // Idempotency check: already processed
       if (session.rewardProcessed || session.status === 'COMPLETED') {
-        return session;
+        return { session, didTransition: false };
       }
 
       const now = Date.now();
@@ -1149,10 +1168,15 @@ export class SessionCoordinator {
       await this.blockingCoordinator.syncBlocking(false, null);
       await this.badge.clearBadge();
       await this.storage.clearSessionLifecycleMarker();
-      await this.triggerSessionEndedHookInternal(updated, 'COMPLETED');
 
-      return updated;
+      return { session: updated, didTransition: true };
     });
+
+    if (result.didTransition && result.session) {
+      await this.triggerSessionEndedHookInternal(result.session, 'COMPLETED');
+    }
+
+    return result.session;
   }
 
   /**
@@ -1179,7 +1203,7 @@ export class SessionCoordinator {
     fromAlarmName?: string,
     expectedPhase?: PomodoroPhase
   ): Promise<SessionSnapshot | null> {
-    return this.storage.runExclusive(async () => {
+    const result = await this.storage.runExclusive(async () => {
       const session = await this.storage.getCurrentSession();
       if (
         !session ||
@@ -1187,7 +1211,7 @@ export class SessionCoordinator {
         !session.pomodoroState ||
         !session.pomodoroConfig
       ) {
-        return null;
+        return { session: null as SessionSnapshot | null, hookType: 'none' as const };
       }
 
       const pState = session.pomodoroState;
@@ -1201,7 +1225,7 @@ export class SessionCoordinator {
             `actualPhase=${pState.currentPhase}, session=${session.id}, interval=${pState.currentInterval}, ` +
             `cycle=${pState.currentCycle ?? 1}, phaseStartedAt=${pState.phaseStartedAt}`
         );
-        return session;
+        return { session, hookType: 'none' as const };
       }
 
       // Construct the exact expected alarm name for the active session, interval, phase, and start timestamp
@@ -1213,18 +1237,9 @@ export class SessionCoordinator {
       );
 
       // Stale or forged alarm protection.
-      //
-      // A well-formed alarm can arrive *after* the phase it belongs to has
-      // already been completed by lifecycle reconciliation or UI auto-reconcile
-      // (this is normal in MV3: onAlarm runs ensureInitialized() first). Such an
-      // alarm is stale, not forged: it must be ignored silently. Malformed
-      // names, foreign sessions, and identity mismatches for the *current*
-      // phase remain hard rejections.
       if (fromAlarmName) {
         const parsed = parsePomodoroStageAlarmName(fromAlarmName);
 
-        // Malformed format or a different session cannot be produced by this
-        // session, so it is forged regardless of the active phase.
         if (!parsed || parsed.sessionId !== session.id) {
           console.warn(
             `[POMODORO] Alarm validation rejected: reason=forged-identity, received='${fromAlarmName}', ` +
@@ -1233,24 +1248,19 @@ export class SessionCoordinator {
           if (session.mode === 'POMODORO_STOPWATCH' && pState.currentPhase === 'FOCUS') {
             throw new Error(`Invalid or forged alarm name for Pomodoro Stopwatch: '${fromAlarmName}'.`);
           }
-          return session;
+          return { session, hookType: 'none' as const };
         }
 
         if (fromAlarmName === expectedAlarmName) {
           console.log(`[POMODORO] Alarm validation passed: name=${fromAlarmName}`);
         } else if (parsed.phaseStartedAt < pState.phaseStartedAt) {
-          // Same session, but the encoded phase start predates the active phase:
-          // this alarm belongs to a stage that was already completed. Ignore it
-          // without transitioning and without mislabelling it as forged.
           console.log(
             `[POMODORO] Alarm ignored: reason=stale-phase-alarm, received='${fromAlarmName}', ` +
               `currentPhase=${pState.currentPhase}, currentPhaseStartedAt=${pState.phaseStartedAt}, ` +
               `alarmPhaseStartedAt=${parsed.phaseStartedAt}, session=${session.id}`
           );
-          return session;
+          return { session, hookType: 'none' as const };
         } else {
-          // Same session and not older, but interval/phase/timestamp does not
-          // match the active stage: fabricated identity for the current phase.
           console.warn(
             `[POMODORO] Alarm validation rejected: reason=identity-mismatch, received='${fromAlarmName}', ` +
               `expected='${expectedAlarmName}', session=${session.id}`
@@ -1258,12 +1268,12 @@ export class SessionCoordinator {
           if (session.mode === 'POMODORO_STOPWATCH' && pState.currentPhase === 'FOCUS') {
             throw new Error(`Invalid or forged alarm name for Pomodoro Stopwatch: '${fromAlarmName}'.`);
           }
-          return session;
+          return { session, hookType: 'none' as const };
         }
       }
 
       if (!TimerStateMachine.isActive(session.status)) {
-        return session;
+        return { session, hookType: 'none' as const };
       }
 
       const now = Date.now();
@@ -1386,9 +1396,7 @@ export class SessionCoordinator {
               },
             });
 
-            await this.triggerSessionEndedHookInternal(updated, 'COMPLETED');
-
-            return updated;
+            return { session: updated, hookType: 'ended' as const };
           }
 
           // Incomplete quest: transition to Break (Short or Long). Wallet is NOT credited yet.
@@ -1458,8 +1466,7 @@ export class SessionCoordinator {
             { minutes: breakDurationMinutes }
           );
 
-          await this.triggerSessionSyncHookInternal(updated, 'PHASE_CHANGED');
-          return updated;
+          return { session: updated, hookType: 'sync' as const };
         }
 
         // BRANCH 1B: Pomodoro Stopwatch (Infinite cycles, recalculate accumulated reward on total focus time)
@@ -1543,8 +1550,7 @@ export class SessionCoordinator {
           }
         );
 
-        await this.triggerSessionSyncHookInternal(updated, 'PHASE_CHANGED');
-        return updated;
+        return { session: updated, hookType: 'sync' as const };
       }
 
       // CASE 2: Currently in BREAK (Short or Long) -> Transition to FOCUS
@@ -1629,9 +1635,15 @@ export class SessionCoordinator {
         }
       );
 
-      await this.triggerSessionSyncHookInternal(updated, 'PHASE_CHANGED');
-      return updated;
+      return { session: updated, hookType: 'sync' as const };
     });
+
+    if (result.hookType === 'ended' && result.session) {
+      await this.triggerSessionEndedHookInternal(result.session, 'COMPLETED');
+    } else if (result.hookType === 'sync' && result.session) {
+      await this.triggerSessionSyncHookInternal(result.session, 'PHASE_CHANGED');
+    }
+    return result.session;
   }
 
   /**
@@ -1648,14 +1660,14 @@ export class SessionCoordinator {
     session: SessionSnapshot,
     interruptedReason: 'EXTENSION_DISABLED' | 'EXTENSION_RELOADED' = 'EXTENSION_DISABLED'
   ): Promise<SessionSnapshot> {
-    return this.storage.runExclusive(async () => {
+    const result = await this.storage.runExclusive(async () => {
       const current = await this.storage.getCurrentSession();
       if (!current || !TimerStateMachine.isActive(current.status)) {
-        return current ?? session;
+        return { session: current ?? session, didTransition: false };
       }
 
       if (current.rewardProcessed) {
-        return current;
+        return { session: current, didTransition: false };
       }
 
       const now = Date.now();
@@ -1713,16 +1725,10 @@ export class SessionCoordinator {
         await this.blockingCoordinator.syncBlocking(false, null);
         await this.badge.clearBadge();
         await this.storage.clearSessionLifecycleMarker();
-        await this.triggerSessionEndedHookInternal(updated, 'INTERRUPTED');
 
-        return updated;
+        return { session: updated, didTransition: true };
       } else if (current.mode === 'POMODORO_STOPWATCH') {
         const pState = current.pomodoroState;
-        const completedCount = pState?.completedFocusCount ?? 0;
-
-        // Section VII.B: Extension disabled is an anti-tamper penalty; yields strictly 0 rewards
-        const coinsEarned = 0;
-        const xpEarned = 0;
 
         const updated: SessionSnapshot = {
           ...current,
@@ -1761,9 +1767,8 @@ export class SessionCoordinator {
         await this.blockingCoordinator.syncBlocking(false, null);
         await this.badge.clearBadge();
         await this.storage.clearSessionLifecycleMarker();
-        await this.triggerSessionEndedHookInternal(updated, 'INTERRUPTED');
 
-        return updated;
+        return { session: updated, didTransition: true };
       } else {
         const reward = this.rewardEngine.calculateInterruptedStopwatchReward(validMinutes);
 
@@ -1798,11 +1803,15 @@ export class SessionCoordinator {
         await this.blockingCoordinator.syncBlocking(false, null);
         await this.badge.clearBadge();
         await this.storage.clearSessionLifecycleMarker();
-        await this.triggerSessionEndedHookInternal(updated, 'INTERRUPTED');
 
-        return updated;
+        return { session: updated, didTransition: true };
       }
     });
+
+    if (result.didTransition) {
+      await this.triggerSessionEndedHookInternal(result.session, 'INTERRUPTED');
+    }
+    return result.session;
   }
 
   /**
@@ -1887,9 +1896,7 @@ export class SessionCoordinator {
       await this.blockingCoordinator.syncBlocking(false, null);
       await this.badge.clearBadge();
       await this.storage.clearSessionLifecycleMarker();
-      if (isStartup) {
-        await this.triggerSessionSyncHookInternal(null, 'STARTUP_NO_SESSION');
-      }
+      await this.triggerSessionSyncHookInternal(null, isStartup ? 'STARTUP_NO_SESSION' : reason);
       return null;
     }
 
@@ -1898,9 +1905,7 @@ export class SessionCoordinator {
       await this.blockingCoordinator.syncBlocking(false, null);
       await this.badge.clearBadge();
       await this.storage.clearSessionLifecycleMarker();
-      if (isStartup) {
-        await this.triggerSessionSyncHookInternal(session, reason);
-      }
+      await this.triggerSessionSyncHookInternal(session, reason);
       return session;
     }
 
@@ -2306,10 +2311,10 @@ export class SessionCoordinator {
       // If target finish time elapsed during downtime, or downtime occurred (>= 1s):
       // Countdown CANNOT be awarded completion. Downtime must NEVER be converted to focus time.
       if (now >= targetFinishTime || downtimeMs >= 1000) {
-        return this.storage.runExclusive(async () => {
+        const result = await this.storage.runExclusive(async () => {
           const latest = await this.storage.getCurrentSession();
           if (!latest || !TimerStateMachine.isActive(latest.status) || latest.rewardProcessed) {
-            return latest ?? current;
+            return { session: latest ?? current, didTransition: false };
           }
 
           const validMs =
@@ -2354,10 +2359,14 @@ export class SessionCoordinator {
           await this.blockingCoordinator.syncBlocking(false, null);
           await this.badge.clearBadge();
           await this.storage.clearSessionLifecycleMarker();
-          await this.triggerSessionEndedHookInternal(updated, 'INTERRUPTED');
 
-          return updated;
+          return { session: updated, didTransition: true };
         });
+
+        if (result.didTransition) {
+          await this.triggerSessionEndedHookInternal(result.session, 'INTERRUPTED');
+        }
+        return result.session;
       }
 
       await this.storage.setSessionLifecycleMarker(current.id);
@@ -2375,15 +2384,16 @@ export class SessionCoordinator {
         // ignore
       }
       await this.blockingCoordinator.syncBlocking(true, activeProfile);
+      await this.triggerSessionSyncHookInternal(current, 'BROWSER_STARTUP_ACTIVE');
       return current;
     }
 
     // 2. STOPWATCH
     if (current.mode === 'STOPWATCH') {
-      return this.storage.runExclusive(async () => {
+      const result = await this.storage.runExclusive(async () => {
         const latest = await this.storage.getCurrentSession();
         if (!latest || !TimerStateMachine.isActive(latest.status) || latest.rewardProcessed) {
-          return latest ?? current;
+          return { session: latest ?? current, didTransition: false };
         }
 
         const validMs =
@@ -2428,18 +2438,22 @@ export class SessionCoordinator {
         await this.blockingCoordinator.syncBlocking(false, null);
         await this.badge.clearBadge();
         await this.storage.clearSessionLifecycleMarker();
-        await this.triggerSessionEndedHookInternal(updated, 'INTERRUPTED');
 
-        return updated;
+        return { session: updated, didTransition: true };
       });
+
+      if (result.didTransition) {
+        await this.triggerSessionEndedHookInternal(result.session, 'INTERRUPTED');
+      }
+      return result.session;
     }
 
     // 3. POMODORO_STOPWATCH
     if (current.mode === 'POMODORO_STOPWATCH') {
-      return this.storage.runExclusive(async () => {
+      const result = await this.storage.runExclusive(async () => {
         const latest = await this.storage.getCurrentSession();
         if (!latest || !TimerStateMachine.isActive(latest.status) || latest.rewardProcessed) {
-          return latest ?? current;
+          return { session: latest ?? current, didTransition: false };
         }
 
         const pState = latest.pomodoroState;
@@ -2506,10 +2520,14 @@ export class SessionCoordinator {
         await this.blockingCoordinator.syncBlocking(false, null);
         await this.badge.clearBadge();
         await this.storage.clearSessionLifecycleMarker();
-        await this.triggerSessionEndedHookInternal(updated, 'INTERRUPTED');
 
-        return updated;
+        return { session: updated, didTransition: true };
       });
+
+      if (result.didTransition) {
+        await this.triggerSessionEndedHookInternal(result.session, 'INTERRUPTED');
+      }
+      return result.session;
     }
 
     // 4. POMODORO_COUNTDOWN
@@ -2527,10 +2545,10 @@ export class SessionCoordinator {
       // Pomodoro Countdown is ALL-OR-NOTHING. It ONLY earns rewards upon 100% full quest completion.
       // If interrupted before full completion: reward MUST be exactly 0 Coins and 0 XP.
       if (now >= phaseTargetFinishTime || downtimeMs >= 1000) {
-        return this.storage.runExclusive(async () => {
+        const result = await this.storage.runExclusive(async () => {
           const latest = await this.storage.getCurrentSession();
           if (!latest || !TimerStateMachine.isActive(latest.status) || latest.rewardProcessed) {
-            return latest ?? current;
+            return { session: latest ?? current, didTransition: false };
           }
 
           const latestPState = latest.pomodoroState;
@@ -2588,10 +2606,14 @@ export class SessionCoordinator {
           await this.blockingCoordinator.syncBlocking(false, null);
           await this.badge.clearBadge();
           await this.storage.clearSessionLifecycleMarker();
-          await this.triggerSessionEndedHookInternal(updated, 'INTERRUPTED');
 
-          return updated;
+          return { session: updated, didTransition: true };
         });
+
+        if (result.didTransition) {
+          await this.triggerSessionEndedHookInternal(result.session, 'INTERRUPTED');
+        }
+        return result.session;
       }
 
       // If 0 downtime (e.g. immediate test startup), restore active session
@@ -2607,7 +2629,7 @@ export class SessionCoordinator {
    * Reset session back to IDLE (only allowed when session is terminal: COMPLETED, ABANDONED, or INTERRUPTED).
    */
   async resetSession(): Promise<void> {
-    return this.storage.runExclusive(async () => {
+    await this.storage.runExclusive(async () => {
       const session = await this.storage.getCurrentSession();
       if (session && TimerStateMachine.isActive(session.status)) {
         throw new Error(`Cannot reset active session with status '${session.status}'. Finish or give up first.`);
@@ -2618,5 +2640,6 @@ export class SessionCoordinator {
       await this.badge.clearBadge();
       await this.storage.clearSessionLifecycleMarker();
     });
+    await this.triggerSessionSyncHookInternal(null, 'RESET');
   }
 }

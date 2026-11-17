@@ -195,7 +195,25 @@ test('MusicPlayerSheet UI: handles empty catalog, dynamic extra tracks, and bili
   );
   assert.ok(emptyHtml.includes('data-testid="music-empty-catalog"'));
   assert.ok(emptyHtml.includes('No Lofi tracks loaded yet'));
+  assert.ok(emptyHtml.includes('data-testid="music-retry-catalog-btn"'));
+  assert.ok(emptyHtml.includes('>Retry<'));
   assert.ok(emptyHtml.includes('data-testid="music-player-error"'));
+
+  const emptyViHtml = renderSheet(
+    'vi',
+    [],
+    makeMusicState([], {
+      currentTrackId: null,
+      durationSec: null,
+      status: 'ERROR',
+      lastErrorCode: 'network',
+      lastError: 'Unable to load online Lofi catalog. Check your internet connection and retry.',
+    })
+  );
+  assert.ok(emptyViHtml.includes('data-testid="music-empty-catalog"'));
+  assert.ok(emptyViHtml.includes('data-testid="music-retry-catalog-btn"'));
+  assert.ok(emptyViHtml.includes('>Thử lại<'));
+  assert.ok(emptyViHtml.includes('Không thể tải danh sách nhạc Lofi trực tuyến'));
 
   const errorViHtml = renderSheet(
     'vi',
