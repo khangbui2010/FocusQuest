@@ -246,7 +246,7 @@ test('LOFI-2 Mini-Player Empty/Error state: stays visible with Retry button in b
   assert.ok(emptyVi.includes('>Thử lại<'));
 });
 
-test('LOFI-2 Bottom Sheet: ~2/3 rounded-t-[22px] sheet, 56px cover, 52px play button, dynamic artist chips, equalizer, short license badges, and footer credits toggle', () => {
+test('LOFI-2 Bottom Sheet: taller rounded-t-[22px] sheet, 56px cover, 52px play button, no artist chips, equalizer, short license badges, and footer credits toggle', () => {
   const catalog = buildFixtureCatalog();
   const expandedVi = renderPlayer(
     'vi',
@@ -264,7 +264,8 @@ test('LOFI-2 Bottom Sheet: ~2/3 rounded-t-[22px] sheet, 56px cover, 52px play bu
   assert.ok(expandedVi.includes('data-testid="music-sheet-backdrop"'));
   assert.ok(expandedVi.includes('backdrop-blur-xs'));
   assert.ok(expandedVi.includes('rounded-t-[22px]'));
-  assert.ok(expandedVi.includes('max-h-[72%]'));
+  assert.ok(expandedVi.includes('h-[560px]'));
+  assert.ok(expandedVi.includes('max-h-[95%]'));
   assert.ok(expandedVi.includes('Nhạc Lofi tập trung'));
   assert.ok(expandedVi.includes('data-testid="music-sheet-close-btn"'));
 
@@ -273,11 +274,9 @@ test('LOFI-2 Bottom Sheet: ~2/3 rounded-t-[22px] sheet, 56px cover, 52px play bu
   assert.ok(expandedVi.includes('w-14 h-14'));
   assert.ok(expandedVi.includes('w-[52px] h-[52px]'));
 
-  // Dynamic artist filter chips generated strictly from catalog counts
-  assert.ok(expandedVi.includes('Tất cả · 4'));
-  assert.ok(expandedVi.includes('Purrple Cat · 2'));
-  assert.ok(expandedVi.includes('HoliznaCC0 · 1'));
-  assert.ok(expandedVi.includes('ikkun (ex. Barradeen) · 1'));
+  // Artist filter chips removed so playlist has room for 4-5+ visible tracks
+  assert.ok(!expandedVi.includes('data-testid="music-artist-filters"'));
+  assert.ok(!expandedVi.includes('data-testid="music-artist-filter-all"'));
 
   // Track rows ~46px with equalizer + short badges (CC0, BY, BY-SA) while preserving full SPDX in Catalog
   assert.ok(expandedVi.includes('min-h-[46px]'));

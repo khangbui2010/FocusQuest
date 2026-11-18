@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   AlertCircle,
   ChevronDown,
@@ -62,21 +62,12 @@ const NEXT_REPEAT_MODE: Record<RepeatMode, RepeatMode> = {
   one: 'off',
 };
 
-const ALL_ARTISTS_FILTER = '__ALL__';
-
 export function formatShortLicenseBadge(license: string): string {
   const upper = license.trim().toUpperCase();
   if (upper.startsWith('CC0')) return 'CC0';
   if (upper.includes('BY-SA')) return 'BY-SA';
   if (upper.includes('BY')) return 'BY';
   return license;
-}
-
-function slugifyArtistTestId(artist: string): string {
-  return artist
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '') || 'artist';
 }
 
 export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
@@ -103,7 +94,6 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
   const { locale, t } = useTranslation();
   const [scrubSec, setScrubSec] = useState<number | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [selectedArtist, setSelectedArtist] = useState<string>(ALL_ARTISTS_FILTER);
   const [isCreditsOpen, setIsCreditsOpen] = useState<boolean>(defaultCreditsOpen);
 
   const expanded = Boolean(isExpanded ?? isOpen ?? false);
@@ -141,27 +131,6 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [expanded, onToggleExpand, onClose]);
-
-  const artistChips = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const track of safeCatalog) {
-      counts.set(track.artist, (counts.get(track.artist) ?? 0) + 1);
-    }
-    return Array.from(counts.entries()).map(([artist, count]) => ({ artist, count }));
-  }, [safeCatalog]);
-
-  const effectiveArtistFilter =
-    selectedArtist !== ALL_ARTISTS_FILTER &&
-    artistChips.some((entry) => entry.artist === selectedArtist)
-      ? selectedArtist
-      : ALL_ARTISTS_FILTER;
-
-  const filteredTracks = useMemo(() => {
-    if (effectiveArtistFilter === ALL_ARTISTS_FILTER) {
-      return safeCatalog;
-    }
-    return safeCatalog.filter((track) => track.artist === effectiveArtistFilter);
-  }, [safeCatalog, effectiveArtistFilter]);
 
   const activeTrack =
     getTrackById(musicState.currentTrackId, safeCatalog) ?? safeCatalog[0] ?? null;
@@ -390,7 +359,7 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
         </div>
       </section>
 
-      {/* 2. Expandable Bottom Sheet (~2/3 popup height, slides above bottom tab bar) */}
+      {/* 2. Expandable Bottom Sheet (taller sheet so 5+ tracks are visible at once) */}
       {expanded && (
         <div
           data-testid="music-sheet-backdrop"
@@ -405,10 +374,10 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
             aria-label={t('music.lofiSheetTitle')}
             data-testid="music-player-sheet"
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-[400px] h-[416px] max-h-[72%] bg-slate-950 text-slate-100 border-t border-slate-800 rounded-t-[22px] shadow-2xl flex flex-col overflow-hidden"
+            className="w-full max-w-[400px] h-[560px] max-h-[95%] bg-slate-950 text-slate-100 border-t border-slate-800 rounded-t-[22px] shadow-2xl flex flex-col overflow-hidden"
           >
             {/* a. Sheet Header: "Nhạc Lofi tập trung" + Refresh + Chevron-Down */}
-            <div className="px-4 py-2 border-b border-slate-800/90 flex items-center justify-between gap-2 shrink-0">
+            <div className="px-4 py-1.5 border-b border-slate-800/90 flex items-center justify-between gap-2 shrink-0">
               <div className="flex items-center gap-2 min-w-0">
                 <Music className="w-4 h-4 text-indigo-400 shrink-0" />
                 <div className="min-w-0">
@@ -469,8 +438,8 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
               </div>
             )}
 
-            {/* Upper Deck (b, c, d, e, f) */}
-            <div className="px-3.5 pt-2 pb-1.5 space-y-2 shrink-0 border-b border-slate-800/70">
+            {/* Upper Deck (b, c, d, e) */}
+            <div className="px-3.5 pt-1.5 pb-1.5 space-y-1.5 shrink-0 border-b border-slate-800/70">
               {/* b. Now Playing: 56px cover square + title + artist · album */}
               <div data-testid="music-now-playing" className="flex items-center gap-3 min-w-0">
                 <div
@@ -680,52 +649,10 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
                 </div>
               </div>
 
-              {/* f. Dynamic Horizontal Artist Filter Chips */}
-              {hasTracks && (
-                <div
-                  data-testid="music-artist-filters"
-                  className="flex items-center gap-1.5 overflow-x-auto pt-0.5 pb-0.5 no-scrollbar"
-                >
-                  <button
-                    type="button"
-                    data-testid="music-artist-filter-all"
-                    aria-pressed={effectiveArtistFilter === ALL_ARTISTS_FILTER}
-                    onClick={() => setSelectedArtist(ALL_ARTISTS_FILTER)}
-                    className={`px-2.5 py-1 rounded-full text-[11px] font-semibold whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
-                      effectiveArtistFilter === ALL_ARTISTS_FILTER
-                        ? 'bg-indigo-500 text-white shadow-xs'
-                        : 'bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-700 hover:text-white'
-                    }`}
-                  >
-                    {t('music.filterAll', { count: safeCatalog.length })}
-                  </button>
-
-                  {artistChips.map(({ artist, count }) => {
-                    const active = effectiveArtistFilter === artist;
-                    return (
-                      <button
-                        key={artist}
-                        type="button"
-                        data-testid={`music-artist-filter-${slugifyArtistTestId(artist)}`}
-                        aria-pressed={active}
-                        aria-label={t('music.filterArtistAria', { artist })}
-                        onClick={() => setSelectedArtist(artist)}
-                        className={`px-2.5 py-1 rounded-full text-[11px] font-medium whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
-                          active
-                            ? 'bg-indigo-500 text-white shadow-xs'
-                            : 'bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-700 hover:text-white'
-                        }`}
-                      >
-                        {`${artist} · ${count}`}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
             </div>
 
-            {/* g. Scrollable Track List (rows ~46px with index / equalizer, short license badge, duration) */}
-            <div className="flex-1 min-h-0 overflow-y-auto px-3.5 py-2 space-y-1">
+            {/* f. Scrollable Track List (rows ~46px with index / equalizer, short license badge, duration) */}
+            <div className="flex-1 min-h-0 overflow-y-auto px-3.5 py-1.5 space-y-1">
               <h3 className="sr-only">{t('music.playlistHeading', { count: safeCatalog.length })}</h3>
 
               {safeCatalog.length === 0 ? (
@@ -754,7 +681,7 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
                 </div>
               ) : (
                 <div data-testid="music-playlist-list" className="space-y-1">
-                  {filteredTracks.map((track, idx) => {
+                  {safeCatalog.map((track, idx) => {
                     const isCurrent = activeTrack?.id === track.id;
                     const isTrackPlaying = isCurrent && isPlaying;
                     const shortBadge = formatShortLicenseBadge(track.license);
