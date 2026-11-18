@@ -16,9 +16,11 @@ import {
   CANOPY_CROSS_B_ORANGE,
   TALL_TREE_1X2_GREEN,
   TALL_TREE_1X2_ORANGE,
-  LOCKED_FOREST_OVERLAY_OPACITY,
+  LOCKED_FOREST_DARKEN_OPACITY,
+  LOCKED_TREE_DARKEN_FACTOR,
   getCellDecor,
 } from './terrainDecor.ts';
+import { TerrainCellLayers } from './TerrainCellLayers.tsx';
 import { StatsBarChart, StatsBarDatum } from '../StatsBarChart.tsx';
 import { useTranslation } from '../../../i18n/I18nContext.tsx';
 import {
@@ -192,7 +194,7 @@ export const SpriteGallery: React.FC<SpriteGalleryProps> = ({ onBack }) => {
               Focus Quest — Stone Age Sprite Gallery (Stage 4a &amp; 4a-3)
             </h1>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              6 công trình Stone Age + cảnh quan đất/cỏ/mầm/nấm (vùng mở) &amp; 6 mẫu cây M1–M6 + bụi filler #5 (~30% mật độ cây) với nền tối tách tương phản (vùng chưa mở).
+              6 công trình Stone Age + cảnh quan đất/cỏ/mầm/nấm (vùng mở) &amp; 6 mẫu cây M1–M6 + bụi filler #5 (~30% mật độ cây) với lớp phủ tối đồng đều cả nền và cây (vùng chưa mở).
             </p>
           </div>
 
@@ -347,7 +349,7 @@ export const SpriteGallery: React.FC<SpriteGalleryProps> = ({ onBack }) => {
               Visual Landscape &amp; 6 Locked Forest Recipes (M1–M6) — Stage 4a-3
             </h2>
             <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
-              Pure UI decor · Background darkened ({Math.round(LOCKED_FOREST_OVERLAY_OPACITY * 100)}%) while trees stay 100% color
+              Pure UI decor · Ground &amp; trees darkened uniformly ({Math.round(LOCKED_FOREST_DARKEN_OPACITY * 100)}%, tree factor {LOCKED_TREE_DARKEN_FACTOR}×)
             </span>
           </div>
 
@@ -398,10 +400,10 @@ export const SpriteGallery: React.FC<SpriteGalleryProps> = ({ onBack }) => {
                     </div>
                   </div>
 
-                  {/* Darkened ground + un-darkened tree overlay (Stage 4a-3 contrast fix) */}
+                  {/* Ground + tree overlay both under unified locked-forest darkening (UX-3) */}
                   <div className="space-y-1">
                     <span className="text-[10px] font-mono text-slate-500">
-                      Locked Floor Darkened (2×)
+                      Locked Forest Darkened (2×)
                     </span>
                     <div
                       style={{
@@ -413,21 +415,13 @@ export const SpriteGallery: React.FC<SpriteGalleryProps> = ({ onBack }) => {
                     >
                       {sample.rows.flatMap((row, rIdx) =>
                         row.map((tileIdx, cIdx) => (
-                          <div key={`dark-${rIdx}-${cIdx}`} className="relative w-8 h-8">
-                            <TileImage pack="tiny-town" tileIndex={0} size={32} className="block" />
-                            <div
-                              aria-hidden="true"
-                              style={{ opacity: LOCKED_FOREST_OVERLAY_OPACITY }}
-                              className="absolute inset-0 bg-slate-950 pointer-events-none"
+                          <div key={`dark-${rIdx}-${cIdx}`} className="relative w-8 h-8 overflow-hidden">
+                            <TerrainCellLayers
+                              baseTile={0}
+                              overlayTile={tileIdx}
+                              isDarkened={true}
+                              size={32}
                             />
-                            {tileIdx !== null && (
-                              <TileImage
-                                pack="tiny-town"
-                                tileIndex={tileIdx}
-                                size={32}
-                                className="absolute inset-0 block"
-                              />
-                            )}
                           </div>
                         ))
                       )}
@@ -456,7 +450,7 @@ export const SpriteGallery: React.FC<SpriteGalleryProps> = ({ onBack }) => {
                 id: 'locked_sample',
                 title: '8×4 Locked Forest Border Sample (isUnlocked = false)',
                 subtitle:
-                  `Recipes M1–M6 + bush filler #5 (~30% trees) over ${Math.round(LOCKED_FOREST_OVERLAY_OPACITY * 100)}% darkened grass background`,
+                  `Recipes M1–M6 + bush filler #5 (~30% trees) with ${Math.round(LOCKED_FOREST_DARKEN_OPACITY * 100)}% darkened ground & trees (${LOCKED_TREE_DARKEN_FACTOR}× tree factor)`,
                 cols: TERRAIN_SAMPLE_COLS,
                 rows: TERRAIN_SAMPLE_ROWS,
                 isCellUnlocked: () => false,
@@ -517,28 +511,13 @@ export const SpriteGallery: React.FC<SpriteGalleryProps> = ({ onBack }) => {
                         TERRAIN_DECOR_SEED
                       );
                       return (
-                        <div key={`${gx},${gy}`} className="relative w-8 h-8">
-                          <TileImage
-                            pack="tiny-town"
-                            tileIndex={decor.baseTile}
+                        <div key={`${gx},${gy}`} className="relative w-8 h-8 overflow-hidden">
+                          <TerrainCellLayers
+                            baseTile={decor.baseTile}
+                            overlayTile={decor.overlayTile}
+                            isDarkened={decor.isDarkened}
                             size={32}
-                            className="block"
                           />
-                          {decor.isDarkened && (
-                            <div
-                              aria-hidden="true"
-                              style={{ opacity: LOCKED_FOREST_OVERLAY_OPACITY }}
-                              className="absolute inset-0 bg-slate-950 pointer-events-none"
-                            />
-                          )}
-                          {decor.overlayTile !== null && (
-                            <TileImage
-                              pack="tiny-town"
-                              tileIndex={decor.overlayTile}
-                              size={32}
-                              className="absolute inset-0 block"
-                            />
-                          )}
                         </div>
                       );
                     })
@@ -558,7 +537,7 @@ export const SpriteGallery: React.FC<SpriteGalleryProps> = ({ onBack }) => {
                 16×11 Locked Forest Algorithm Preview (Stage 4a-3 · M1–M6 + Bush #5 · ~30% Density)
               </h3>
               <p className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
-                Generated via getCellDecor(x, y, false, TERRAIN_DECOR_SEED) · Ground darkened ({Math.round(LOCKED_FOREST_OVERLAY_OPACITY * 100)}%) while trees stay full color · Tiles 15/16 strictly M1/M2 bases
+                Generated via getCellDecor(x, y, false, TERRAIN_DECOR_SEED) · Ground &amp; trees darkened ({Math.round(LOCKED_FOREST_DARKEN_OPACITY * 100)}%, tree factor {LOCKED_TREE_DARKEN_FACTOR}×) · Tiles 15/16 strictly M1/M2 bases
               </p>
             </div>
 
@@ -583,28 +562,13 @@ export const SpriteGallery: React.FC<SpriteGalleryProps> = ({ onBack }) => {
                       (cx, cy) => cx < -8 || cx >= 8 || cy < -8 || cy >= 3
                     );
                     return (
-                      <div key={`16x11-${gx},${gy}`} className="relative w-8 h-8">
-                        <TileImage
-                          pack="tiny-town"
-                          tileIndex={decor.baseTile}
+                      <div key={`16x11-${gx},${gy}`} className="relative w-8 h-8 overflow-hidden">
+                        <TerrainCellLayers
+                          baseTile={decor.baseTile}
+                          overlayTile={decor.overlayTile}
+                          isDarkened={decor.isDarkened}
                           size={32}
-                          className="block"
                         />
-                        {decor.isDarkened && (
-                          <div
-                            aria-hidden="true"
-                            style={{ opacity: LOCKED_FOREST_OVERLAY_OPACITY }}
-                            className="absolute inset-0 bg-slate-950 pointer-events-none"
-                          />
-                        )}
-                        {decor.overlayTile !== null && (
-                          <TileImage
-                            pack="tiny-town"
-                            tileIndex={decor.overlayTile}
-                            size={32}
-                            className="absolute inset-0 block"
-                          />
-                        )}
                       </div>
                     );
                   })

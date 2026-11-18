@@ -37,6 +37,7 @@ export interface TileImageProps {
   size?: number;
   className?: string;
   alt?: string;
+  style?: React.CSSProperties;
 }
 
 /**
@@ -49,6 +50,7 @@ export const TileImage: React.FC<TileImageProps> = ({
   size = PACKED_TILE_PX,
   className = '',
   alt = '',
+  style,
 }) => {
   const sheetPath = getSpriteSheetPath(pack);
   const { col, row } = getTileSourceCoords(tileIndex);
@@ -74,6 +76,7 @@ export const TileImage: React.FC<TileImageProps> = ({
       style={{
         width: size,
         height: size,
+        ...style,
       }}
     >
       <img

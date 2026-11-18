@@ -12,14 +12,13 @@ import { getBuildingDefinition } from '../../../core/civilization/buildingCatalo
 import { renderBuildingIcon } from './BuildingCatalogPanel.tsx';
 import {
   PixelSprite,
-  TileImage,
   getBuildingSprite,
 } from './spriteRegistry.ts';
 import {
   TERRAIN_DECOR_SEED,
-  LOCKED_FOREST_OVERLAY_OPACITY,
   getCellDecor,
 } from './terrainDecor.ts';
+import { TerrainCellLayers } from './TerrainCellLayers.tsx';
 import {
   ActiveExpansionReveal,
   EXPANSION_IMPACT_MS,
@@ -47,14 +46,22 @@ export interface MapGridViewProps {
 }
 
 export const CELL_SIZE = 32;
+export const ZOOM_PIXEL_DENOMINATOR = 16;
 export const FOREST_MARGIN_CHUNKS = 2;
 export const FOREST_MARGIN_CELLS = FOREST_MARGIN_CHUNKS * CHUNK_WIDTH;
 export const EXPANSION_FOREST_MARGIN_CELLS = Math.max(FOREST_MARGIN_CELLS, CHUNK_WIDTH, CHUNK_HEIGHT);
-const MIN_ZOOM = 0.6;
-const EXPANSION_MIN_ZOOM = 0.35;
+const MIN_ZOOM = 0.5;
+const EXPANSION_MIN_ZOOM = 0.375;
 const MAX_ZOOM = 2.0;
-const ZOOM_STEP = 0.2;
+const ZOOM_STEP = 0.25;
+const WHEEL_ZOOM_STEP = 0.125;
 const DRAG_THRESHOLD_PX = 4;
+
+export function snapZoomToIntegerPixels(rawZoom: number, minZoom = MIN_ZOOM): number {
+  const clamped = Math.min(MAX_ZOOM, Math.max(minZoom, rawZoom));
+  const snapped = Math.round(clamped * ZOOM_PIXEL_DENOMINATOR) / ZOOM_PIXEL_DENOMINATOR;
+  return Math.min(MAX_ZOOM, Math.max(minZoom, snapped));
+}
 
 export function computeExpansionFitZoom(
   mapWidthPx: number,
@@ -67,7 +74,8 @@ export function computeExpansionFitZoom(
   const availableH = Math.max(200, viewportHeight - 24);
   const raw = Math.min(1.0, availableW / mapWidthPx, availableH / mapHeightPx);
   const clamped = Math.max(EXPANSION_MIN_ZOOM, Math.min(MAX_ZOOM, raw));
-  return Math.round(clamped * 100) / 100;
+  const snapped = Math.floor(clamped * ZOOM_PIXEL_DENOMINATOR) / ZOOM_PIXEL_DENOMINATOR;
+  return Math.max(EXPANSION_MIN_ZOOM, Math.min(MAX_ZOOM, snapped));
 }
 
 export function getPlacementPreviewLabel(
@@ -123,8 +131,8 @@ const GridCell = React.memo<GridCellProps>(
         className={`relative box-border select-none overflow-hidden transition-colors ${
           isUnlocked
             ? isPlacementMode
-              ? 'border-[0.5px] border-emerald-950/20 dark:border-slate-900/40 after:absolute after:inset-0 after:pointer-events-none hover:after:bg-emerald-300/35 cursor-crosshair'
-              : 'border-[0.5px] border-emerald-950/15 dark:border-slate-900/35'
+              ? 'border-0 after:absolute after:inset-0 after:pointer-events-none hover:after:bg-emerald-300/35 cursor-crosshair'
+              : 'border-0'
             : isPlacementMode
             ? 'border-0 cursor-crosshair'
             : clickableLocked
@@ -132,30 +140,12 @@ const GridCell = React.memo<GridCellProps>(
             : 'border-0 pointer-events-none'
         }`}
       >
-        <TileImage
-          pack="tiny-town"
-          tileIndex={decor.baseTile}
+        <TerrainCellLayers
+          baseTile={decor.baseTile}
+          overlayTile={decor.overlayTile}
+          isDarkened={decor.isDarkened}
           size={CELL_SIZE}
-          className="block pointer-events-none"
         />
-
-        {decor.isDarkened && (
-          <div
-            aria-hidden="true"
-            data-locked-forest="true"
-            style={{ opacity: LOCKED_FOREST_OVERLAY_OPACITY }}
-            className="absolute inset-0 bg-slate-950 pointer-events-none"
-          />
-        )}
-
-        {decor.overlayTile !== null && (
-          <TileImage
-            pack="tiny-town"
-            tileIndex={decor.overlayTile}
-            size={CELL_SIZE}
-            className="absolute inset-0 block pointer-events-none"
-          />
-        )}
       </div>
     );
   }
@@ -289,10 +279,7 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
 
   const activeMinZoom = isExpansionMode ? EXPANSION_MIN_ZOOM : MIN_ZOOM;
 
-  const clampZoom = (val: number): number => {
-    const clamped = Math.min(MAX_ZOOM, Math.max(activeMinZoom, val));
-    return Math.round(clamped * 100) / 100;
-  };
+  const clampZoom = (val: number): number => snapZoomToIntegerPixels(val, activeMinZoom);
 
   const handleZoomIn = useCallback(
     (e: React.MouseEvent) => {
@@ -344,8 +331,8 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
     }
     if (hasMovedRef.current) {
       setPan({
-        x: dragStartRef.current.panX + dx,
-        y: dragStartRef.current.panY + dy,
+        x: Math.round(dragStartRef.current.panX + dx),
+        y: Math.round(dragStartRef.current.panY + dy),
       });
     }
   };
@@ -357,7 +344,7 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
 
   const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
     e.stopPropagation();
-    const delta = e.deltaY < 0 ? 0.1 : -0.1;
+    const delta = e.deltaY < 0 ? WHEEL_ZOOM_STEP : -WHEEL_ZOOM_STEP;
     setZoom((z) => clampZoom(z + delta));
   };
 
@@ -435,9 +422,10 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
         data-testid="map-grid-stage"
         data-render-width={renderBox.width}
         data-render-height={renderBox.height}
+        data-cell-px={CELL_SIZE * zoom}
         data-expansion-mode={isExpansionMode ? 'true' : 'false'}
         style={{
-          transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+          transform: `translate(${Math.round(pan.x)}px, ${Math.round(pan.y)}px) scale(${zoom})`,
           transformOrigin: 'center center',
           width: mapWidthPx,
           height: mapHeightPx,
@@ -461,6 +449,7 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
             gridTemplateColumns: `repeat(${renderBox.width}, ${CELL_SIZE}px)`,
             width: mapWidthPx,
             height: mapHeightPx,
+            imageRendering: 'pixelated',
           }}
         >
           {cells.map((cell) => (

@@ -468,7 +468,7 @@ test('Terrain Decor Stage 4a-3: unlocked boundary gating prevents clipped canopi
   assert.deepStrictEqual(allLocked, lBorder);
 });
 
-test('Terrain Decor Stage 4a-3: MapGridView ground-only darkening order & SpriteGallery M1-M6 + 16x11 sample', () => {
+test('Terrain Decor Stage 4a-3 + UX-3: MapGridView ground->tree->scrim darkening order & SpriteGallery M1-M6 + 16x11 sample', () => {
   const baseState = createInitialCivilizationState();
   const mapHtml = renderToString(
     React.createElement(MapGridView, {
@@ -479,16 +479,19 @@ test('Terrain Decor Stage 4a-3: MapGridView ground-only darkening order & Sprite
     })
   );
 
-  // Verify layer order inside locked grid cell: baseTile (data-tile-index="0") -> bg-slate-950 scrim -> overlayTile
+  // UX-3: Verify layer order inside locked grid cell: baseTile -> overlayTile (if any) -> bg-slate-950 scrim
   const lockedCellStart = mapHtml.indexOf('data-cell-coord="-8,-8"');
   assert.ok(lockedCellStart > -1);
   const lockedCellSnippet = mapHtml.slice(lockedCellStart, lockedCellStart + 900);
   const baseIdx = lockedCellSnippet.indexOf('data-tile-index="');
   const scrimIdx = lockedCellSnippet.indexOf('data-locked-forest="true"');
-  const overlayIdx = lockedCellSnippet.indexOf('data-tile-index="', scrimIdx);
   assert.ok(baseIdx > -1 && scrimIdx > baseIdx, 'Dark scrim must sit AFTER base grass tile');
-  if (overlayIdx !== -1) {
-    assert.ok(overlayIdx > scrimIdx, 'Tree overlay MUST render AFTER dark scrim so tree keeps 100% color');
+  const secondTileIdx = lockedCellSnippet.indexOf('data-tile-index="', baseIdx + 1);
+  if (secondTileIdx !== -1 && secondTileIdx < lockedCellSnippet.indexOf('data-cell-coord="', 10)) {
+    assert.ok(
+      secondTileIdx < scrimIdx,
+      'Tree overlay MUST render BEFORE dark scrim so ground and trees darken uniformly'
+    );
   }
   // Regression guard: overlay TileImage with "absolute inset-0" must NEVER also have "relative"
   // (Tailwind v4 outputs .relative after .absolute, which pushed overlays out of the overflow-hidden cell).

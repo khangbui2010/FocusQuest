@@ -20,7 +20,7 @@
  *   - Canopy fragments (6–11, 18–23, 30–35) NEVER stand alone or get clipped at unlocked borders.
  *   - Corner cells ("—") of M5/M6 belong to the 3×3 block, stay locked & clear of other units.
  *   - Tree density targeted at ~30% (25%–35% overlay cells; 65%–75% darkened grass clearings).
- *   - Background-only darkening (`LOCKED_FOREST_OVERLAY_OPACITY`) keeps tree overlays at full Tiny Town color.
+ *   - Uniform darkening (`LOCKED_FOREST_DARKEN_OPACITY` with `LOCKED_TREE_DARKEN_FACTOR`) renders over both ground and tree layers.
  */
 
 import { CHUNK_WIDTH, CHUNK_HEIGHT } from '../../../core/civilization/constants.ts';
@@ -28,8 +28,61 @@ import { REUSED_TINY_TOWN_TILES } from './spriteData.ts';
 
 export const TERRAIN_DECOR_SEED = 5202402;
 
-/** Darkens ONLY the ground layer under locked forest so trees retain crisp Tiny Town contrast */
-export const LOCKED_FOREST_OVERLAY_OPACITY = 0.44;
+/** Shared darkening opacity for locked forest ground & trees (0.44) */
+export const LOCKED_FOREST_DARKEN_OPACITY = 0.44;
+
+/**
+ * Multiplier for tree darkening relative to locked ground (`1.0` = identical to ground).
+ * Can be tuned (e.g. `0.7`) without changing component layer structure.
+ */
+export const LOCKED_TREE_DARKEN_FACTOR = 1.0;
+
+/** Backward-compatible alias for LOCKED_FOREST_DARKEN_OPACITY */
+export const LOCKED_FOREST_OVERLAY_OPACITY = LOCKED_FOREST_DARKEN_OPACITY;
+
+export interface LockedDarkenOpacities {
+  readonly groundUnderOverlayOpacity: number;
+  readonly topScrimOpacity: number;
+  readonly treeBrightnessFactor: number;
+}
+
+/**
+ * Computes layer opacities so that locked cells always render `ground -> tree -> topScrim`
+ * while keeping ground darkened at `darkenOpacity` (0.44) even if `treeFactor` is tuned (e.g. 0.7).
+ */
+export function computeLockedForestOpacities(
+  hasOverlay: boolean,
+  darkenOpacity = LOCKED_FOREST_DARKEN_OPACITY,
+  treeFactor = LOCKED_TREE_DARKEN_FACTOR
+): LockedDarkenOpacities {
+  const safeGround = Math.max(0, Math.min(1, darkenOpacity));
+  if (!hasOverlay || treeFactor === 1) {
+    return {
+      groundUnderOverlayOpacity: 0,
+      topScrimOpacity: safeGround,
+      treeBrightnessFactor: 1,
+    };
+  }
+
+  const targetTreeOpacity = Math.max(0, Math.min(1, safeGround * Math.max(0, treeFactor)));
+  if (targetTreeOpacity < safeGround) {
+    const denom = 1 - targetTreeOpacity;
+    const underOpacity = denom > 0 ? (safeGround - targetTreeOpacity) / denom : 0;
+    return {
+      groundUnderOverlayOpacity: Math.round(underOpacity * 10000) / 10000,
+      topScrimOpacity: Math.round(targetTreeOpacity * 10000) / 10000,
+      treeBrightnessFactor: 1,
+    };
+  }
+
+  const denom = 1 - safeGround;
+  const brightness = denom > 0 ? (1 - targetTreeOpacity) / denom : 1;
+  return {
+    groundUnderOverlayOpacity: 0,
+    topScrimOpacity: safeGround,
+    treeBrightnessFactor: Math.round(brightness * 10000) / 10000,
+  };
+}
 
 /** Target tree density (~30%, bounded 25%–35%) and corresponding clearing ratio (65%–75%) on 24×24 samples */
 export const FOREST_TARGET_DENSITY_MIN = 0.25;
