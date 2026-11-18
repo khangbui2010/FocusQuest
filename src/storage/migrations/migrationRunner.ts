@@ -3,12 +3,14 @@ import { STORAGE_KEYS } from '../storageKeys.ts';
 import { Migration } from './types.ts';
 import { v1_initialSchema } from './v1_initialSchema.ts';
 import { v2_civilizationSchema } from './v2_civilizationSchema.ts';
+import { v3_questsSchema } from './v3_questsSchema.ts';
 
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
 
 export const ALL_MIGRATIONS: Migration[] = [
   v1_initialSchema,
   v2_civilizationSchema,
+  v3_questsSchema,
 ];
 
 export class MigrationRunner {

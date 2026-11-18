@@ -143,7 +143,7 @@ test('Session Integrity [Test 3]: Countdown target elapsed while browser closed 
 // =========================================================================
 // TEST 4: Extension Disable / Re-enable
 // =========================================================================
-test('Session Integrity [Test 4]: Extension Disable/Re-enable interrupts Countdown (0 rewards) and Stopwatch (0.5x penalty)', async () => {
+test('Session Integrity [Test 4]: Extension Disable/Re-enable interrupts Countdown and Stopwatch with 0 rewards', async () => {
   // A. Countdown: 0 reward
   const h1 = createIntegrityTestHarness();
   const p1 = await h1.profileManager.createProfile('Study', ['wikipedia.org']);

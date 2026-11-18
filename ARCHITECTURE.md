@@ -1,7 +1,7 @@
 # Focus Quest — Technical Architecture Specification (Manifest V3)
 
-**Version:** 1.5.0  
-**Status:** MV3 Background, Offscreen LOFI Streaming, Civilization Engine & Full Bilingual Architecture  
+**Version:** 1.5.1  
+**Status:** MV3 Background, Offscreen LOFI Streaming, Civilization Engine, Schema v3 Pure Quest Foundation & Full Bilingual Architecture  
 **Target Platform:** Google Chrome Extension (Manifest V3, Chrome >= 116)  
 **Language & Stack:** TypeScript, React 19 (Popup & Blocked UI), Tailwind CSS 4, Chrome Extension APIs (`declarativeNetRequest`, `alarms`, `notifications`, `offscreen`, `storage`, `runtime`, `action`, `i18n`)  
 
@@ -132,7 +132,7 @@ Các action được hỗ trợ:
 - Session & Pomodoro: `GET_SESSION_STATE`, `START_SESSION`, `PAUSE_SESSION`, `RESUME_SESSION`, `GIVE_UP_SESSION`, `FINISH_STOPWATCH`, `SKIP_POMODORO_BREAK`, `ADVANCE_POMODORO_STAGE`, `RESET_SESSION`, `HEARTBEAT`.
 - Profiles: `GET_PROFILES`, `GET_ACTIVE_PROFILE`, `SWITCH_PROFILE`, `CREATE_PROFILE`, `RENAME_PROFILE`, `DELETE_PROFILE`, `ADD_DOMAIN`, `REMOVE_DOMAIN`.
 - Economy & Stats: `GET_ECONOMY`, `GET_DAILY_STATS`.
-- Civilization (`CURRENT_SCHEMA_VERSION = 2`, lưới `8×8` / chunk `4×4` mở rộng theo tọa độ `origin` và điều kiện `Level >= k + 2`): `GET_CIVILIZATION_STATE`, `PLACE_BUILDING`, `REMOVE_BUILDING`, `EXPAND_LAND`.
+- Civilization & Storage Schema v3 (`CURRENT_SCHEMA_VERSION = 3`): `fq_civilization` giữ nguyên cấu trúc v2 (lưới `8×8` / chunk `4×4` mở rộng theo `origin`, `Level >= k + 2`); bổ sung `fq_quests` (`STORAGE_KEYS.QUESTS`) qua `v3_questsSchema.ts` cho lõi Daily/Weekly Quest thuần ở Stage 2a. Messages: `GET_CIVILIZATION_STATE`, `PLACE_BUILDING`, `REMOVE_BUILDING`, `EXPAND_LAND`. *(Lưu ý: `GET_QUEST_STATE` & `CLAIM_QUEST_REWARD` chưa được nối vào `MessageHandler` / `SessionCoordinator` ở Stage 2a — dự kiến Giai đoạn 2b.)*
 - Preferences: `SET_LANGUAGE`, `SET_CHIME_ENABLED`, `SET_MUSIC_PLAYER_EXPANDED`.
 - Focus Music Player: `MUSIC_GET_STATE`, `MUSIC_GET_CATALOG`, `MUSIC_REFRESH_CATALOG`, `MUSIC_PLAY_TRACK`, `MUSIC_PAUSE`, `MUSIC_RESUME`, `MUSIC_STOP`, `MUSIC_NEXT`, `MUSIC_PREVIOUS`, `MUSIC_SEEK`, `MUSIC_SET_VOLUME`, `MUSIC_SET_SHUFFLE`, `MUSIC_SET_REPEAT`.
 - SW ↔ Offscreen Document (lọc bằng `target: 'offscreen' | 'background'`): `MUSIC_PLAY`, `MUSIC_PAUSE`, `MUSIC_STOP`, `MUSIC_SEEK`, `MUSIC_SET_VOLUME`, `MUSIC_GET_STATUS` ↔ `MUSIC_POSITION`, `MUSIC_ENDED`, `MUSIC_ERROR`.

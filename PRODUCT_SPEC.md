@@ -1,9 +1,9 @@
 # Focus Quest — Product Specification
 
-**Document Version:** 1.4.1-synced  
+**Document Version:** 1.4.2-synced  
 **Target Release:** MVP v1.0  
 **Role:** Senior Product Architect & Product Manager  
-**Status:** Formal Product Specification (Synced through Milestone UX-4)  
+**Status:** Formal Product Specification (Synced through Milestone UX-4 & Milestone 5B.5 Stage 2a)  
 
 ---
 
@@ -195,3 +195,21 @@ Sản phẩm áp dụng triết lý **Positive Reinforcement (Khen thưởng tí
 - **Công nghệ UI:** **React 19 + Tailwind CSS 4** cho Popup (`index.html`), Blocked Page (`blocked.html` + module `blocked.js` tuân thủ CSP MV3) và Chrome `_locales` (`en`, `vi`).
 - **Điều hướng & Song ngữ:** Thanh điều hướng đáy 5 tab cố định (`Quests | Focus | Map | Awards | Stats`), mặc định mở màn hình bản đồ `Map` ở giữa; song ngữ 100% EN/VI (UI, lỗi từ backend qua `errorTranslator`, thông báo Chrome, trang chặn `blocked.html`). `Quests` và `Awards` hiện ở trạng thái giữ chỗ "Coming soon".
 - **Ranh giới:** UI là view/controller mỏng; **tuyệt đối không trực tiếp quyết định thời gian tập trung chính thức hoặc tự trao Coins/XP**.
+
+---
+
+## 13. Hệ thống Nhiệm vụ Hàng ngày & Hàng tuần (Quest Engine — Stage 2a, chưa nối vào session)
+> **Trạng thái tích hợp:** Phần domain thuần (`src/core/quests/`), types (`src/types/quests.ts`) và Schema v3 (`fq_quests`, `v3_questsSchema.ts`) đã hoàn tất ở **Giai đoạn 2a**, **chưa nối vào `SessionCoordinator` / `MessageHandler` / `QuestView`** (dự kiến thực hiện ở **Giai đoạn 2b** và **5c**).
+
+- **Nhiệm vụ Hàng ngày (Daily Quests — Cap: `40 Coins · 100 XP / ngày`):**
+  1. `daily_first_spark` (*First Spark*): Hoàn thành `1` phiên Focus hợp lệ → `10 Coins · 25 XP`.
+  2. `daily_steady_rhythm` (*Steady Rhythm*): Tích lũy `60` phút Focus từ các phiên hoàn thành hôm nay → `15 Coins · 35 XP`.
+  3. `daily_double_tap` (*Double Tap*): Hoàn thành `2` phiên Focus hợp lệ trong ngày → `15 Coins · 40 XP`.
+- **Nhiệm vụ Hàng tuần (Weekly Quests — 3 trục độc lập, Cap: `150 Coins · 370 XP / tuần`):**
+  1. `weekly_habit_builder` (*Habit Builder*): Hoàn thành phiên trên `4` ngày phân biệt trong tuần (Thứ Hai–Chủ Nhật) → `50 Coins · 120 XP`.
+  2. `weekly_deep_diver` (*Deep Diver*): Hoàn thành `3` phiên sâu (`>= 45 phút`) → `60 Coins · 150 XP`.
+  3. `weekly_tenacity_10` (*Weekly Tenacity*): Hoàn thành tổng `10` phiên Focus hợp lệ trong tuần → `40 Coins · 100 XP`.
+- **Quy tắc Cân bằng & Bảo vệ:**
+  - **Thưởng cố định (Flat Rewards) & Manual Claim:** Thưởng Quest không nhân với Session Multiplier hay Civilization `CoinBonus`; người dùng bấm nhận thủ công và phần thưởng chưa nhận sẽ hết hạn khi rollover qua `00:00` (Daily) hoặc `00:00` Thứ Hai (Weekly).
+  - **All-or-Nothing Session Eligibility (`toQuestOutcomeDelta`):** Chỉ phiên `COMPLETED` mới cộng tiến độ Quest (Countdown / Pomodoro Countdown Give Up hoặc `INTERRUPTED` = `0`; Stopwatch `< 5 phút` hoặc `INTERRUPTED` = `0`; Pomodoro Stopwatch chỉ tính `completedFocusCount × intervalDuration`, **không** cộng interval đang dở dang).
+  - **Streak & Chống tua đồng hồ (Anti-Clock-Rollback):** Chuỗi ngày tập trung (`currentDays`, `longestDays`) chỉ tăng khi hoàn thành phiên ở ngày mới kế tiếp (nhiều phiên cùng ngày giữ nguyên, gián đoạn >= 2 ngày reset về `1`) và **không sinh Coin thụ động**; hệ thống lưu `lastSettledTimestamp`, `processedPeriodKeys` và `recentClaimedKeys` (ring buffer tối đa `14` mục) để chặn reset ngoài ý muốn hoặc claim trùng khi đồng hồ hệ thống lùi lại.

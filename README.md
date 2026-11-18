@@ -20,6 +20,9 @@ Focus Quest transforms daily study and focused work into a civilization-building
     - `DECORATIVE`: Aesthetic and cultural monuments (Campfire, Ancient Totem).
     - `FOCUS_SUPPORT`: Unlocks statistics and focus insights (Elder's Hut, Meditation Cave).
     - `ECONOMY_EFFECT`: Grants additive CoinBonus percentages to focus session rewards (+2%, +3% per level).
+- **Focus Music Player (MV3 Offscreen Streaming):** Streams curated tracks from the online `FocusQuest-LOFI-archive` catalog through a Chrome Offscreen Document (`Chrome >= 116`), persisting playback position past Chrome's 30s audio idle cutoff with a session-scoped mini-player and expandable bottom sheet.
+- **Map-First 5-Tab Popup & Analytics Engine:** Compact `Quests | Focus | Map | Awards | Stats` bottom navigation (hidden inside active/post-focus sessions until Exit), pure Gregorian Day/Month/Year Stats aggregator with custom SVG bar charts, and half-up 2-decimal UI display (`formatRewardAmount`) preserving full IEEE-754 precision in storage.
+- **Quest Engine & Schema v3 Foundation (Stage 2a):** Pure Daily & Weekly Quest domain engine (`src/core/quests/`) with fixed flat rewards, streak tracking, anti-clock-rollback ledger, and idempotent v3 storage migration (wiring into background/UI scheduled for Stage 2b & 5c).
 - **Full EN/VI Localization & MV3 CSP Compliance:** 100% EN/VI translations across UI, Chrome notifications, backend error mapper, Chrome `_locales`, and CSP-safe `blocked.html` + `blocked.js`.
 - **Concurrency & Transaction Safety:** All mutations execute inside atomic critical sections guarded by `StorageMutex` with rollback compensation.
 
@@ -36,7 +39,7 @@ Focus Quest transforms daily study and focused work into a civilization-building
 | **CoinBonus Formula** | `durationMinutes × 1.5 × tierMultiplier × (1 + totalCoinBonus)` | `durationMinutes × 1.0 × tierMultiplier × (1 + totalCoinBonus)` |
 
 ### Multiplier Tiers
-- Dưới 30 min: **×1.0**
+- Under 30 min (< 30 min): **×1.0**
 - 30–59 min: **×1.2**
 - 60–89 min: **×1.4**
 - 90–119 min: **×1.6**
@@ -65,7 +68,7 @@ npm install
 # Start local interactive dev preview (Port 3000)
 npm run dev
 
-# Run comprehensive test suite (509/509 tests)
+# Run comprehensive test suite (574/574 tests)
 npm test
 
 # Typecheck and lint codebase
@@ -74,6 +77,16 @@ npm run lint
 # Build extension artifacts (outputs to dist/)
 npm run build
 ```
+
+> **Verification scope:** Automated tests execute on Node.js (`tsx --test`) using React SSR (`renderToString`) for UI components and mock Chrome adapters for background services. Core runtime flows—the `400×600` popup (5-tab navigation, grid map, dark forest overlay, axe chop reveal animation), `blocked.html` with DNR rules, `chrome.i18n` & `manifest.json`, Offscreen Audio streaming (including Pause > 30s recovery), and remote music catalog fetching—have additionally been manually verified end-to-end in unpacked Chrome (`>= 116`).
+
+---
+
+## 🗺️ Roadmap
+
+- **Quest Integration & UI (`Stage 2b` → `Stage 5c`):** Atomically connect the Quest Engine into `SessionCoordinator` / `MessageHandler` (`GET_QUEST_STATE`, `CLAIM_QUEST_REWARD`), complete the interactive `QuestView` and Day/Month/Year `StatsView` (`Quests` and `Awards` tabs currently show `"Coming soon"` placeholders).
+- **Awards System:** Implement achievement tracking and milestones to replace the `Awards` tab placeholder.
+- **Milestone 5C — Era Progression & Upgrades:** Enable `UPGRADE_BUILDING` (unlocking the currently locked `"Milestone 5C"` upgrade action) and advance civilization progression into the **Bronze Age** and subsequent historical eras.
 
 ---
 

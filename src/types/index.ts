@@ -3,3 +3,4 @@ export * from './economy.ts';
 export * from './profiles.ts';
 export * from './storageSchema.ts';
 export * from './messages.ts';
+export * from './quests.ts';

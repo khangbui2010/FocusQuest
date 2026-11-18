@@ -3,6 +3,7 @@ import { PlayerEconomy } from './economy.ts';
 import { FocusProfile } from './profiles.ts';
 import { CivilizationState } from '../core/civilization/civilizationState.ts';
 import { SupportedLocale } from '../i18n/types.ts';
+import { QuestState } from './quests.ts';
 
 export interface DailyStatRecord {
   date: string;               // ISO date string 'YYYY-MM-DD'
@@ -32,4 +33,5 @@ export interface StorageSchema {
   dailyStats: Record<string, DailyStatRecord>; // Keyed by 'YYYY-MM-DD'
   settings: UserSettings;
   civilization?: CivilizationState;
+  quests?: QuestState;
 }

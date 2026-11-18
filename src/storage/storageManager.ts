@@ -14,6 +14,8 @@ import {
 import { GridMap } from '../core/civilization/gridMap.ts';
 import { calculatePlayerLevel } from '../core/economy/levelSystem.ts';
 import { CachedMusicCatalog, MusicPlayerState } from '../types/music.ts';
+import { QuestState } from '../types/quests.ts';
+import { sanitizeQuestState } from '../core/quests/questEngine.ts';
 
 export class StorageManager {
   private mutex = new StorageMutex();
@@ -509,6 +511,29 @@ export class StorageManager {
 
   async clearMusicCatalogCache(): Promise<void> {
     await this.adapter.remove(STORAGE_KEYS.MUSIC_CATALOG_CACHE);
+  }
+
+  // --- Quests Storage (Schema v3) ---
+
+  async getQuests(nowMs: number = Date.now()): Promise<QuestState> {
+    const raw = await this.adapter.get<unknown>(STORAGE_KEYS.QUESTS);
+    return sanitizeQuestState(raw, nowMs);
+  }
+
+  async setQuests(state: QuestState): Promise<void> {
+    await this.adapter.set(STORAGE_KEYS.QUESTS, state);
+  }
+
+  async updateQuests(
+    updater: (current: QuestState) => QuestState,
+    nowMs: number = Date.now()
+  ): Promise<QuestState> {
+    return this.mutex.runExclusive(async () => {
+      const current = await this.getQuests(nowMs);
+      const updated = sanitizeQuestState(updater(current), nowMs);
+      await this.setQuests(updated);
+      return updated;
+    });
   }
 }
 

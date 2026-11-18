@@ -1657,13 +1657,9 @@ export class SessionCoordinator {
 
   /**
    * Handle recovery when Extension was Disabled or Reloaded while browser was open.
-   * Countdown: Cancelled/Interrupted, Reward = 0, rewardProcessed = true.
-   * Stopwatch: INTERRUPTED, reward computed for focus minutes up to lastHeartbeatAt with 0.5x penalty.
-   */
-  /**
-   * Handle recovery when Extension was Disabled or Reloaded while browser was open.
-   * Countdown: Cancelled/Interrupted, Reward = 0, rewardProcessed = true.
-   * Stopwatch: INTERRUPTED, reward computed for focus minutes up to lastHeartbeatAt with 0.5x penalty.
+   * Countdown & Pomodoro Countdown: INTERRUPTED, Reward = 0, valid minutes recorded to Daily Stats, rewardProcessed = true.
+   * Stopwatch: INTERRUPTED, Reward = 0, valid minutes recorded to Daily Stats, rewardProcessed = true.
+   * Pomodoro Stopwatch (per PRODUCT_SPEC §9): EXTENSION_DISABLED/EXTENSION_RELOADED earns 0 Coins/XP, valid minutes recorded to Daily Stats, rewardProcessed = true.
    */
   async handleExtensionDisabledRecovery(
     session: SessionSnapshot,
