@@ -1,9 +1,9 @@
 # Focus Quest — Product Specification
 
-**Document Version:** 1.4.0-synced  
+**Document Version:** 1.4.1-synced  
 **Target Release:** MVP v1.0  
 **Role:** Senior Product Architect & Product Manager  
-**Status:** Formal Product Specification (Synced through Stages A–E / Milestones 5B.5 partial & 5B.6)  
+**Status:** Formal Product Specification (Synced through Milestone UX-2)  
 
 ---
 
@@ -70,7 +70,7 @@ Sản phẩm áp dụng triết lý **Positive Reinforcement (Khen thưởng tí
 - **Không áp dụng quy tắc Give Up của Countdown cho Stopwatch.** Bấm kết thúc là hoàn thành phiên thành công.
 
 ### 5.3. Chế độ Pomodoro (Pomodoro Countdown & Pomodoro Stopwatch)
-- **Pomodoro Countdown:** Multiplier được xác định và khóa cố định ngay từ khi bắt đầu dựa trên **tổng thời lượng Focus dự kiến của toàn bộ phiên** (`N × cycles × intervalDuration`). Áp dụng **All-or-Nothing**: thưởng chỉ trao khi hoàn thành 100% toàn bộ các chu kỳ dự kiến; nếu Give Up hoặc gián đoạn giữa chừng nhận 0 Coins và 0 XP.
+- **Pomodoro Countdown:** Multiplier được xác định và khóa cố định ngay từ khi bắt đầu dựa trên **tổng thời lượng Focus dự kiến của toàn bộ phiên** (`intervalsPerCycle × cycles × intervalDuration`). Áp dụng **All-or-Nothing**: phần thưởng chỉ được **quyết toán và cộng một lần duy nhất** vào ví/thống kê khi hoàn thành **100% toàn bộ các pha và chu kỳ dự kiến**. Trong lúc phiên đang chạy, con số hiển thị là **Thưởng dự kiến** (`Projected Reward`) kèm ghi chú điều kiện hoàn thành đủ 100%. Nếu **Give Up** hoặc bị **gián đoạn (`INTERRUPTED`)** trước khi hoàn thành hết toàn bộ các pha và chu kỳ, phiên nhận **0 Coins và 0 XP** (dù đã xong một phần số pha); màn hình kết thúc hiển thị `+0` Coin / `+0` XP và giải thích rõ chưa hoàn thành tất cả các pha và chu kỳ, đồng thời vẫn lưu số phút tập trung hợp lệ thực tế vào thống kê ngày (`fq_daily_stats`).
 - **Pomodoro Stopwatch:**
   - **Quy tắc Thưởng (Reward Rule):** Thưởng Focus Coins và XP được tính **độc quyền trên các focus intervals đã hoàn thành trọn vẹn 100%** (`T = completedIntervals × intervalDuration`). Nếu người dùng kết thúc khi chưa hoàn thành trọn vẹn interval đầu tiên (`N = 0`), phiên nhận 0 Coins và 0 XP. Khi dừng giữa chừng trong một interval đang diễn ra, interval đó không được tính vào thưởng.
   - **Quy tắc Thống kê Ngày (Daily Stats Rule):** Daily Stats ghi nhận **toàn bộ số phút tập trung thực tế (`actualFocusMinutes`)**, bao gồm cả số phút của focus interval đang dang dở (ví dụ: hoàn thành 1 interval 25 phút và tập trung thêm 15 phút ở interval thứ 2 rồi kết thúc -> nhận thưởng 25 phút, nhưng thống kê ngày ghi nhận 40 phút).
@@ -149,9 +149,10 @@ Sản phẩm áp dụng triết lý **Positive Reinforcement (Khen thưởng tí
 ---
 
 ## 9. Xử lý Gián đoạn & Tắt Trình duyệt Đột ngột (Approved Decision)
-- **Phương án A:** Ghi nhận thời gian tập trung hợp lệ thực tế trước khi tắt dựa trên mốc `startedAt`, thời gian pause và `lastHeartbeatAt`, sau đó đóng phiên bị gián đoạn.
-- **Countdown gián đoạn:** Không tính là hoàn thành, không trao Coins/XP. Số phút thực tế đã học vẫn được lưu vào thống kê ngày.
-- **Stopwatch gián đoạn:** Nếu đạt >= 5 phút trước khi tắt, tính thưởng cho số phút đó; nếu < 5 phút, chỉ lưu số phút vào thống kê và không trao thưởng.
+- **Phương án A:** Ghi nhận thời gian tập trung hợp lệ thực tế trước khi tắt dựa trên mốc `startedAt`, thời gian pause và `lastHeartbeatAt` (`lastCheckpointAt`), sau đó đóng phiên bị gián đoạn (`INTERRUPTED`).
+- **Countdown & Pomodoro Countdown gián đoạn:** Không tính là hoàn thành, **nhận 0 Coins và 0 XP** (kể cả khi Pomodoro Countdown đã hoàn thành một phần số pha trước khi gián đoạn). Số phút tập trung hợp lệ thực tế đã học vẫn được lưu vào thống kê ngày.
+- **Stopwatch gián đoạn:** Khi bị gián đoạn bởi tắt trình duyệt hoặc tắt/tải lại extension, nhận **0 Coins và 0 XP**; số phút tập trung hợp lệ thực tế được ghi nhận vào thống kê ngày (`isAbandoned = true`).
+- **Pomodoro Stopwatch gián đoạn:** Khi đóng/mở lại trình duyệt (`BROWSER_CLOSED`), bảo toàn và trao thưởng cho các focus intervals đã hoàn thành trọn vẹn (`completedFocusCount >= 1`), không thưởng cho interval đang dở dang và ghi toàn bộ số phút hợp lệ vào thống kê ngày; nếu bị tắt/tải lại extension (`EXTENSION_DISABLED` / `EXTENSION_RELOADED`), nhận 0 Coins và 0 XP nhưng vẫn ghi nhận số phút tập trung hợp lệ.
 - **Chống thưởng trùng:** Đánh dấu `rewardProcessed = true` ngay khi khôi phục để bảo đảm tính idempotency tuyệt đối.
 
 ---

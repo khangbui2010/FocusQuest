@@ -1,12 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  sendExtensionMessage,
+  buildSimulatedDailyStats,
+  getDailyStatsClient,
   isChromeExtension,
+  sendExtensionMessage,
 } from '../../src/ui/services/extensionClient.ts';
 import { FullSessionStateResponse } from '../../src/types/messages.ts';
 import { SessionSnapshot } from '../../src/types/session.ts';
 import { FocusProfile } from '../../src/types/profiles.ts';
+import { DailyStatRecord } from '../../src/types/storageSchema.ts';
+import {
+  aggregateMonthStats,
+  aggregateYearStats,
+  calculateFocusStreak,
+} from '../../src/core/stats/statsAggregator.ts';
 
 test('UI ExtensionClient: isChromeExtension returns boolean without error', () => {
   const result = isChromeExtension();
@@ -317,4 +325,40 @@ test('UI ExtensionClient (5B.6a): EXPAND_LAND simulator matches backend Level, C
   assert.match(levelGateRes.error || '', /Player Level 4/);
 });
 
+test('UI ExtensionClient (Stage 3): GET_DAILY_STATS simulator returns deterministic ~400-day dataset with gaps & streaks', async () => {
+  const firstRes = await getDailyStatsClient();
+  const secondRes = await sendExtensionMessage<Record<string, DailyStatRecord>>({
+    action: 'GET_DAILY_STATS',
+  });
 
+  assert.equal(firstRes.success, true);
+  assert.equal(secondRes.success, true);
+  assert.deepEqual(firstRes.data, secondRes.data, 'Simulated GET_DAILY_STATS must be deterministic');
+
+  const records = firstRes.data!;
+  const keys = Object.keys(records).sort();
+  assert.ok(keys.length >= 250 && keys.length <= 405, `Expected dense ~13 month subset, got ${keys.length}`);
+
+  const fixedAnchor = '2026-11-17';
+  const fixedA = buildSimulatedDailyStats(fixedAnchor);
+  const fixedB = buildSimulatedDailyStats(fixedAnchor);
+  assert.deepEqual(fixedA, fixedB);
+
+  // Covers rest weeks, gap days, Day/Month/Year & realistic streaks
+  const streak = calculateFocusStreak(fixedA, fixedAnchor);
+  assert.ok(streak.current >= 5, `Expected current streak >= 5, got ${streak.current}`);
+  assert.ok(streak.longest >= 16, `Expected longest streak >= 16, got ${streak.longest}`);
+  assert.ok(streak.current <= streak.longest);
+
+  const month = aggregateMonthStats(fixedA, '2026-11');
+  assert.ok(month.activeDays > 0 && month.activeDays < month.daysInMonth, 'Month must include both active & rest days');
+  const year = aggregateYearStats(fixedA, '2026');
+  assert.equal(year.months.length, 12);
+  assert.ok(
+    year.months.slice(0, 11).every((m) => m.focusMinutes > 0),
+    'Jan-Nov 2026 months should have focus activity'
+  );
+  assert.equal(year.months[11].focusMinutes, 0, 'Dec 2026 is after 2026-11-17 anchor');
+  const prevYear = aggregateYearStats(fixedA, '2025');
+  assert.ok(prevYear.totalFocusMinutes > 0, '405-day span must include late 2025 history');
+});

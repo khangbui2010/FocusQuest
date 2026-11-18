@@ -54,6 +54,8 @@ import { getCoinBonusMultiplier } from '../../core/economy/coinBonus.ts';
 import { TimeCalculator } from '../../core/timer/timeCalculator.ts';
 import { isSupportedLocale } from '../../i18n/translator.ts';
 import { DomainNormalizer } from '../../core/profiles/domainNormalizer.ts';
+import { getLocalDateKey } from '../../core/utils/dateUtils.ts';
+import { addDaysToDateKey, isValidDateKey } from '../../core/stats/statsAggregator.ts';
 
 const rewardEngine = new RewardEngine();
 
@@ -83,7 +85,7 @@ const mockState: FullSessionStateResponse = {
     level: 3,
   },
   todayStats: {
-    date: new Date().toISOString().slice(0, 10),
+    date: getLocalDateKey(),
     totalFocusMinutes: 50,
     completedSessions: 2,
     abandonedSessions: 0,
@@ -97,6 +99,111 @@ const mockState: FullSessionStateResponse = {
     notificationsEnabled: true,
   },
 };
+
+const SIM_DURATION_PATTERN = [25, 45, 60, 30, 85, 50, 70] as const;
+
+/**
+ * Deterministic ~405-day DailyStatRecord generator for standalone web preview.
+ * Zero Math.random() calls; includes rest weeks, gap days, a 16-day historical
+ * streak, and a 5-day current streak ending on `todayDateKey`.
+ */
+export function buildSimulatedDailyStats(
+  todayDateKey: string,
+  liveTodayStats?: DailyStatRecord | null
+): Record<string, DailyStatRecord> {
+  const anchor = isValidDateKey(todayDateKey) ? todayDateKey : getLocalDateKey();
+  const records: Record<string, DailyStatRecord> = {};
+
+  for (let offset = -404; offset <= 0; offset++) {
+    const key = addDaysToDateKey(anchor, offset);
+    if (!key) continue;
+
+    if (offset === 0) {
+      if (liveTodayStats && liveTodayStats.date === anchor) {
+        records[key] = { ...liveTodayStats };
+      } else {
+        records[key] = {
+          date: key,
+          totalFocusMinutes: 50,
+          completedSessions: 2,
+          abandonedSessions: 0,
+          coinsEarned: 100,
+          xpEarned: 250,
+        };
+      }
+      continue;
+    }
+
+    // Recent 4 days leading into today -> guarantees current 5-day active streak
+    if (offset >= -4 && offset <= -1) {
+      const mins = [75, 40, 55, 35][-offset - 1];
+      const completed = Math.max(1, Math.floor(mins / 25));
+      records[key] = {
+        date: key,
+        totalFocusMinutes: mins,
+        completedSessions: completed,
+        abandonedSessions: 0,
+        coinsEarned: mins * 2,
+        xpEarned: mins * 5,
+      };
+      continue;
+    }
+
+    // 3-day break immediately before current streak
+    if (offset >= -7 && offset <= -5) {
+      if (offset === -6) {
+        records[key] = {
+          date: key,
+          totalFocusMinutes: 0,
+          completedSessions: 0,
+          abandonedSessions: 1,
+          coinsEarned: 0,
+          xpEarned: 0,
+        };
+      }
+      continue;
+    }
+
+    const backIdx = -offset;
+
+    // 16-day unbroken historical focus streak [-90 .. -75]
+    if (offset >= -90 && offset <= -75) {
+      const mins = 45 + (backIdx % 5) * 15;
+      const completed = Math.max(1, Math.floor(mins / 25));
+      records[key] = {
+        date: key,
+        totalFocusMinutes: mins,
+        completedSessions: completed,
+        abandonedSessions: backIdx % 13 === 0 ? 1 : 0,
+        coinsEarned: mins * 2,
+        xpEarned: mins * 5,
+      };
+      continue;
+    }
+
+    // Periodic full rest weeks (every 8th week) and regular gap days
+    if (Math.floor(backIdx / 7) % 8 === 3) {
+      continue;
+    }
+    if (backIdx % 7 === 0 || backIdx % 11 === 2) {
+      continue;
+    }
+
+    const mins = SIM_DURATION_PATTERN[backIdx % SIM_DURATION_PATTERN.length];
+    const completed = Math.max(1, Math.floor(mins / 25));
+    const abandoned = backIdx % 9 === 0 ? 1 : 0;
+    records[key] = {
+      date: key,
+      totalFocusMinutes: mins,
+      completedSessions: completed,
+      abandonedSessions: abandoned,
+      coinsEarned: mins * 2,
+      xpEarned: mins * 5,
+    };
+  }
+
+  return records;
+}
 
 let mockProfiles: FocusProfile[] = [
   {
@@ -1593,6 +1700,15 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
       return { success: true, data: { ...updatedSettings } as unknown as T };
     }
 
+    case 'GET_DAILY_STATS': {
+      const todayKey =
+        mockState.todayStats?.date && isValidDateKey(mockState.todayStats.date)
+          ? mockState.todayStats.date
+          : getLocalDateKey();
+      const stats = buildSimulatedDailyStats(todayKey, mockState.todayStats);
+      return { success: true, data: stats as unknown as T };
+    }
+
     default:
       return { success: true, data: undefined as unknown as T };
   }
@@ -1669,6 +1785,17 @@ export async function expandLandClient(
 export async function getMusicStateClient(): Promise<MessageResponse<MusicStateResponseData>> {
   return sendExtensionMessage<MusicStateResponseData>({
     action: 'MUSIC_GET_STATE',
+  });
+}
+
+/**
+ * Typed client helper: fetch all persisted DailyStatRecord entries keyed by 'YYYY-MM-DD'.
+ */
+export async function getDailyStatsClient(): Promise<
+  MessageResponse<Record<string, DailyStatRecord>>
+> {
+  return sendExtensionMessage<Record<string, DailyStatRecord>>({
+    action: 'GET_DAILY_STATS',
   });
 }
 

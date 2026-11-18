@@ -19,6 +19,47 @@ import {
   LOCKED_FOREST_OVERLAY_OPACITY,
   getCellDecor,
 } from './terrainDecor.ts';
+import { StatsBarChart, StatsBarDatum } from '../StatsBarChart.tsx';
+import { useTranslation } from '../../../i18n/I18nContext.tsx';
+import {
+  aggregateDayStats,
+  aggregateMonthStats,
+  aggregateYearStats,
+} from '../../../core/stats/statsAggregator.ts';
+import { buildSimulatedDailyStats } from '../../services/extensionClient.ts';
+
+const PREVIEW_ANCHOR_DATE = '2026-11-17';
+const PREVIEW_SIM_STATS = buildSimulatedDailyStats(PREVIEW_ANCHOR_DATE);
+const PREVIEW_DAY = aggregateDayStats(PREVIEW_SIM_STATS, PREVIEW_ANCHOR_DATE);
+const PREVIEW_MONTH = aggregateMonthStats(PREVIEW_SIM_STATS, '2026-11');
+const PREVIEW_YEAR = aggregateYearStats(PREVIEW_SIM_STATS, '2026');
+
+const PREVIEW_7_BARS: StatsBarDatum[] = PREVIEW_DAY.trend7Days.map((d) => ({
+  key: d.dateISO,
+  label: d.dateISO,
+  axisLabel: d.dateISO.slice(5),
+  value: d.focusMinutes,
+  sessions: d.sessions,
+  isCurrent: d.dateISO === PREVIEW_ANCHOR_DATE,
+}));
+
+const PREVIEW_30_BARS: StatsBarDatum[] = PREVIEW_MONTH.days.map((d) => ({
+  key: d.dateISO,
+  label: d.dateISO,
+  axisLabel: `${d.dayNumber}`,
+  value: d.focusMinutes,
+  sessions: d.sessions,
+  isCurrent: d.dateISO === PREVIEW_ANCHOR_DATE,
+}));
+
+const PREVIEW_12_BARS: StatsBarDatum[] = PREVIEW_YEAR.months.map((m) => ({
+  key: m.monthKey,
+  label: m.monthKey,
+  axisLabel: `${m.monthNumber}`,
+  value: m.focusMinutes,
+  sessions: m.sessions,
+  isCurrent: m.monthKey === '2026-11',
+}));
 
 const SCALES = [1, 2, 4] as const;
 const TERRAIN_SAMPLE_COLS = 8;
@@ -118,6 +159,13 @@ export interface SpriteGalleryProps {
  * web preview (!isChromeExtension() && location.hash === '#sprites').
  */
 export const SpriteGallery: React.FC<SpriteGalleryProps> = ({ onBack }) => {
+  const { t } = useTranslation();
+  const formatTooltip = (bar: StatsBarDatum) =>
+    t('stats.chart.tooltip', {
+      minutes: Math.round(bar.value),
+      sessions: bar.sessions ?? 0,
+    });
+
   const handleBack = () => {
     if (onBack) {
       onBack();
@@ -562,6 +610,60 @@ export const SpriteGallery: React.FC<SpriteGalleryProps> = ({ onBack }) => {
                   })
                 )}
               </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Section 4: Stage 3 Pure SVG StatsBarChart Preview (368px popup width) */}
+        <section
+          data-testid="gallery-stats-bar-chart-preview"
+          className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 space-y-4"
+        >
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-sm font-bold">{t('stats.chart.previewHeading')}</h2>
+            <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
+              368px · Day (7) / Month (30) / Year (12)
+            </span>
+          </div>
+
+          <div className="flex flex-wrap gap-4">
+            <div className="w-[368px] max-w-full space-y-1.5">
+              <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                {t('stats.chart.preview7Bars')}
+              </div>
+              <StatsBarChart
+                bars={PREVIEW_7_BARS}
+                highlightKey={PREVIEW_ANCHOR_DATE}
+                tooltipFormatter={formatTooltip}
+                ariaLabel={`${t('stats.chart.ariaLabel')} — ${t('stats.chart.preview7Bars')}`}
+                emptyLabel={t('stats.chart.empty')}
+              />
+            </div>
+
+            <div className="w-[368px] max-w-full space-y-1.5">
+              <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                {t('stats.chart.preview30Bars')}
+              </div>
+              <StatsBarChart
+                bars={PREVIEW_30_BARS}
+                highlightKey={PREVIEW_ANCHOR_DATE}
+                tooltipFormatter={formatTooltip}
+                ariaLabel={`${t('stats.chart.ariaLabel')} — ${t('stats.chart.preview30Bars')}`}
+                emptyLabel={t('stats.chart.empty')}
+              />
+            </div>
+
+            <div className="w-[368px] max-w-full space-y-1.5">
+              <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                {t('stats.chart.preview12Bars')}
+              </div>
+              <StatsBarChart
+                bars={PREVIEW_12_BARS}
+                highlightKey="2026-11"
+                tooltipFormatter={formatTooltip}
+                ariaLabel={`${t('stats.chart.ariaLabel')} — ${t('stats.chart.preview12Bars')}`}
+                emptyLabel={t('stats.chart.empty')}
+              />
             </div>
           </div>
         </section>

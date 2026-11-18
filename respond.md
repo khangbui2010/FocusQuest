@@ -1,103 +1,117 @@
-# BÁO CÁO NGHIỆM THU — MILESTONE LOFI / GIAI ĐOẠN LOFI-2
+# BÁO CÁO NGHIỆM THU — MILESTONE UX / GIAI ĐOẠN UX-2
 
-**Giai đoạn:** Milestone LOFI — Giai đoạn LOFI-2 *(mini-player chỉ hiện khi đang trong phiên tập trung, playlist trong bảng mở rộng, đổi quy tắc phát/dừng nhạc, dọn Header & nền trời sáng cho cảnh tập trung; KHÔNG thuộc Phase 5 hay Milestone 5B.5)*  
-**Ngày hoàn thành:** 2026-11-17  
-**File sao lưu báo cáo cũ:** `/respond_lofi2_prev.md`  
-**Trạng thái:** Đã hoàn tất kiểm định (`530 / 530` tests PASS 3/3 lần, Build PASS, Lint PASS) — **DỪNG chờ duyệt**
-
----
-
-## 1. PHẠM VI TUÂN THỦ ("KHÔNG LÀM")
-
-- **Không sửa `offscreen`, catalog loader/cache hay nguồn nhạc:** Giữ nguyên hoàn toàn `src/offscreen/*`, `public/offscreen.html`, `src/data/musicCatalog.ts` và các URL archive HTTPS. Không thêm thư viện npm mới và không đóng gói file âm thanh cục bộ (`0` file audio trong `public/` & `dist/`).
-- **Không đổi lõi game/kinh tế/schema/blocking:** Giữ nguyên `RewardEngine`, toàn bộ công thức kinh tế/CoinBonus/Multiplier, `CURRENT_SCHEMA_VERSION`, logic chặn web/allowlist (`BlockingCoordinator`, `dnrAdapter`, `ProfileManager`), và không tái cấu trúc `SessionCoordinator` (chỉ giữ nguyên điểm gọi hook đồng bộ để dừng nhạc khi phiên kết thúc).
+**Giai đoạn:** Milestone UX — Giai đoạn UX-2 *(Sửa hiển thị phần thưởng màn kết thúc, nhãn `"Thưởng dự kiến"` khi chạy Pomodoro Countdown, cập nhật `PRODUCT_SPEC.md` & test — KHÔNG thuộc Phase 5, 5B.5 hay LOFI)*  
+**Ngày hoàn thành:** 2026-11-18  
+**File sao lưu báo cáo cũ:** `/respond_ux2_prev.md`  
+**Trạng thái:** Đã hoàn tất kiểm định (`551 / 551` tests PASS 3/3 lần, Build PASS, Lint PASS) — **DỪNG chờ duyệt**
 
 ---
 
-## 2. CHI TIẾT CÁC HẠNG MỤC ĐÃ TRIỂN KHAI (A–G)
+## 1. BƯỚC 0 — KẾT QUẢ ĐIỀU TRA & BẰNG CHỨNG MÃ NGUỒN
 
-### A. Quy tắc hiển thị chỉ trong phiên tập trung (`App.tsx`, `MusicPlayerSheet.tsx`)
-- Trong `PopupShell` (`src/App.tsx`): mini-player và bảng mở rộng chỉ render khi `showMusicPlayer` đúng, tức phiên đang ở trạng thái **`RUNNING` hoặc `PAUSED`** (bao gồm focus, `SHORT_BREAK`, `LONG_BREAK`) và `effectiveTab === 'focus'`.
-- **Không render** khi ở ngoài phiên (`session === null` hoặc `status === 'IDLE'`), **không render** ở các tab khác, và **không render** trên màn hình kết quả sau khi phiên đã kết thúc (`COMPLETED`, `ABANDONED`, `INTERRUPTED` chờ bấm `Exit`).
-- Do thanh tab `<Navbar>` đã bị ẩn hoàn toàn trong phiên (UX-1), mini-player nằm sát đáy màn tập trung (`hasBottomNav={false}`, backdrop dùng `pb-0`).
+### (a) Nguồn dữ liệu của ô `"Phần thưởng"` và câu mô tả trên màn kết thúc
+- **Ô Phần thưởng trước khi sửa (`src/ui/components/TimerView.tsx`, dòng 431–445 cũ):**
+  - `TimerView` gộp chung `isPomodoro = session.mode === 'POMODORO_COUNTDOWN' || session.mode === 'POMODORO_STOPWATCH'` rồi gán trực tiếp:
+    `earnedCoins = isPomodoro ? session.pomodoroState?.accumulatedCoins ?? 0 : ...`
+    `earnedXp = isPomodoro ? session.pomodoroState?.accumulatedXp ?? 0 : ...`
+  - **Bản chất của `pomodoroState.accumulatedCoins / accumulatedXp` ở `POMODORO_COUNTDOWN`:** Đây là **phần thưởng DỰ KIẾN cho toàn bộ phiên nếu hoàn thành 100%**, KHÔNG phải số đã cộng vào ví!
+    - Trong `src/background/sessionCoordinator.ts` (`startSession`, **dòng 403–406 & 448–449**) và `advancePomodoroStage` (**dòng 1334–1339, 1417–1418**) — cũng như bản simulator `src/ui/services/extensionClient.ts` (**dòng 647–658 & 688–689**) — backend tính sẵn `totalCoins = totalQuestMinutes * 1.5 * lockedMultiplier * coinBonusFactor` và `totalXp = totalQuestMinutes * 5.0 * lockedMultiplier` rồi lưu vào `pomodoroState.accumulatedCoins/Xp` ngay lúc bắt đầu phiên.
+    - Khi người dùng bấm **Give Up** (`giveUpCountdown()`, `sessionCoordinator.ts` **dòng 780–803**; `extensionClient.ts` **dòng 920–931**), backend chỉ đổi `status: 'ABANDONED'` và giữ nguyên `...session`, làm giá trị dự kiến trong `pomodoroState.accumulatedCoins/Xp` (ví dụ `+35437.5 Coin / +112500 XP`) bị `TimerView` đọc nhầm thành thưởng thực nhận.
+- **Câu mô tả màn kết thúc trước khi sửa (`src/ui/components/TimerView.tsx`, dòng 486–490 cũ):**
+  - Nhánh `else if (isPomodoro && completedIntervals > 0)` gọi `t('timer.outcome.pomoEndedRetainedDesc', { count: completedIntervals })` (`src/i18n/locales/en.ts:224`, `src/i18n/locales/vi.ts:226`: *"Toàn bộ phần thưởng từ {count} pha tập trung hoàn thành đã được lưu an toàn vào ví!"*) cho **cả `POMODORO_COUNTDOWN`** lẫn `POMODORO_STOPWATCH`, bất kể `ABANDONED` hay `INTERRUPTED`.
 
-### B. Đổi quy tắc phát / dừng nhạc (`music.ts`, `messages.ts`, `storageSchema.ts`, `musicCoordinator.ts`, `messageHandler.ts`, `background/index.ts`, `extensionClient.ts`, `MusicPlayerSheet.tsx`)
-- **Pause phiên, Resume, nghỉ ngắn, nghỉ dài không tác động lên nhạc:** `deriveMusicIntent(snapshot: SessionSnapshot | null)` rút gọn chỉ còn `'keep' | 'stop'`: trả về `'keep'` cho mọi phiên `'RUNNING'` hoặc `'PAUSED'` (kể cả `SHORT_BREAK` / `LONG_BREAK`). Nhạc đang phát tiếp tục phát, nhạc đang tạm dừng thủ công giữ nguyên tạm dừng.
-- **Dừng hẳn khi phiên kết thúc hoặc phát hiện phát mồ côi:** Khi phiên kết thúc vì bất cứ lý do gì (`COMPLETED`, `ABANDONED`, `INTERRUPTED`, `RESET_SESSION`, extension disable, browser startup downtime hoặc recovery không còn phiên đang chạy), hoặc khi `MUSIC_GET_STATE` / sự kiện từ offscreen phát hiện nhạc đang phát mà không có phiên hoạt động (`intent === 'stop'`), `MusicCoordinator` thực hiện `stopInternal()`: chuyển trạng thái về `'STOPPED'`, đóng Offscreen Document, đưa `positionSec` về `0`, đồng thời **giữ nguyên** `currentTrackId`, `volume`, `muted`, `shuffle`, `repeatMode`.
-- **Không tự động phát khi bắt đầu phiên:** `START_SESSION` giữ nguyên trạng thái nhạc hiện tại (`IDLE`/`STOPPED`/`PAUSED`), chỉ người dùng tự bấm phát mới phát.
-- **Gỡ bỏ tùy chọn & thông điệp cũ + tương thích ngược storage:** Xóa 2 checkbox `"Stop music when focus session ends"` / `"Keep playing music during Pomodoro breaks"` trong `MusicPlayerSheet.tsx`, xóa `MUSIC_SET_SYNC_WITH_SESSION` & `MUSIC_SET_PLAY_DURING_BREAK` (`messages.ts`, `MessageHandler`), xóa `stopMusicOnSessionEnd` & `musicPlayDuringBreak` (`UserSettings`), và xóa `pausedBySession` (`MusicPlayerState`). Khi đọc dữ liệu storage cũ còn chứa các trường này, `normalizeStateAgainstCatalog()` dựng lại state tường minh nên bỏ qua an toàn mà không crash hay cần migration.
+### (b) Ma trận 4 chế độ × 3 trạng thái kết thúc (Hiện trạng cũ vs. Backend thực tế vs. Sau UX-2)
 
-### C. Thanh Mini-Player (`MusicPlayerSheet.tsx`)
-- Thanh cao `56px` (`h-[56px]`) gắn đường tiến độ mảnh `3px` (`h-[3px]`) ở mép trên; gồm ảnh bìa nhỏ có icon nhạc, tên bài (truncate ellipsis), `tác giả · album`, nút Bài trước, Play/Pause (`40×40px`), Bài tiếp và Chevron-Up mở rộng (tất cả nút đều là `<button type="button">` thật vùng bấm tối thiểu `36×36px` kèm `aria-label` song ngữ).
-- Khi catalog rỗng hoặc lỗi mạng lúc mở đầu: hiển thị hàng gọn `"Chưa tải được nhạc"` / `"Music not loaded yet"` kèm nút `Thử lại` / `Retry`. Mọi thao tác trên UI chỉ gửi command tới background, không tự phát `<audio>`.
+| Chế độ | Trạng thái | Quyết toán thực tế ở Backend (`SessionCoordinator`) | Hiển thị UI cũ (`TimerView.tsx` trước UX-2) | Hiển thị UI sau UX-2 |
+|---|---|---|---|---|
+| `COUNTDOWN` | `COMPLETED` | `completeCountdown()` (`1098–1152`): Cộng Coins & XP vào ví + thống kê ngày. | Hiện thưởng từ `targetMinutes × base × mult` + `countdownCompletedDesc`. | **Giữ nguyên.** |
+| `COUNTDOWN` | `ABANDONED` | `giveUpCountdown()` (`722–816`): Không truyền `economyDelta` (**0 Coin / 0 XP**); ghi phút thực tế vào daily stats (`coins: 0, xp: 0`). | `+0` / `+0`, `endedEarlyDesc`. | **Giữ nguyên** (`0` Coin / `0` XP, `endedEarlyDesc`). |
+| `COUNTDOWN` | `INTERRUPTED` | Recovery (`1167–1230`, `1689–1729`): **0 Coin / 0 XP**; ghi `lastKnownValidFocusMinutes` vào daily stats. | `+0` / `+0`, `endedInterruptedDesc`. | **Giữ nguyên** (`0` Coin / `0` XP, `endedInterruptedDesc`). |
+| `POMODORO_COUNTDOWN` | `COMPLETED` | `advancePomodoroStage()` (`1343–1380`): Cộng thưởng **1 lần duy nhất** khi đủ 100% pha & chu kỳ. | Đọc `accumulatedCoins/Xp`, `pomoCompletedDesc`, `N (Xm)`. | **Giữ nguyên.** |
+| `POMODORO_COUNTDOWN` | `ABANDONED` | `giveUpCountdown()` (`722–816`): **0 Coin / 0 XP** (`economyDelta` không truyền); giữ nguyên `accumulatedCoins/Xp` cũ; ghi phút thực tế vào daily stats. | **SAI:** Đọc `accumulatedCoins/Xp` dự kiến (`+35437.5 / +112500`); nếu `completedIntervals > 0` hiện `pomoEndedRetainedDesc` (*"đã lưu vào ví!"*); cột pha hiện `N (Xm)`. | **Đã sửa:** Cứng **`+0` Coin / `+0` XP**, cột pha **`N / total (Xm)`** (nếu đủ config), mô tả **`pomoCountdownIncompleteDesc`** (EN/VI). |
+| `POMODORO_COUNTDOWN` | `INTERRUPTED` | Recovery (`1394–1478`, `1689–1729`): **0 Coin / 0 XP**; backend reset `accumulatedCoins/Xp = 0`; ghi `totalActualMinutes` vào daily stats. | **SAI phần mô tả & phụ thuộc snapshot:** nếu `completedIntervals > 0` hiện `pomoEndedRetainedDesc` (*"đã lưu vào ví!"*) dù thưởng = `0`. | **Đã sửa:** Cứng **`+0` Coin / `+0` XP** (không đọc field tích lũy), **`N / total (Xm)`**, **`pomoCountdownIncompleteDesc`**. |
+| `STOPWATCH` | `COMPLETED` | `finishStopwatch()` (`997–1091`): `< 5m` = 0; `>= 5m` = cộng thưởng thực tế. | Hiện `focusMinutes × base × mult` + `stopwatchCompletedDesc`. | **Giữ nguyên.** |
+| `STOPWATCH` | `ABANDONED` | Không hỗ trợ (`giveUpCountdown()` dòng `734` ném lỗi). | Fallback `+0` / `+0`, `endedEarlyDesc`. | **Giữ nguyên.** |
+| `STOPWATCH` | `INTERRUPTED` | Recovery (`1252–1309`, `1772–1808`): **0 Coin / 0 XP**; ghi `validMinutes` vào daily stats (`lifecycleRecovery.test.ts:159-160`). | `+0` / `+0`, `endedInterruptedDesc`. | **Giữ nguyên.** *(Đã đồng bộ `PRODUCT_SPEC.md` mục 9).* |
+| `POMODORO_STOPWATCH` | `COMPLETED` | `finishStopwatch()` (`859–995`): Cộng thưởng các pha hoàn thành trọn vẹn (`completedIntervals × duration`). | Đọc `accumulatedCoins/Xp`, `pomoCompletedDesc`. | **Giữ nguyên.** |
+| `POMODORO_STOPWATCH` | `ABANDONED` | *(Lưu ý sai khác biên)* Giao diện không có nút Give Up (chỉ có `"Kết thúc"` → `COMPLETED`), nhưng `giveUpCountdown()` (`732`) vẫn nhận mode này và trả **0 `economyDelta`** trong khi giữ nguyên `accumulatedCoins/Xp`. | Đọc `accumulatedCoins/Xp` và `pomoEndedRetainedDesc` nếu `completedIntervals > 0`. | **Giữ nguyên theo quy tắc #4** *(báo cáo sai khác biên, không tự đổi `POMODORO_STOPWATCH`)*. |
+| `POMODORO_STOPWATCH` | `INTERRUPTED` | Có 2 nhánh: (1) `BROWSER_CLOSED` (`1312–1391`): **trao thưởng** các pha đã hoàn thành (`economyDelta`); (2) `EXTENSION_DISABLED/RELOADED` (`1730–1771`): **0 `economyDelta`** và zero `accumulatedCoins/Xp`. | Đọc `accumulatedCoins/Xp` và hiện `pomoEndedRetainedDesc` nếu `completedIntervals > 0` *(sai khác nhẹ ở nhánh `EXTENSION_DISABLED` nếu `completedIntervals > 0`: hiện `+0` nhưng câu chữ vẫn nói `"đã lưu vào ví"`).* | **Giữ nguyên nhánh chuẩn `BROWSER_CLOSED` & toàn bộ code `POMODORO_STOPWATCH` theo quy tắc #4** *(chỉ báo cáo sai khác ở nhánh `EXTENSION_DISABLED`).* |
 
-### D. Bảng mở rộng Bottom Sheet (`MusicPlayerSheet.tsx`, `UserSettings.musicPlayerExpanded`)
-- Bấm Chevron-Up mở bottom sheet (`h-[416px] max-h-[72%]`, `rounded-t-[22px]`, nền `bg-slate-950`, backdrop mờ `bg-black/55 backdrop-blur-xs`). Đóng bằng Chevron-Down, bấm nền ngoài hoặc phím `Esc`. Trạng thái mở/đóng được lưu bền vững ở `UserSettings.musicPlayerExpanded` qua `SET_MUSIC_PLAYER_EXPANDED` (không đổi `schemaVersion`).
-- Đầy đủ khối `Now Playing` (`56px` cover), thanh tua, cụm Play `52px` / Prev / Next / Stop / Shuffle / Repeat, thanh âm lượng + Mute, dải chip lọc tác giả động (`"Tất cả · N"` + theo từng nghệ sĩ), danh sách bài cuộn dòng `min-h-[46px]` có equalizer khi đang phát + badge ngắn `CC0`/`BY`/`BY-SA` (không sửa dữ liệu SPDX gốc trong catalog), và footer `"Ghi công & giấy phép"` đóng mặc định để mở xem chi tiết bản quyền từng bài.
+### (c) Xác nhận `economy` (`focusCoins`, `totalXP`, `level`) sau Give Up / Interrupted trên `POMODORO_COUNTDOWN`
+- Đã kiểm tra mã nguồn `sessionCoordinator.ts` (**dòng 722–816, 1394–1478, 1689–1729**) và bổ sung test hồi quy thực thi `SessionCoordinator` tại **`__tests__/background/ux2PomodoroCountdownSettlement.test.ts`**:
+  - Ví seeded `focusCoins: 55.5, totalXP: 1035, level: 5` vẫn **giữ nguyên tuyệt đối `55.5 / 1035 / Lv. 5`** sau khi hoàn thành `2/10` pha (`180m`) rồi gọi `giveUpCountdown()`, trong khi `fq_daily_stats` vẫn ghi `totalFocusMinutes: 180, coinsEarned: 0, xpEarned: 0, abandonedSessions: 1`.
+  - Tương tự khi `EXTENSION_RE_ENABLED` ngắt giữa phiên sau `1` pha (`15m`), `economy` không thay đổi và `dailyStats` ghi nhận `15m` với `0` thưởng.
+  - Khi hoàn thành đủ `100%` (`2/2` pha = `30m`), `economy` chỉ được cộng đúng **1 lần duy nhất** (`+54 Coin, +180 XP`), chống cộng trùng khi alarm chạy lại.
 
-### E. Dọn Header (`Header.tsx`)
-- Không còn nút mở trình phát nhạc (`♪` / `music-player-open-btn`) trên Header; giữ nguyên Brand về trang chủ, Era badge rút gọn (`header.eraShort.*`) chống chồng lấp ở chiều rộng `400px` cả EN & VI, Coins, `Lv. X`, nút `?`, nút `EN|VI`, thanh XP mảnh và huy hiệu khiên khi chạy phiên.
-
-### F. Trời sáng cho cảnh tập trung (`FocusSceneArea.tsx`)
-- Loại bỏ hoàn toàn nền trời tối và sao đêm (`fq-scene-star`); cả 3 trạng thái đều dùng trời sáng/hoàng hôn:
-  - `working`: nền trời xanh ban ngày `#6ec1f0 → #a9dcf9 → #d4f0ff` kèm mặt trời vàng & mây trắng trôi.
-  - `paused`: nền sáng xám xanh dịu `#cbd5e1 → #dbe4ee → #edf2f7`.
-  - `resting`: nền hoàng hôn pastel `#fed7aa → #fbcfe8 → #e9d5ff` với ánh nắng chiều ấm.
-- Hai chip góc trên (`focus-scene-status-chip` & `chime-toggle-btn`) dùng scrim tối `bg-slate-900/75 text-white border-white/25` bảo đảm độ tương phản rõ trên nền sáng.
-
-### G. Đồng bộ song ngữ EN / VI (`src/i18n/locales/{en,vi}.ts`, `src/i18n/errorTranslator.ts`)
-- Xóa các khóa/mapping lỗi thừa (`music.syncWithSessionLabel`, `music.playDuringBreakLabel`, lỗi của 2 action đã xóa); bảo đảm 100% key parity giữa `EN_MESSAGES` và `VI_MESSAGES`.
+### (d) Nhãn thưởng khi phiên `POMODORO_COUNTDOWN` đang chạy (`STATE 2`)
+- Trước khi sửa (`src/ui/components/TimerView.tsx`, dòng 798–810 cũ; `en.ts:173`; `vi.ts:175`):
+  - Chỉ hiển thị `timer.liveReward.totalLabel` = `"Total Reward:"` / `"Tổng thưởng:"` ngay trước số Coin/XP cả phiên và chip hệ số (`×2.5`), **không** nói rõ đó là phần thưởng **dự kiến** và **chỉ nhận khi hoàn thành 100% tất cả pha và chu kỳ**.
 
 ---
 
-## 3. CÁC TEST ĐÃ CẬP NHẬT & LÝ DO
+## 2. CÁC THAY ĐỔI ĐÃ THỰC HIỆN TRONG UX-2
 
-1. **`__tests__/background/musicCoordinator.test.ts`:**
-   - Cập nhật bảng chân lý `deriveMusicIntent(snapshot)` sang chữ ký 1 tham số `'keep' | 'stop'`.
-   - Thay thế các test đồng bộ pause/break cũ sang quy tắc LOFI-2: Pause/Resume/Break không tự dừng hay tự phát lại nhạc; `START_SESSION` không tự động phát; mọi nhánh kết thúc phiên (`completeCountdown`, `finishStopwatch`, `giveUpCountdown`, Pomodoro completion, `handleExtensionDisabledRecovery`, browser startup downtime, `resetSession`, `SERVICE_WORKER_WAKE`, `MUSIC_GET_STATE` khi không còn phiên) đều dừng nhạc và giữ lại track/âm lượng/shuffle/repeat; từ chối 2 action cũ; bỏ qua an toàn các key cũ trong storage (`syncWithSession`, `playDuringBreak`, `pausedBySession`, `stopMusicOnSessionEnd`, `musicPlayDuringBreak`).
-2. **`__tests__/ui/lofi2MusicUi.test.ts`:**
-   - Gỡ các trường/prop cũ (`syncWithSession`, `playDuringBreak`, `pausedBySession`, `onToggleSyncWithSession`, `onTogglePlayDuringBreak`).
-   - Cập nhật assertion của `<App />`: ẩn hoàn toàn `music-mini-player` khi rảnh hoặc ở màn kết quả `COMPLETED`, chỉ render ở đáy màn Tập trung khi `RUNNING`/`PAUSED`, và xác nhận 2 toggle cũ không xuất hiện trong sheet.
-3. **`__tests__/ui/musicPlayerSheet.test.ts`:**
-   - Gỡ các trường/prop cũ và đổi assertion kiểm tra `music-play-during-break-toggle` / `"Tiếp tục phát nhạc trong giờ nghỉ Pomodoro"` thành kiểm tra vắng mặt hoàn toàn.
-4. **`__tests__/ui/navigationRedesign.test.ts` (dòng 44) & `__tests__/ui/extensionPopupShell.test.ts` (dòng 39):**
-   - Đổi assertion trên `<App />` mặc định ở tab Bản đồ từ `assert.ok(html.includes('data-testid="music-mini-player"'))` sang `assert.ok(!html.includes('data-testid="music-mini-player"'))` để khớp quy tắc A của LOFI-2.
-5. **`__tests__/ui/ux1SessionNavigationAndProfile.test.ts`:**
-   - Gỡ trường/prop nhạc cũ trong helper `makePopupShellProps`, và tách assertion `music-mini-player` / `music-sheet-backdrop`: chỉ hiện (với `pb-0`) ở `RUNNING`/`PAUSED`/`SHORT_BREAK`/`LONG_BREAK`, không hiện ở màn kết quả (`COMPLETED`/`ABANDONED`/`INTERRUPTED`) hay ngoài phiên (`null`/`IDLE`).
+1. **Màn hình kết thúc (`src/ui/components/TimerView.tsx` s.415–549, `en.ts`, `vi.ts`):**
+   - Tách riêng `isPomoCountdown` và `isPomoStopwatch`.
+   - Với `POMODORO_COUNTDOWN` ở trạng thái `ABANDONED` hoặc `INTERRUPTED`: `earnedCoins = 0` và `earnedXp = 0` cứng theo quyết toán thực tế, tuyệt đối không đọc `pomodoroState.accumulatedCoins/Xp`.
+   - Ô `"Số pha hoàn thành"` / `"Completed Intervals"` hiển thị `N / total (Xm)` khi `pomodoroConfig` có đủ `intervalsPerCycle` và `numberOfCycles` (ví dụ `2 / 10 (180m)`), fallback an toàn về `N (Xm)` nếu thiếu config.
+   - Câu mô tả dùng key mới `timer.outcome.pomoCountdownIncompleteDesc`:
+     - **VI:** `"Bạn chưa hoàn thành tất cả các pha và chu kỳ nên không nhận phần thưởng. Thời gian tập trung của bạn vẫn được ghi vào thống kê."`
+     - **EN:** `"You did not finish all phases and cycles, so no reward was earned. Your focus time is still recorded in your stats."`
+   - Màn `COMPLETED` và `POMODORO_STOPWATCH` giữ nguyên không thay đổi.
+2. **Nhãn thưởng khi đang chạy (`src/ui/components/TimerView.tsx` s.827–902, `en.ts`, `vi.ts`):**
+   - Đổi `timer.liveReward.totalLabel` thành `timer.liveReward.projectedLabel`: `"Projected Reward:"` (EN) / `"Thưởng dự kiến:"` (VI).
+   - Bổ sung dòng chú thích `data-testid="pomo-countdown-all-or-nothing-note"` (`timer.liveReward.pomoAllOrNothingNote`): `"earned only upon completing all phases & cycles"` (EN) / `"nhận khi hoàn thành tất cả pha và chu kỳ"` (VI).
+   - Kiểm tra 100% key parity EN/VI: **428 / 428 khóa khớp tuyệt đối**.
+3. **Cập nhật tài liệu đặc tả (`PRODUCT_SPEC.md`):**
+   - **Đầu tài liệu (dòng 3–6):** Nâng version sync `1.4.1-synced` (`Synced through Milestone UX-2`).
+   - **Mục 5.3 (`Pomodoro Countdown`, dòng 72):** Làm rõ quy tắc quyết toán 1 lần khi hoàn thành 100% toàn bộ pha và chu kỳ, con số khi đang chạy là **Thưởng dự kiến**, Give Up/gián đoạn hiển thị `+0` Coin / `+0` XP và lưu số phút hợp lệ vào `fq_daily_stats`.
+   - **Mục 9 (`Xử lý Gián đoạn`, dòng 150–153):** Bổ sung rõ trường hợp `Pomodoro Countdown gián đoạn` (`0` Coins/XP, lưu phút vào daily stats), đồng bộ quy tắc thực tế của `Stopwatch gián đoạn` (`0` Coins/XP) và tách rõ `Pomodoro Stopwatch gián đoạn` (`BROWSER_CLOSED` giữ pha hoàn thành vs `EXTENSION_DISABLED/RELOADED` = 0).
+
+---
+
+## 3. KIỂM THỬ MỚI & CÁC TEST CŨ ĐÃ CẬP NHẬT
+
+- **Test UI mới (`__tests__/ui/ux2PomodoroOutcomeDisplay.test.ts` — 4 tests):**
+  1. `POMODORO_COUNTDOWN` `ABANDONED` sau `N` pha hiển thị `+0` / `+0`, `N / total (Xm)`, mô tả đúng (EN & VI), không chứa `"safely retained in your wallet"` / `"được lưu an toàn vào ví"` hay `"35437.5"`.
+  2. `POMODORO_COUNTDOWN` `ABANDONED` ở `0` pha và `INTERRUPTED` sau `N` pha đều hiển thị `+0` / `+0`, mô tả không nhận thưởng, fallback `N (Xm)` khi thiếu `numberOfCycles`.
+  3. Bảo toàn `COUNTDOWN` `ABANDONED`/`INTERRUPTED`, `COMPLETED` của mọi chế độ và `POMODORO_STOPWATCH` `INTERRUPTED` (`BROWSER_CLOSED`).
+  4. Nhãn chạy `POMODORO_COUNTDOWN` hiển thị `"Projected Reward:"` / `"Thưởng dự kiến:"` + ghi chú all-or-nothing và parity 100% EN/VI.
+- **Test Background hồi quy (`__tests__/background/ux2PomodoroCountdownSettlement.test.ts` — 2 tests):**
+  1. `POMODORO_COUNTDOWN` hoàn thành `2/10` pha (`180m`) rồi `giveUpCountdown()` giữ nguyên `economy` (`55.5 Coin, 1035 XP, Lv. 5`) và ghi `180m, 0 coins, 0 xp` vào `dailyStats`.
+  2. `POMODORO_COUNTDOWN` bị `EXTENSION_RE_ENABLED` sau `1` pha giữ nguyên `economy`; hoàn thành đủ `100%` cộng thưởng đúng 1 lần duy nhất.
+- **Test UI cũ đã cập nhật assertion có chủ đích** *(do đổi nhãn chạy `POMODORO_COUNTDOWN` từ `"Total Reward:"` sang `"Projected Reward:"`)*:
+  1. `__tests__/ui/focusRunningFixes5b3.test.ts` (dòng **171, 213, 256**): đổi `'Total Reward:'` → `'Projected Reward:'` (+ kiểm tra ghi chú all-or-nothing ở dòng 172).
+  2. `__tests__/ui/focusRunningView.test.ts` (dòng **319**): đổi `'Total Reward:'` → `'Projected Reward:'` + kiểm tra `data-testid="pomo-countdown-all-or-nothing-note"`.
+  3. `__tests__/ui/startFocusView.test.ts` (dòng **207**): đổi `'Total Reward:'` → `'Projected Reward:'` + kiểm tra `data-testid="pomo-countdown-all-or-nothing-note"`.
 
 ---
 
 ## 4. KẾT QUẢ KIỂM ĐỊNH THỰC TẾ (VERIFIED REAL OUTPUTS)
 
 - **`npm run lint` (`tsc --noEmit`):** **PASS** (`Exit code 0`, `0` errors).
-- **`npm run clean && npm run build`:** **PASS** (`Vite v8.3.8`, `1,737 modules transformed`, `1.02s`):
-  - `dist/background.js`: **`87.76 kB`** (gzip: `18.93 kB`) — `0` kết quả `react-dom` trong bundle nền.
-  - `dist/assets/popup-DR3j5Xqm.js`: **`750.99 kB`** (gzip: `198.04 kB`)
-  - `dist/assets/popup-DgGRUQxi.css`: **`86.84 kB`** (gzip: `13.62 kB`)
-  - `dist/assets/translator-CBOM9ACM.js`: **`51.07 kB`** (gzip: `13.74 kB`)
-  - `dist/assets/domainNormalizer-LjAHelB6.js`: **`48.55 kB`** (gzip: `13.17 kB`)
-  - `dist/assets/storageKeys-BmLuJ1Do.js`: **`0.37 kB`** (gzip: `0.26 kB`)
-  - `dist/offscreen.js`: **`3.87 kB`** (gzip: `1.48 kB`)
-  - `dist/blocked.js`: **`1.32 kB`** (gzip: `0.60 kB`)
-  - `dist/index.html`: **`0.71 kB`** | `dist/blocked.html`: **`1.81 kB`** | `dist/offscreen.html`: **`0.26 kB`**
-  - Tổng dung lượng `dist/`: **`1,061,849 B`**; số file âm thanh (`.mp3/.ogg/.wav/.m4a/.flac`) trong `public/` & `dist/`: **`0`**.
-- **`npm test` — chạy 3 lần liên tiếp:**
-  - **Lần 1:** **530 / 530 tests PASS** (`0` fail, `0` skipped, `0` cancelled — `17,886.16 ms`, `EXIT=0`)
-  - **Lần 2:** **530 / 530 tests PASS** (`0` fail, `0` skipped, `0` cancelled — `17,995.11 ms`, `EXIT=0`)
-  - **Lần 3:** **530 / 530 tests PASS** (`0` fail, `0` skipped, `0` cancelled — `20,333.90 ms`, `EXIT=0`)
+- **`npm run clean && npm run build`:** **PASS** (`Vite v8.3.8`, `1,738 modules transformed`, `775ms`, tổng dung lượng `dist/`: `1,078,018 B`):
+  - `dist/index.html`: `0.71 kB` | `dist/assets/popup-BFp-OSd4.css`: `87.75 kB`
+  - `dist/assets/popup-KA70q5OR.js`: `760.87 kB` (gzip: `200.79 kB`)
+  - `dist/assets/translator-B5-w4v6G.js`: `52.47 kB` | `dist/assets/statsAggregator-DM7wxVkB.js`: `53.96 kB` | `dist/assets/storageKeys-BmLuJ1Do.js`: `0.37 kB`
+  - `dist/background.js`: `87.39 kB` | `dist/offscreen.js`: `3.87 kB` | `dist/blocked.js`: `1.32 kB`
+- **`npm test` — chạy 3 lần liên tiếp (tất cả sau lần sửa code & test cuối cùng):**
+  - **Lần 1:** `551 / 551 PASS` (`0` fail, `0` skipped, `0` cancelled, `13,899.21 ms`, Exit `0`).
+  - **Lần 2:** `551 / 551 PASS` (`0` fail, `0` skipped, `0` cancelled, `14,336.86 ms`, Exit `0`).
+  - **Lần 3:** `551 / 551 PASS` (`0` fail, `0` skipped, `0` cancelled, `14,654.21 ms`, Exit `0`).
 
 ---
 
-## 5. GIỚI HẠN KIỂM CHỨNG & 9 BƯỚC TỰ KIỂM TRA TRÊN CHROME THẬT
+## 5. GIỚI HẠN KIỂM CHỨNG & HƯỚNG DẪN TỰ KIỂM TRÊN CHROME THẬT
 
-- **Giới hạn kiểm chứng:** Toàn bộ UI test được chạy bằng **React SSR (`renderToString`)** trên Node.js và backend test dùng mock Chrome adapters; tôi **chưa mở trực tiếp trên trình duyệt Chrome thật** để xem giao diện `400×600px`, nghe âm thanh stream qua Offscreen Document, hoặc kiểm tra tương tác chuột/phím thật.
-- **9 bước tự kiểm đề xuất trên Chrome (>= 116, `chrome://extensions` → Developer mode → Load unpacked `dist/`):**
-  1. **Ngoài phiên & các tab khác:** Mở popup ở trạng thái rảnh (tab `Bản đồ`, `Nhiệm vụ`, `Thành tựu`, `Thống kê` và màn chuẩn bị `Tập trung`) — xác nhận **không có mini-player** ở đáy và **không có nút `♪`** trên Header; kiểm tra Header ở cả EN & VI không bị đè chữ.
-  2. **Bắt đầu phiên (không tự phát nhạc):** Bắt đầu một phiên Focus — xác nhận thanh tab dưới cùng biến mất và thanh **mini-player `56px`** xuất hiện sát đáy màn tập trung, hiển thị đúng tên bài mặc định nhưng **không tự phát nhạc**.
-  3. **Trời sáng `FocusSceneArea`:** Quan sát khung cảnh trại Thời đại Đồ Đá ở trạng thái đang chạy (`working`), `Pause` (`paused`), và Pomodoro nghỉ (`resting`) — xác nhận nền trời sáng ban ngày / hoàng hôn pastel không có trời tối hay sao đêm, và 2 chip góc trên đọc rõ nét.
-  4. **Phát nhạc, mở/đóng bảng playlist (`rounded-t-[22px]`):** Bấm Play rồi bấm chevron-up trên mini-player — xác nhận sheet tối trượt lên từ đáy trên nền mờ, thử lọc chip tác giả, chọn bài khác, tua thanh tiến độ, chỉnh âm lượng/mute, shuffle/repeat, mở `"Ghi công & giấy phép"`, rồi đóng sheet bằng chevron-down / click nền ngoài / phím `Esc`. Đóng và mở lại popup để xác nhận nhớ trạng thái mở/đóng và bài/âm lượng đã chọn.
-  5. **Pause phiên & Resume phiên:** Đang phát nhạc, bấm `Pause` phiên rồi `Resume` — xác nhận nhạc **vẫn tiếp tục phát bình thường**; sau đó thử tự bấm Pause trên trình phát nhạc rồi mới Pause/Resume phiên — xác nhận nhạc **giữ nguyên tạm dừng**, không tự phát lại.
-  6. **Pomodoro nghỉ ngắn / nghỉ dài:** Chạy Pomodoro sang pha `SHORT_BREAK` / `LONG_BREAK` — xác nhận thanh mini-player vẫn hiện ở đáy và nhạc đang phát/tạm dừng **giữ nguyên trạng thái**, không còn checkbox `"Keep playing music..."` hay `"Stop music when focus session ends"` trong sheet.
-  7. **Kết thúc phiên & màn kết quả (`Exit`):** Chờ phiên hoàn thành hoặc bấm `Give Up` — xác nhận nhạc **dừng hẳn tức thì** (hết tiếng phát nền ở Chrome Task Manager), đồng thời trên màn kết quả có nút `Exit` thì mini-player **cũng biến mất**. Bấm `Exit` để về Bản đồ.
-  8. **Bắt đầu phiên mới nhớ tùy chọn:** Mở phiên tập trung thứ hai — xác nhận nhạc vẫn giữ đúng bài/âm lượng/shuffle/repeat trước đó, `positionSec` đã reset về `0`, và không tự phát cho tới khi tự bấm Play.
-  9. **Kiểm tra offline / lỗi tải catalog:** Tạm ngắt mạng (hoặc chặn request archive trong DevTools) khi cache trống rồi mở phiên — xác nhận mini-player hiển thị gọn `"Chưa tải được nhạc"` kèm nút `Thử lại`; bật lại mạng rồi bấm `Thử lại` để xác nhận tải lại danh sách thành công.
+- **Giới hạn kiểm chứng:** Toàn bộ UI test chạy bằng **React SSR (`renderToString`)** và backend test chạy trên mock Chrome adapters trong Node.js; **chưa chạy thử trực tiếp trên extension Chrome (`400×600` popup thật)**.
+- **Hướng dẫn tự kiểm trên Chrome (`chrome://extensions` → Load unpacked `dist/`):**
+  1. Bật **Chế độ Pomodoro → Chu kỳ Đếm ngược (`Pomodoro Countdown`)**, kiểm tra cả **EN** và **VI**, bấm **Bắt đầu phiên Pomodoro**.
+  2. Trên màn hình đang chạy, xác nhận dòng thưởng hiển thị **`Thưởng dự kiến: ... Coin, ... XP [×...]`** kèm ghi chú **`(nhận khi hoàn thành tất cả pha và chu kỳ)`** nằm gọn gàng trong khung `400×600` (không bị tràn/cắt). Kiểm tra header thấy số dư ví chưa thay đổi.
+  3. Để mô phỏng Give Up giữa chừng: bấm **Bỏ cuộc (`Give Up`)** ngay ở pha 1 (hoặc sau khi hoàn thành `1–2` pha ngắn) → xác nhận:
+     - Màn kết thúc hiển thị **Số pha hoàn thành** dạng `0 / total (0m)` hoặc `N / total (Xm)`.
+     - Ô **Phần thưởng** hiển thị **`+0` Coin / `+0` XP**.
+     - Mô tả hiển thị đúng: *"Bạn chưa hoàn thành tất cả các pha và chu kỳ nên không nhận phần thưởng. Thời gian tập trung của bạn vẫn được ghi vào thống kê."*
+     - Kiểm tra header (Coin / XP / Level) **không đổi** so với trước khi bắt đầu phiên; bấm **Thoát (`Exit`)** rồi sang tab **Thống kê (`Stats`)** để xác nhận số phút thực tế vẫn được cộng.
+  4. Kiểm tra trường hợp **gián đoạn (`INTERRUPTED`)**: mở một phiên Pomodoro Countdown, bật/tắt lại extension trong `chrome://extensions` rồi mở lại popup → xác nhận màn kết thúc hiện **`+0` Coin / `+0` XP** và câu mô tả chưa hoàn thành (không còn câu *"đã được lưu an toàn vào ví"*).
+  5. Kiểm tra nhanh lại **Countdown** (`Give Up` → `+0 / +0`), **Stopwatch**, và **Pomodoro Stopwatch** (`Kết thúc` sau >= 1 pha → vẫn cộng thưởng và hiển thị đúng như trước).

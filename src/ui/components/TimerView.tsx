@@ -412,7 +412,9 @@ export const TimerView: React.FC<TimerViewProps> = ({
     const isCompleted = session.status === 'COMPLETED';
     const isInterrupted = session.status === 'INTERRUPTED';
     const isCountdown = session.mode === 'COUNTDOWN';
-    const isPomodoro = session.mode === 'POMODORO_COUNTDOWN' || session.mode === 'POMODORO_STOPWATCH';
+    const isPomoCountdown = session.mode === 'POMODORO_COUNTDOWN';
+    const isPomoStopwatch = session.mode === 'POMODORO_STOPWATCH';
+    const isPomodoro = isPomoCountdown || isPomoStopwatch;
     const focusMinutes =
       isInterrupted && typeof session.lastKnownValidFocusMinutes === 'number'
         ? session.lastKnownValidFocusMinutes
@@ -428,7 +430,14 @@ export const TimerView: React.FC<TimerViewProps> = ({
       ? DEFAULT_REWARD_CONFIG.countdownBaseXpPerMinute
       : DEFAULT_REWARD_CONFIG.stopwatchBaseXpPerMinute;
 
-    const earnedCoins = isPomodoro
+    // Pomodoro Countdown settles rewards strictly once upon 100% completion.
+    // On ABANDONED / INTERRUPTED, session.pomodoroState.accumulatedCoins/Xp still holds projected values
+    // and must NEVER be displayed as earned rewards.
+    const earnedCoins = isPomoCountdown
+      ? isCompleted
+        ? session.pomodoroState?.accumulatedCoins ?? 0
+        : 0
+      : isPomoStopwatch
       ? session.pomodoroState?.accumulatedCoins ?? 0
       : isCompleted
       ? isCountdown
@@ -436,7 +445,11 @@ export const TimerView: React.FC<TimerViewProps> = ({
         : focusMinutes * baseCoins * multiplier
       : 0;
 
-    const earnedXp = isPomodoro
+    const earnedXp = isPomoCountdown
+      ? isCompleted
+        ? session.pomodoroState?.accumulatedXp ?? 0
+        : 0
+      : isPomoStopwatch
       ? session.pomodoroState?.accumulatedXp ?? 0
       : isCompleted
       ? isCountdown
@@ -446,6 +459,18 @@ export const TimerView: React.FC<TimerViewProps> = ({
 
     const completedIntervals = session.pomodoroState?.completedFocusCount ?? 0;
     const totalPomoFocusMins = session.pomodoroState?.totalCompletedFocusMinutes ?? focusMinutes;
+    const outcomePomoConfig = session.pomodoroConfig;
+    const outcomeIntervalsPerCycle =
+      outcomePomoConfig?.focusIntervalsPerCycle ?? outcomePomoConfig?.targetFocusSessions;
+    const outcomeNumberOfCycles = outcomePomoConfig?.numberOfCycles;
+    const totalPlannedIntervals =
+      isPomoCountdown &&
+      typeof outcomeIntervalsPerCycle === 'number' &&
+      outcomeIntervalsPerCycle > 0 &&
+      typeof outcomeNumberOfCycles === 'number' &&
+      outcomeNumberOfCycles > 0
+        ? outcomeIntervalsPerCycle * outcomeNumberOfCycles
+        : null;
 
     return (
       <div
@@ -483,7 +508,9 @@ export const TimerView: React.FC<TimerViewProps> = ({
                   minutes: focusMinutes,
                   multiplier,
                 })
-            : isPomodoro && completedIntervals > 0
+            : isPomoCountdown
+            ? t('timer.outcome.pomoCountdownIncompleteDesc')
+            : isPomoStopwatch && completedIntervals > 0
             ? t('timer.outcome.pomoEndedRetainedDesc', { count: completedIntervals })
             : isInterrupted
             ? t('timer.outcome.endedInterruptedDesc')
@@ -501,7 +528,9 @@ export const TimerView: React.FC<TimerViewProps> = ({
               </span>
               <span className="text-base font-bold text-slate-900 dark:text-slate-100 tabular-nums">
                 {isPomodoro
-                  ? `${completedIntervals} (${totalPomoFocusMins}m)`
+                  ? !isCompleted && isPomoCountdown && totalPlannedIntervals !== null
+                    ? `${completedIntervals} / ${totalPlannedIntervals} (${totalPomoFocusMins}m)`
+                    : `${completedIntervals} (${totalPomoFocusMins}m)`
                   : isCountdown && isCompleted
                   ? `${session.targetMinutes}m`
                   : `${focusMinutes}m`}
@@ -796,8 +825,8 @@ export const TimerView: React.FC<TimerViewProps> = ({
             className="pt-1.5 border-t border-slate-200/70 dark:border-slate-700/60 flex items-center justify-center flex-wrap gap-1.5 text-[11px] text-slate-600 dark:text-slate-300 select-none"
           >
             {isPomoCountdown ? (
-              <span className="flex items-center gap-1">
-                <span className="text-slate-500 dark:text-slate-400">{t('timer.liveReward.totalLabel')}</span>
+              <span className="flex items-center gap-1 flex-wrap justify-center">
+                <span className="text-slate-500 dark:text-slate-400">{t('timer.liveReward.projectedLabel')}</span>
                 <span className="font-semibold text-amber-600 dark:text-amber-400 tabular-nums flex items-center gap-0.5">
                   <Coins className="w-3 h-3 inline shrink-0" />
                   {formatRewardAmount(pomoCdTotalCoins)} {t('timer.liveReward.coinUnit')}
@@ -862,6 +891,14 @@ export const TimerView: React.FC<TimerViewProps> = ({
             >
               {`×${activeMultiplierDisplay.toFixed(1)}`}
             </span>
+            {isPomoCountdown && (
+              <span
+                data-testid="pomo-countdown-all-or-nothing-note"
+                className="basis-full text-center text-[10px] text-slate-400 dark:text-slate-500 leading-tight"
+              >
+                ({t('timer.liveReward.pomoAllOrNothingNote')})
+              </span>
+            )}
           </div>
         </div>
 

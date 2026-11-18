@@ -316,7 +316,8 @@ test('Focus Running (5b-2): Pomodoro Countdown and Pomodoro Stopwatch render app
   );
   assert.ok(pomoCdHtml.includes('Pomodoro • 2/4 • Cycle 1/3'));
   assert.ok(pomoCdHtml.includes('data-testid="running-giveup-btn"'));
-  assert.ok(pomoCdHtml.includes('Total Reward:'));
+  assert.ok(pomoCdHtml.includes('Projected Reward:'));
+  assert.ok(pomoCdHtml.includes('data-testid="pomo-countdown-all-or-nothing-note"'));
   assert.ok(!pomoCdHtml.includes('data-testid="skip-break-btn"'));
 
   const pomoSwHtml = renderToString(

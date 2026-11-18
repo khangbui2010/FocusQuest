@@ -168,7 +168,8 @@ test('5b-3 Bug 2: simulator initializes default Pomodoro Countdown (25m x 4 x 3 
       /<[^>]+>/g,
       ''
     );
-    assert.ok(text.includes('Total Reward:'));
+    assert.ok(text.includes('Projected Reward:'));
+    assert.ok(text.includes('earned only upon completing all phases &amp; cycles') || text.includes('earned only upon completing all phases & cycles'));
     assert.ok(text.includes('1125 Coin'), `Expected 1125 Coin in text: ${text}`);
     assert.ok(text.includes('3750 XP'));
     assert.ok(text.includes('×2.5'));
@@ -210,7 +211,7 @@ test('5b-3 Bug 2: custom Pomodoro Countdown config (15m x 2 x 2 = 60m) computes 
       /<[^>]+>/g,
       ''
     );
-    assert.ok(text.includes('Total Reward:'));
+    assert.ok(text.includes('Projected Reward:'));
     assert.ok(text.includes('126 Coin'), `Expected 126 Coin in text: ${text}`);
     assert.ok(text.includes('420 XP'));
     assert.ok(text.includes('×1.4'));
@@ -253,7 +254,7 @@ test('5b-3 Bug 2: TimerView falls back cleanly when active Pomodoro Countdown sn
   const text = renderToString(
     React.createElement(TimerView, makeTimerProps({ session: staleZeroSession }))
   ).replace(/<[^>]+>/g, '');
-  assert.ok(text.includes('Total Reward:'));
+  assert.ok(text.includes('Projected Reward:'));
   assert.ok(text.includes('1125 Coin'), `Expected 1125 Coin in text: ${text}`);
   assert.ok(text.includes('3750 XP'));
   assert.ok(text.includes('×2.5'));

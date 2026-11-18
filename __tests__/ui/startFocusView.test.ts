@@ -204,7 +204,8 @@ test('Start Focus View (5b): preserves exact English live reward headings and tr
       })
     )
   );
-  assert.ok(pomoHtml.includes('Total Reward:'));
+  assert.ok(pomoHtml.includes('Projected Reward:'));
+  assert.ok(pomoHtml.includes('data-testid="pomo-countdown-all-or-nothing-note"'));
 
   const viHtml = renderToString(
     React.createElement(
