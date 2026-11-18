@@ -1,81 +1,82 @@
-# BÁO CÁO NGHIỆM THU — MILESTONE UX / GIAI ĐOẠN UX-3
+# BÁO CÁO NGHIỆM THU — MILESTONE UX / GIAI ĐOẠN UX-4
 
-**Giai đoạn:** Milestone UX — Giai đoạn UX-3 *(Đưa lớp tối lên trên cây vùng chưa mở với hằng số dùng chung + hệ số cây, bỏ lưới từng ô vùng đã mở & chống khe hở sub-pixel ở mọi mức zoom, đồng bộ `#sprites` — KHÔNG thuộc Phase 5, 5B.5 hay LOFI)*  
+**Giai đoạn:** Milestone UX — Giai đoạn UX-4 *(Đồng bộ hiển thị phần thưởng giữa các màn hình qua Một Nguồn Chân Lý và chuẩn hóa định dạng số Coin/XP tối đa 2 chữ số thập phân — KHÔNG thuộc Phase 5, 5B.5 hay Milestone LOFI)*  
 **Ngày hoàn thành:** 2026-11-18  
-**File sao lưu báo cáo cũ:** `/respond_ux3_prev.md`  
-**Trạng thái:** Đã hoàn tất kiểm định (`554 / 554` tests PASS 3/3 lần, Build PASS, Lint PASS) — **DỪNG chờ duyệt**
+**File sao lưu báo cáo cũ:** `/respond_ux4_prev.md`  
+**Trạng thái:** Đã hoàn tất kiểm định (`561 / 561` tests PASS 3/3 lần, Build PASS, Lint PASS) — **DỪNG chờ duyệt**
 
 ---
 
-## 1. BẤT BIẾN ĐƯỢC BẢO TOÀN
+## 1. BẤT BIẾN & PHẠM VI ĐƯỢC BẢO TOÀN
 
-- **Không sửa logic lõi:** Giữ nguyên hoàn toàn thuật toán đặt cây & mẫu `M1–M6` trong `src/ui/components/civilization/terrainDecor.ts` (`getCellDecor` cho cùng input → cùng output 100%), mật độ ~30%, màu nền đất vùng đã mở, độ tối nền `0.44`, `GridMap`, mở đất, đặt/gỡ công trình, civilization core, schema và kinh tế. Không thêm thư viện ngoài.
-
----
-
-## 2. HIỆN TRẠNG ĐỌC TỪ MÃ NGUỒN & CÁC THAY ĐỔI ĐÃ THỰC HIỆN
-
-### (1) Đưa lớp tối lên trên lớp cây ở vùng chưa mở + Hằng số dùng chung & Hệ số cây
-- **Hằng số trong `src/ui/components/civilization/terrainDecor.ts`:**
-  - Định nghĩa `LOCKED_FOREST_DARKEN_OPACITY = 0.44` (hằng số dùng chung cho độ tối nền và cây) và `LOCKED_TREE_DARKEN_FACTOR = 1.0` (hệ số tối của cây so với nền; giữ `LOCKED_FOREST_OVERLAY_OPACITY = LOCKED_FOREST_DARKEN_OPACITY` làm alias tương thích ngược).
-  - Bổ sung hàm thuần `computeLockedForestOpacities(hasOverlay, darkenOpacity, treeFactor)`:
-    - Khi `LOCKED_TREE_DARKEN_FACTOR = 1.0` (mặc định hiện tại): chỉ render đúng thứ tự **nền đất → cây → lớp tối (`bg-slate-950`, `opacity: 0.44`)**, cây và đất tối đồng đều nhau.
-    - Khi bạn muốn chỉnh hệ số cây sau này (ví dụ đổi một dòng `LOCKED_TREE_DARKEN_FACTOR = 0.7` trong `terrainDecor.ts` mà không phải sửa cấu trúc UI): `topScrimOpacity` áp lên cây thành `0.44 * 0.7 = 0.308`, đồng thời phần nền xung quanh gốc cây trong cùng ô vẫn được bù đủ để đạt tổng độ tối `0.44`, không lộ ô vuông sáng quanh cây.
-- **Component dùng chung `src/ui/components/civilization/TerrainCellLayers.tsx` (+ prop `style` ở `TileImage.tsx`):**
-  - Tách phần vẽ các lớp bên trong ô (`baseTile → overlayTile → data-locked-forest="true"`) dùng chung cho cả **`MapGridView.tsx`** (`GridCell`) lẫn **`SpriteGallery.tsx`** (`#sprites`: khối `Locked Forest Darkened (2×)`, 4 panel `8×4 / 8×8`, và `16×11 Locked Forest Algorithm Preview`) để hai nơi không bao giờ lệch nhau.
-- **Cập nhật chú thích trong `SpriteGallery.tsx`:**
-  - Gỡ bỏ các câu cũ `"while trees stay 100% color"` / `"while trees stay full color"` / `"Locked Floor Darkened (2×)"` (dòng 195, 350, 404, 459, 561), cập nhật sang mô tả nền và cây cùng được làm tối đồng đều (`LOCKED_FOREST_DARKEN_OPACITY`, `LOCKED_TREE_DARKEN_FACTOR`).
-
-### (2) Bỏ lưới ở ô đã mở + Chống hairline seam + Báo cáo hiện trạng ô chưa mở & ranh giới chunk
-- **Kiểm tra mọi nguồn tạo đường lưới trong `MapGridView.tsx`:**
-  1. **Viền mỏng từng ô đã mở (`GridCell`, dòng 124–127 cũ):**
-     - Khi bình thường: `'border-[0.5px] border-emerald-950/15 dark:border-slate-900/35'` → **Đã gỡ**, đổi thành `'border-0'`.
-     - Khi ở Placement Mode: `'border-[0.5px] border-emerald-950/20 dark:border-slate-900/40 after:...'` → **Đã gỡ phần `border-[0.5px] ...`**, đổi thành `'border-0 after:absolute after:inset-0 after:pointer-events-none hover:after:bg-emerald-300/35 cursor-crosshair'`.
-  2. **Container lưới (dòng 451–459):** Không có `gap`, không `divide-*`, không `outline`, không `ring`, không nền lưới.
-  3. **Hiện trạng ô CHƯA mở (không tự sửa theo yêu cầu):** Các ô chưa mở (`isUnlocked === false`, dòng 130–136) **đã dùng sẵn `border-0`** ở mọi trạng thái (bình thường, placement, expansion), hoàn toàn không có lưới/viền riêng.
-  4. **Các thành phần được GIỮ NGUYÊN:**
-     - Hiệu ứng hover (`hover:after:bg-emerald-300/35`) và vùng ghost đặt công trình (viền `border-emerald-400` / `border-rose-500`).
-     - Chế độ Expansion Mode (khung chunk ứng viên `border-emerald-300/90` / `border-amber-300`), khung công trình đã đặt, thanh điều khiển bản đồ (`map-controls-toolbar`).
-     - Ranh giới 4×4 Chunk (`Unlocked Chunk Boundaries`, dòng 474–498: `border border-emerald-500/35` + nhãn `(0,0)`): được giữ nguyên vì đây là mốc ranh giới chunk lãnh thổ 4×4, không phải lưới từng ô.
-- **Chống đường hở li ti (`hairline seam`) ở mọi mức zoom:**
-  - Trước đây `ZOOM_STEP = 0.2`, `handleWheel` tăng giảm `0.1`, và `computeExpansionFitZoom` làm tròn `0.01` (ví dụ `0.44`), khiến kích thước ô sau scale là số thập phân (`32 * 0.8 = 25.6px`, `32 * 0.44 = 14.08px`), dễ lộ đường kẻ mảnh giữa hai ô.
-  - Đã thêm `ZOOM_PIXEL_DENOMINATOR = 16`, `snapZoomToIntegerPixels()`, cập nhật `MIN_ZOOM = 0.5`, `EXPANSION_MIN_ZOOM = 0.375`, `ZOOM_STEP = 0.25`, `WHEEL_ZOOM_STEP = 0.125`, và chuẩn hóa `computeExpansionFitZoom` về bội của `1/16`: **ở mọi mức zoom**, `CELL_SIZE * zoom` (`12px..64px`) và `16 * zoom` (`6px..32px`) **đều là số nguyên pixel**. Đồng thời làm tròn `Math.round(pan.x/y)` và gắn `imageRendering: 'pixelated'` cho container lưới (bên cạnh `imageRendering: 'pixelated'` sẵn có trên từng `<img>` trong `TileImage.tsx`).
+- **Không sửa công thức & thời điểm quyết toán thưởng:** Giữ nguyên hoàn toàn `RewardEngine`, `MultiplierRules`, `coinBonus.ts`, cách tính và thời điểm cộng thưởng trên `SessionCoordinator` (`completeCountdown`, `finishStopwatch`, `advancePomodoroStage`), hệ thống XP/Level và storage schema (`schemaVersion`).
+- **Bảo toàn độ chính xác IEEE-754 trong storage:** Ví người chơi (`fq_economy.focusCoins`) và thống kê ngày (`fq_daily_stats.coinsEarned`) lưu nguyên giá trị thập phân thực (`7.875`, `55.5 + 7.875 = 63.375`, `8 × 7.875 = 63`), **không** làm tròn non ở lõi.
+- **Ranh giới hiển thị sạch sẽ:** Không có file nào trong `src/core/reward/*`, `src/core/economy/*`, `src/storage/*` hoặc `src/background/sessionCoordinator.ts` import helper định dạng UI (`formatters.ts`). Định dạng số chỉ nằm ở ranh giới UI và `src/background/notificationFormatter.ts`.
 
 ---
 
-## 3. KIỂM THỬ MỚI & TEST CŨ ĐÃ CẬP NHẬT
+## 2. ĐỐI SOÁT HIỆN TRẠNG & NGUYÊN NHÂN GỐC (TRƯỚC → SAU UX-4)
 
-- **Test mới (`__tests__/ui/ux3MapAndForestUi.test.ts` — 3 tests SSR):**
-  1. Kiểm tra ô rừng chưa mở render đúng thứ tự `nền → cây → lớp tối` (`data-locked-forest="true"` sau `overlayTile`) dùng `LOCKED_FOREST_DARKEN_OPACITY = 0.44` và `LOCKED_TREE_DARKEN_FACTOR = 1.0`; kiểm tra đổi hệ số cây `0.7` qua `computeLockedForestOpacities` & `TerrainCellLayers` giữ độ tối nền `0.44` và giảm độ tối cây xuống `0.308`.
-  2. Kiểm tra ô đã mở không còn `border-[0.5px]`, `border-emerald-950`, `border-slate-900`, `divide-`, `outline`, `ring`; vẫn giữ `hover:after:bg-emerald-300/35`, `cursor-crosshair`, công trình, thanh zoom, Expansion Mode, `image-rendering:pixelated` và kích thước pixel nguyên ở mọi mức zoom + auto-fit.
-  3. Kiểm tra `SpriteGallery` (`#sprites`) render cùng thứ tự `nền → cây → lớp tối` với `opacity:0.44` ở cả card mẫu tán lá lẫn `16×11 Locked Forest Algorithm Preview`, và đã gỡ mọi dòng chú thích `"trees stay full color"` / `"trees stay 100% color"`.
-- **Test cũ bắt buộc cập nhật (1 test):**
-  - `__tests__/ui/terrainDecor.test.ts` (dòng **471–496**): test `Terrain Decor Stage 4a-3` trước đây kiểm tra quy tắc cũ `overlayIdx > scrimIdx` (*"Tree overlay MUST render AFTER dark scrim so tree keeps 100% color"*). Đã cập nhật thành kiểm tra quy tắc mới UX-3: `secondTileIdx < scrimIdx` (*"Tree overlay MUST render BEFORE dark scrim so ground and trees darken uniformly"*). Toàn bộ test `getCellDecor` / mẫu `M1–M6` / mật độ 24×24 còn lại giữ nguyên 100% và PASS.
+| Màn hình / Thành phần | Trước UX-4 (Lỗi quan sát) | Nguyên nhân gốc | Sau UX-4 (Đã sửa) |
+|---|---|---|---|
+| **Màn Setup (`TimerView` STATE 3)** | Hiển thị đúng `+7.88 [+5%], +25 XP` nhưng tự nhân lại công thức tách rời + dùng `Math.round(bonus * 100)`. | Tính tay trong `TimerView.tsx` (không dùng chung nguồn với Running/Outcome). | Gọi `getSessionRewardPreview` (`src/core/reward/rewardPreview.ts`) & `formatRewardAmount` cho cả Coins, XP và `% bonus`. |
+| **Màn đang chạy (`TimerView` STATE 2)** | Countdown 5m với công trình `+5%` hiện sai `Reward: 7.5 Coin, 25 XP ×1.0` (thiếu `+5%`). | `App.tsx` không truyền `civBonusRate` xuống `TimerView`; `TimerView` tính thiếu `(1 + activeBonusRate)` và không gắn chip `+%`. | `App.tsx` tính `civBonusRate` từ `aggregateCoinBonus(extractBuildingCoinBonuses(...))` trong `refreshState()` và truyền vào `PopupShell`/`TimerView`; `TimerView` dùng `getSessionRewardPreviewFromSnapshot` và render chip `live-coin-bonus-chip` (`+5%`). |
+| **Màn hoàn thành (`TimerView` STATE 1)** | Countdown 5m với `+5%` hiện sai `+7.5 Coin, +25 XP` (lệch với ví cộng thật `+7.875`); Stopwatch `< 5m` completed không kiểm ngưỡng 5 phút. | `TimerView` tự tính `1.5 * target * mult` bỏ qua `activeBonusRate`, và tính `sw` không check `>= 5m`. | Dùng chung `getSessionRewardPreviewFromSnapshot` và render `outcome-coin-bonus-chip` (`+5%`), hiện `+7.88` / `+25`; Stopwatch `< 5m` hiển thị `+0` / `+0` khớp `RewardEngine`. |
+| **Header & Catalog / Civilization** | `Header` hiển thị `63.38`, nhưng `BuildingCatalogPanel` hiện raw float `playerCoins` chưa định dạng (`63.375`). | `BuildingCatalogPanel.tsx` truyền trực tiếp `playerCoins`, `eff.rate * 100`, `def.baseCost` chưa qua `formatRewardAmount`. | Chuẩn hóa `BuildingCatalogPanel.tsx` (d.83, 137, 197, 258), `BuildingDetailsModal.tsx` (d.188) và `LandExpansionModal.tsx` (d.56, 127, 173) dùng `formatRewardAmount`. |
+| **Bộ định dạng `formatRewardAmount` (`src/ui/utils/formatters.ts`)** | Dùng `Math.round((amount + Number.EPSILON) * 100) / 100`: sai số half-up nhị phân ở các mốc `.005` (`1.005`, `10.005`) và không chặn `Infinity`/`-Infinity`. | Phép nhân float `* 100` mất chính xác trước khi làm tròn. | Viết lại thuần bằng phân tích chuỗi thập phân `parsePositiveDecimalString` + `addOneToDigits` (hỗ trợ cả ký hiệu khoa học `e/E`), làm tròn half-up đúng chuẩn, bỏ `.0`/`0` thừa cuối, luôn dùng `.`, chặn `-0`/`NaN`/`Infinity`. |
+| **Ranh giới `SessionCoordinator`** | `sessionCoordinator.ts` import trực tiếp `formatRewardAmount` từ `src/ui/utils/formatters.ts` và `translator.ts`. | Pha trộn tầng giao diện vào logic nghiệp vụ nền. | Tách `src/background/notificationFormatter.ts` (`formatSessionNotificationContent`); `SessionCoordinator` chỉ truyền `coins` và `xp` dạng `number` thuần ra ranh giới thông báo. |
 
 ---
 
-## 4. KẾT QUẢ KIỂM ĐỊNH THỰC TẾ (VERIFIED REAL OUTPUTS)
+## 3. CÁC TỆP ĐÃ THAY ĐỔI & TẠO MỚI
+
+- **Tạo mới:**
+  - `src/core/reward/rewardPreview.ts` — Hàm thuần `getSessionRewardPreview` & `getSessionRewardPreviewFromSnapshot` làm Một Nguồn Chân Lý cho Setup, Running/Paused, Finish Confirm Modal và Terminal Outcomes (bảo toàn IEEE-754 thô).
+  - `src/background/notificationFormatter.ts` — Adapter biên hiển thị Chrome Notification, định dạng số `coins`/`xp` và dịch i18n bên ngoài `SessionCoordinator`.
+  - `__tests__/ui/ux4RewardDisplayAndFormatting.test.ts` — Bộ 7 test kiểm chứng toàn diện UX-4.
+- **Cập nhật mã nguồn:**
+  - `src/ui/utils/formatters.ts` — Thuật toán định dạng thập phân half-up max 2 chữ số + alias `formatCoinAmount`, `formatXpAmount`, `formatDecimalMax2`.
+  - `src/background/sessionCoordinator.ts` — Gỡ import `ui/utils/formatters` & `translator`, truyền số thô qua `formatSessionNotificationContent`.
+  - `src/App.tsx` — Đồng bộ `civBonusRate` trực tiếp từ snapshot Civilization (tự cập nhật khi xây/gỡ công trình giữa phiên) và truyền xuống `PopupShell` → `TimerView`.
+  - `src/ui/components/TimerView.tsx` — Dùng `getSessionRewardPreview` / `getSessionRewardPreviewFromSnapshot` cho cả 3 STATE + Finish Confirm Modal + chip `+%` + chuẩn hóa `multiplier.toFixed(1)`.
+  - `src/ui/components/civilization/BuildingCatalogPanel.tsx`, `BuildingDetailsModal.tsx`, `LandExpansionModal.tsx` — Áp dụng `formatRewardAmount` đồng nhất cho ví, chi phí và `% bonus`.
+- **Cập nhật tài liệu:**
+  - `PRODUCT_SPEC.md` (đồng bộ Status UX-4 và mục `§6.3`), `PROJECT_STATUS.md`, `respond_ux4_prev.md` (sao lưu báo cáo UX-3).
+
+---
+
+## 4. KIỂM THỬ MỚI (`__tests__/ui/ux4RewardDisplayAndFormatting.test.ts` — 7 TESTS)
+
+1. **Formatter Edge Cases:** `7.875 -> "7.88"`, `7.5 -> "7.5"`, `34.5 -> "34.5"`, `55 -> "55"`, `63.375 -> "63.38"`, `1.005 -> "1.01"`, `10.005 -> "10.01"`, `0.004 -> "0"`, `0.005 -> "0.01"`, `-0`/`-0.004 -> "0"`, `-1.005 -> "-1.01"`, `NaN`/`Infinity`/`-Infinity -> "0"`, `1234567.891 -> "1234567.89"`, `7.7250000000000005 -> "7.73"`, ký hiệu `e/E`, dấu chấm `.`.
+2. **Kịch bản lỗi thực tế (`55.5` + Countdown 5m @ `+5%`):** Xác nhận ví lưu chính xác `63.375`, `Header` và `BuildingCatalogPanel` cùng hiện `63.38`, Notification hiện `7.88` / `25`, Setup/Running/Completed đều hiện `7.88` + `+5%` + `25` XP (không còn `7.5`).
+3. **Bảng đối chiếu 4 chế độ (`0%` & `+5%`):** Kiểm tra `COUNTDOWN`, `STOPWATCH` (`30m ×1.2`), `POMODORO_COUNTDOWN` (`300m ×2.5`), `POMODORO_STOPWATCH` (`50m ×1.2`) có Setup == Running == Completed == số cộng thật ở `SessionCoordinator`.
+4. **Stopwatch `< 5m` khi Completed:** Xác nhận phiên `3m` trả `0` Coin / `0` XP cả ở màn đang chạy lẫn màn hoàn thành.
+5. **Đồng bộ `CoinBonus` giữa phiên:** `PopupShell` truyền `civBonusRate` thay đổi từ `0%` → `+5%` cập nhật ngay màn Running và khớp quyết toán cuối phiên.
+6. **Bảo toàn tích lũy IEEE-754 trong storage:** Hoàn thành 8 phiên Countdown 5m liên tiếp (`+7.875` mỗi phiên) tích lũy thành **chính xác `63`** Coins trong ví và `fq_daily_stats` (không sai số cộng dồn).
+7. **Kiểm tra tĩnh biên kiến trúc:** Quét toàn bộ `.ts` trong `src/core/reward/`, `src/core/economy/`, `src/storage/` và `src/background/sessionCoordinator.ts` bảo đảm 0 import tới `ui/utils/formatters` hay hàm format.
+
+---
+
+## 5. KẾT QUẢ KIỂM ĐỊNH THỰC TẾ (VERIFIED REAL OUTPUTS)
 
 - **`npm run lint` (`tsc --noEmit`):** **PASS** (`Exit code 0`, `0` errors).
-- **`npm run clean && npm run build`:** **PASS** (`Vite v8.3.8`, `1,739 modules transformed`, `681ms`, tổng dung lượng `dist/`: `1,076,448 B`):
-  - `dist/index.html`: `0.71 kB` | `dist/assets/popup-DduAWiN5.css`: `87.51 kB`
-  - `dist/assets/popup-B6pNM7KC.js`: `759.54 kB` (gzip: `200.64 kB`)
-  - `dist/assets/translator-B5-w4v6G.js`: `52.47 kB` | `dist/assets/statsAggregator-DM7wxVkB.js`: `53.96 kB` | `dist/assets/storageKeys-BmLuJ1Do.js`: `0.37 kB`
-  - `dist/background.js`: `87.39 kB` | `dist/offscreen.js`: `3.87 kB` | `dist/blocked.js`: `1.32 kB`
+- **`npm run clean && npm run build`:** **PASS** (`Vite v8.3.8`, `1,741 modules transformed`, `652ms`, tổng dung lượng `dist/`: `1,084,217 B`):
+  - `dist/index.html`: `716 B` | `dist/assets/popup-D9z-9pA-.css`: `88.29 kB`
+  - `dist/assets/popup-xM55En9Z.js`: `765.03 kB` (gzip: `201.49 kB`)
+  - `dist/assets/translator-B5-w4v6G.js`: `52.47 kB` | `dist/assets/statsAggregator-DUdjfgHP.js`: `55.13 kB` | `dist/assets/storageKeys-BmLuJ1Do.js`: `0.37 kB`
+  - `dist/background.js`: `87.71 kB` | `dist/offscreen.js`: `3.87 kB` | `dist/blocked.js`: `1.32 kB`
 - **`npm test` — chạy 3 lần liên tiếp (sau lần sửa code & test cuối cùng):**
-  - **Lần 1:** `554 / 554 PASS` (`0` fail, `0` skipped, `0` cancelled, `18,835.57 ms`, Exit `0`).
-  - **Lần 2:** `554 / 554 PASS` (`0` fail, `0` skipped, `0` cancelled, `14,944.56 ms`, Exit `0`).
-  - **Lần 3:** `554 / 554 PASS` (`0` fail, `0` skipped, `0` cancelled, `15,070.48 ms`, Exit `0`).
+  - **Lần 1:** `561 / 561 PASS` (`0` fail, `0` skipped, `0` cancelled, `15,420.17 ms`, Exit `0`).
+  - **Lần 2:** `561 / 561 PASS` (`0` fail, `0` skipped, `0` cancelled, `15,492.74 ms`, Exit `0`).
+  - **Lần 3:** `561 / 561 PASS` (`0` fail, `0` skipped, `0` cancelled, `15,342.93 ms`, Exit `0`).
 
 ---
 
-## 5. GIỚI HẠN KIỂM CHỨNG & HƯỚNG DẪN TỰ KIỂM TRÊN CHROME THẬT
+## 6. GIỚI HẠN KIỂM CHỨNG & HƯỚNG DẪN TỰ KIỂM TRÊN CHROME THẬT
 
-- **Giới hạn kiểm chứng:** Chưa xem bằng mắt trực tiếp trên trình duyệt Chrome thật (`400×600` popup và `#sprites`); toàn bộ kiểm tra UI thực hiện qua React SSR (`renderToString`).
-- **Các bước để bạn tự kiểm trên Chrome (`chrome://extensions` → Load unpacked `dist/` và trang Web Preview `#sprites`):**
-  1. **Mở tab Bản đồ (`Map`), vùng chưa mở:** kiểm tra các cây, bụi và nền cỏ tối đồng đều với nhau, vẫn phân biệt được rõ từng cụm cây `M1–M6` và bụi `#5`.
-  2. **Vùng đã mở:** kiểm tra nền cỏ/đất/đá/hoa liền mạch, không còn đường lưới mỏng chia từng ô; thử bấm `+` / `-` và lăn chuột zoom ở các mức (`50%..200%`), kéo pan qua lại để xác nhận không có khe sáng/tối li ti giữa các ô.
-  3. **Rê chuột và đặt thử công trình:** chọn một công trình từ Catalog, rê chuột qua các ô để xác nhận hiệu ứng hover và khung ghost hợp lệ (xanh) / không hợp lệ (đỏ) vẫn hiện rõ ràng.
-  4. **Bật Expansion Mode (`Mở rộng đất`):** xác nhận bản đồ tự zoom vừa khung và các ô/chunk ứng viên mở rộng cùng viền nổi bật, nhãn tọa độ vẫn hiển thị rõ ràng.
-  5. **So với trang `#sprites`:** mở Web Preview tại `#sprites`, đối chiếu khối `"Locked Forest Darkened (2×)"`, panel `8×4 Locked Forest Border Sample`, và `"16×11 Locked Forest Algorithm Preview"` xem màu tối cây + đất khớp với Bản đồ thật và không còn chữ nói cây giữ nguyên 100% màu.
-  6. **Thử chỉnh hệ số cây (tùy chọn):** mở `src/ui/components/civilization/terrainDecor.ts`, đổi `LOCKED_TREE_DARKEN_FACTOR` từ `1.0` sang `0.7` (không cần sửa JSX nào khác) và xem cả Bản đồ lẫn `#sprites` đổi độ tối cây đồng bộ mà nền xung quanh cây vẫn giữ nguyên độ tối `0.44`.
+- **Giới hạn kiểm chứng:** Chưa chạy mở trực tiếp popup Chrome `400×600px`; toàn bộ test UI chạy qua React SSR (`renderToString`) và test background chạy qua mock Chrome adapters.
+- **Các bước để bạn tự kiểm trên Chrome (`chrome://extensions` → Load unpacked `dist/`):**
+  1. **Tái hiện kịch bản `55.5 -> 63.375`:** Đặt 1 công trình `+5%` Coin, chạy thử Countdown 5 phút. Kiểm tra màn Running hiện `7.88 Coin`, chip `+5%`, `25 XP ×1.0` (không còn `7.5`).
+  2. **Khi Countdown 5 phút hoàn thành:** Xác nhận màn Completed hiện `+7.88`, chip `+5%`, `+25` XP; đồng thời số dư Header và trong Catalog công trình tăng từ `55.5` lên `63.38` (và trong `chrome.storage.local` là đúng `63.375`).
+  3. **Kiểm tra Stopwatch `< 5 phút` & `>= 5 phút`:** Chạy thử Stopwatch kết thúc ở `2m–3m` để xác nhận màn Completed hiện `+0` Coin / `+0` XP; chạy `>= 5m` xác nhận chip `+5%` khớp ví.
+  4. **Thử thay đổi bonus giữa phiên:** Mở một phiên Countdown (để popup không đóng) hoặc mở bản đồ trước khi xong phiên để đặt/gỡ công trình `+CoinBonus`, kiểm tra số thưởng hiển thị trên màn Running đồng bộ theo mức bonus mới.

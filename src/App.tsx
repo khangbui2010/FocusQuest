@@ -28,6 +28,8 @@ import { FocusProfile } from './types/profiles.ts';
 import { PlayerEconomy } from './types/economy.ts';
 import { DailyStatRecord, UserSettings } from './types/storageSchema.ts';
 import { CivilizationEra } from './core/civilization/buildingTypes.ts';
+import { extractBuildingCoinBonuses } from './core/civilization/civilizationBonusHelper.ts';
+import { aggregateCoinBonus } from './core/economy/coinBonus.ts';
 import { MusicPlayerState, MusicTrack, RepeatMode } from './types/music.ts';
 import { I18nProvider, useTranslation } from './i18n/I18nContext.tsx';
 import { SupportedLocale } from './i18n/types.ts';
@@ -82,6 +84,7 @@ interface PopupShellProps {
   isBlockingActive: boolean;
   isSessionActive: boolean;
   civEra: CivilizationEra;
+  civBonusRate?: number;
   settings: UserSettings | null;
   isLoading: boolean;
   activeTab: ActiveTab;
@@ -137,6 +140,7 @@ export const PopupShell: React.FC<PopupShellProps> = ({
   isBlockingActive,
   isSessionActive,
   civEra,
+  civBonusRate = 0,
   settings,
   isLoading,
   activeTab,
@@ -251,6 +255,8 @@ export const PopupShell: React.FC<PopupShellProps> = ({
             session={session}
             activeProfile={activeProfile}
             era={civEra}
+            activeBonusRate={civBonusRate}
+            isBonusLoading={false}
             onStartSession={handleStartSession}
             onPauseSession={handlePauseSession}
             onResumeSession={handleResumeSession}
@@ -372,6 +378,7 @@ export const App: React.FC<AppProps> = ({
   const [lifetimeFocusMinutes, setLifetimeFocusMinutes] = useState<number>(0);
   const [isBlockingActive, setIsBlockingActive] = useState(false);
   const [civEra, setCivEra] = useState<CivilizationEra>('STONE_AGE');
+  const [civBonusRate, setCivBonusRate] = useState<number>(0);
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [musicState, setMusicState] = useState<MusicPlayerState>(DEFAULT_MUSIC_STATE);
   const [musicCatalog, setMusicCatalog] = useState<readonly MusicTrack[]>([]);
@@ -435,8 +442,13 @@ export const App: React.FC<AppProps> = ({
       });
 
       const civPromise = getCivilizationStateClient().then((civRes) => {
-        if (civRes.success && civRes.data?.era) {
-          setCivEra(civRes.data.era);
+        if (civRes.success && civRes.data) {
+          if (civRes.data.era) {
+            setCivEra(civRes.data.era);
+          }
+          setCivBonusRate(
+            aggregateCoinBonus(extractBuildingCoinBonuses(civRes.data.buildings))
+          );
         }
       });
 
@@ -782,6 +794,7 @@ export const App: React.FC<AppProps> = ({
       isBlockingActive={isBlockingActive}
       isSessionActive={isSessionActive}
       civEra={civEra}
+      civBonusRate={civBonusRate}
       settings={settings}
       isLoading={isLoading}
       activeTab={activeTab}

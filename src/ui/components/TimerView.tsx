@@ -29,8 +29,11 @@ import {
 } from '../../types/session.ts';
 import { FocusProfile } from '../../types/profiles.ts';
 import { TimeCalculator, MAX_PAUSE_DURATION_MS } from '../../core/timer/timeCalculator.ts';
-import { MultiplierRules } from '../../core/reward/multiplierRules.ts';
 import { DEFAULT_REWARD_CONFIG } from '../../core/reward/rewardEngine.ts';
+import {
+  getSessionRewardPreview,
+  getSessionRewardPreviewFromSnapshot,
+} from '../../core/reward/rewardPreview.ts';
 import { formatRewardAmount } from '../utils/formatters.ts';
 import { soundEffects, isChimeEnabled, playPhaseTransitionChime } from '../services/soundEffects.ts';
 import { extractBuildingCoinBonuses } from '../../core/civilization/civilizationBonusHelper.ts';
@@ -422,40 +425,15 @@ export const TimerView: React.FC<TimerViewProps> = ({
         ? elapsed.actualFocusMinutes
         : 0;
 
-    const multiplier = session.lockedMultiplier || 1.0;
-    const baseCoins = isCountdown
-      ? DEFAULT_REWARD_CONFIG.countdownBaseCoinPerMinute
-      : DEFAULT_REWARD_CONFIG.stopwatchBaseCoinPerMinute;
-    const baseXp = isCountdown
-      ? DEFAULT_REWARD_CONFIG.countdownBaseXpPerMinute
-      : DEFAULT_REWARD_CONFIG.stopwatchBaseXpPerMinute;
-
-    // Pomodoro Countdown settles rewards strictly once upon 100% completion.
-    // On ABANDONED / INTERRUPTED, session.pomodoroState.accumulatedCoins/Xp still holds projected values
-    // and must NEVER be displayed as earned rewards.
-    const earnedCoins = isPomoCountdown
-      ? isCompleted
-        ? session.pomodoroState?.accumulatedCoins ?? 0
-        : 0
-      : isPomoStopwatch
-      ? session.pomodoroState?.accumulatedCoins ?? 0
-      : isCompleted
-      ? isCountdown
-        ? session.targetMinutes * baseCoins * multiplier
-        : focusMinutes * baseCoins * multiplier
-      : 0;
-
-    const earnedXp = isPomoCountdown
-      ? isCompleted
-        ? session.pomodoroState?.accumulatedXp ?? 0
-        : 0
-      : isPomoStopwatch
-      ? session.pomodoroState?.accumulatedXp ?? 0
-      : isCompleted
-      ? isCountdown
-        ? session.targetMinutes * baseXp * multiplier
-        : focusMinutes * baseXp * multiplier
-      : 0;
+    const outcomePreview = getSessionRewardPreviewFromSnapshot(session, {
+      actualFocusMinutes: focusMinutes,
+      coinBonusRate: activeBonusRate,
+    });
+    const multiplier = outcomePreview.multiplier;
+    const earnedCoins = outcomePreview.coins;
+    const earnedXp = outcomePreview.xp;
+    const showOutcomeBonusBadge =
+      isCompleted && earnedCoins > 0 && activeBonusRate > 0;
 
     const completedIntervals = session.pomodoroState?.completedFocusCount ?? 0;
     const totalPomoFocusMins = session.pomodoroState?.totalCompletedFocusMinutes ?? focusMinutes;
@@ -502,11 +480,11 @@ export const TimerView: React.FC<TimerViewProps> = ({
               : isCountdown
               ? t('timer.outcome.countdownCompletedDesc', {
                   minutes: session.targetMinutes,
-                  multiplier,
+                  multiplier: multiplier.toFixed(1),
                 })
               : t('timer.outcome.stopwatchCompletedDesc', {
                   minutes: focusMinutes,
-                  multiplier,
+                  multiplier: multiplier.toFixed(1),
                 })
             : isPomoCountdown
             ? t('timer.outcome.pomoCountdownIncompleteDesc')
@@ -540,12 +518,20 @@ export const TimerView: React.FC<TimerViewProps> = ({
               <span className="block text-[11px] text-slate-500 dark:text-slate-400">
                 {t('timer.outcome.rewardsLabel')}
               </span>
-              <div className="flex items-center justify-center gap-2 mt-0.5">
-                <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-0.5 tabular-nums">
-                  <Coins className="w-3 h-3" /> +{formatRewardAmount(earnedCoins)}
+              <div className="flex items-center justify-center flex-wrap gap-2 mt-0.5">
+                <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-1 tabular-nums">
+                  <Coins className="w-3 h-3 shrink-0" /> +{formatRewardAmount(earnedCoins)}
+                  {showOutcomeBonusBadge && (
+                    <span
+                      data-testid="outcome-coin-bonus-chip"
+                      className="text-[10px] text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/60 px-1 py-0.2 rounded font-medium tabular-nums"
+                    >
+                      +{formatRewardAmount(activeBonusRate * 100)}%
+                    </span>
+                  )}
                 </span>
                 <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 flex items-center gap-0.5 tabular-nums">
-                  <Award className="w-3 h-3" /> +{formatRewardAmount(earnedXp)}
+                  <Award className="w-3 h-3 shrink-0" /> +{formatRewardAmount(earnedXp)}
                 </span>
               </div>
             </div>
@@ -614,24 +600,19 @@ export const TimerView: React.FC<TimerViewProps> = ({
     }
 
     const actualFocusMins = elapsed ? elapsed.actualFocusMinutes : 0;
-    const isStopwatchEligible = actualFocusMins >= DEFAULT_REWARD_CONFIG.stopwatchMinMinutesThreshold;
-    const swMultiplier = MultiplierRules.getStopwatchMultiplier(actualFocusMins);
+    const isBreakPhase = isPomodoro && pState && pState.currentPhase !== 'FOCUS';
+    const isPomoCountdown = session.mode === 'POMODORO_COUNTDOWN';
+    const isPomoStopwatch = session.mode === 'POMODORO_STOPWATCH';
 
-    const estStopwatchCoins = isStopwatchEligible
-      ? DEFAULT_REWARD_CONFIG.stopwatchBaseCoinPerMinute * actualFocusMins * swMultiplier
-      : 0;
-    const estStopwatchXp = isStopwatchEligible
-      ? DEFAULT_REWARD_CONFIG.stopwatchBaseXpPerMinute * actualFocusMins * swMultiplier
-      : 0;
-
-    const estCountdownCoins =
-      DEFAULT_REWARD_CONFIG.countdownBaseCoinPerMinute *
-      session.targetMinutes *
-      (session.lockedMultiplier || 1.0);
-    const estCountdownXp =
-      DEFAULT_REWARD_CONFIG.countdownBaseXpPerMinute *
-      session.targetMinutes *
-      (session.lockedMultiplier || 1.0);
+    const livePreview = getSessionRewardPreviewFromSnapshot(session, {
+      actualFocusMinutes: actualFocusMins,
+      coinBonusRate: activeBonusRate,
+    });
+    const isStopwatchEligible = livePreview.isEligible;
+    const liveCoins = livePreview.coins;
+    const liveXp = livePreview.xp;
+    const activeMultiplierDisplay = livePreview.multiplier;
+    const showLiveBonusBadge = liveCoins > 0 && activeBonusRate > 0;
 
     const pauseTimeRemainingMs =
       isPaused && session.currentPauseStartedAt
@@ -641,43 +622,13 @@ export const TimerView: React.FC<TimerViewProps> = ({
     const pausesLeft = Math.max(0, 2 - session.pauseCount);
     const canPause = session.status === 'RUNNING' && session.pauseCount < 2;
 
-    const isBreakPhase = isPomodoro && pState && pState.currentPhase !== 'FOCUS';
-    const isPomoCountdown = session.mode === 'POMODORO_COUNTDOWN';
-    const isPomoStopwatch = session.mode === 'POMODORO_STOPWATCH';
-
-    const pomoIntervalDuration =
-      pConfig?.focusIntervalDurationMinutes ?? pConfig?.focusDurationMinutes ?? 25;
-    const pomoIntervalsPerCycle =
-      pConfig?.focusIntervalsPerCycle ?? pConfig?.targetFocusSessions ?? 4;
-    const pomoNumberOfCycles = pConfig?.numberOfCycles ?? 3;
-    const pomoCdTotalFocusMins =
-      pomoIntervalDuration * pomoIntervalsPerCycle * pomoNumberOfCycles;
-    const pomoCdMultiplier =
-      session.lockedMultiplier || MultiplierRules.getCountdownMultiplier(pomoCdTotalFocusMins);
-    const pomoCdTotalCoins =
-      pState?.accumulatedCoins && pState.accumulatedCoins > 0
-        ? pState.accumulatedCoins
-        : pomoCdTotalFocusMins *
-          DEFAULT_REWARD_CONFIG.countdownBaseCoinPerMinute *
-          pomoCdMultiplier *
-          (1 + activeBonusRate);
-    const pomoCdTotalXp =
-      pState?.accumulatedXp && pState.accumulatedXp > 0
-        ? pState.accumulatedXp
-        : pomoCdTotalFocusMins * DEFAULT_REWARD_CONFIG.countdownBaseXpPerMinute * pomoCdMultiplier;
-
     const pomoCompletedCount = pState?.completedFocusCount ?? 0;
     const pomoCompletedFocusMins = pState?.totalCompletedFocusMinutes ?? 0;
-    const pomoSwMultiplier = MultiplierRules.getSessionMultiplier(pomoCompletedFocusMins);
 
     const isEligibleForFinish = isPomoStopwatch ? pomoCompletedCount > 0 : isStopwatchEligible;
-    const modalFinishCoins = isPomoStopwatch
-      ? (pState?.accumulatedCoins ?? 0)
-      : estStopwatchCoins;
-    const modalFinishXp = isPomoStopwatch
-      ? (pState?.accumulatedXp ?? 0)
-      : estStopwatchXp;
-    const modalFinishMultiplier = isPomoStopwatch ? pomoSwMultiplier : swMultiplier;
+    const modalFinishCoins = liveCoins;
+    const modalFinishXp = liveXp;
+    const modalFinishMultiplier = activeMultiplierDisplay;
 
     const sceneState = resolveFocusSceneState(session);
     const sceneStatusLabel = isPaused
@@ -686,13 +637,6 @@ export const TimerView: React.FC<TimerViewProps> = ({
       ? t('timer.status.break')
       : t('timer.status.focusing');
     const modeLabel = getSessionModeLabel(session, t);
-    const activeMultiplierDisplay = isPomoStopwatch
-      ? pomoSwMultiplier
-      : isPomoCountdown
-      ? pomoCdMultiplier
-      : isCountdown
-      ? (session.lockedMultiplier || 1.0)
-      : swMultiplier;
     const pauseTooltip = !canPause
       ? t('timer.actions.pauseDisabledTitle')
       : t('timer.actions.pauseTooltip', { count: pausesLeft });
@@ -827,53 +771,85 @@ export const TimerView: React.FC<TimerViewProps> = ({
             {isPomoCountdown ? (
               <span className="flex items-center gap-1 flex-wrap justify-center">
                 <span className="text-slate-500 dark:text-slate-400">{t('timer.liveReward.projectedLabel')}</span>
-                <span className="font-semibold text-amber-600 dark:text-amber-400 tabular-nums flex items-center gap-0.5">
+                <span className="font-semibold text-amber-600 dark:text-amber-400 tabular-nums flex items-center gap-1">
                   <Coins className="w-3 h-3 inline shrink-0" />
-                  {formatRewardAmount(pomoCdTotalCoins)} {t('timer.liveReward.coinUnit')}
+                  {formatRewardAmount(liveCoins)} {t('timer.liveReward.coinUnit')}
+                  {showLiveBonusBadge && (
+                    <span
+                      data-testid="live-coin-bonus-chip"
+                      className="text-[10px] text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/60 px-1 py-0.2 rounded font-medium tabular-nums"
+                    >
+                      +{formatRewardAmount(activeBonusRate * 100)}%
+                    </span>
+                  )}
                 </span>
                 <span>,</span>
                 <span className="font-semibold text-indigo-600 dark:text-indigo-400 tabular-nums flex items-center gap-0.5">
                   <Award className="w-3 h-3 inline shrink-0" />
-                  {formatRewardAmount(pomoCdTotalXp)} {t('timer.liveReward.xpUnit')}
+                  {formatRewardAmount(liveXp)} {t('timer.liveReward.xpUnit')}
                 </span>
               </span>
             ) : isPomoStopwatch ? (
-              <span className="flex items-center gap-1">
+              <span className="flex items-center gap-1 flex-wrap justify-center">
                 <span className="text-slate-500 dark:text-slate-400">{t('timer.liveReward.accumulatedLabel')}</span>
-                <span className="font-semibold text-amber-600 dark:text-amber-400 tabular-nums flex items-center gap-0.5">
+                <span className="font-semibold text-amber-600 dark:text-amber-400 tabular-nums flex items-center gap-1">
                   <Coins className="w-3 h-3 inline shrink-0" />
-                  {formatRewardAmount(pState?.accumulatedCoins ?? 0)} {t('timer.liveReward.coinUnit')}
+                  {formatRewardAmount(liveCoins)} {t('timer.liveReward.coinUnit')}
+                  {showLiveBonusBadge && (
+                    <span
+                      data-testid="live-coin-bonus-chip"
+                      className="text-[10px] text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/60 px-1 py-0.2 rounded font-medium tabular-nums"
+                    >
+                      +{formatRewardAmount(activeBonusRate * 100)}%
+                    </span>
+                  )}
                 </span>
                 <span>,</span>
                 <span className="font-semibold text-indigo-600 dark:text-indigo-400 tabular-nums flex items-center gap-0.5">
                   <Award className="w-3 h-3 inline shrink-0" />
-                  {formatRewardAmount(pState?.accumulatedXp ?? 0)} {t('timer.liveReward.xpUnit')}
+                  {formatRewardAmount(liveXp)} {t('timer.liveReward.xpUnit')}
                 </span>
               </span>
             ) : isCountdown ? (
-              <span className="flex items-center gap-1">
+              <span className="flex items-center gap-1 flex-wrap justify-center">
                 <span className="text-slate-500 dark:text-slate-400">{t('timer.liveReward.rewardLabel')}</span>
-                <span className="font-semibold text-amber-600 dark:text-amber-400 tabular-nums flex items-center gap-0.5">
+                <span className="font-semibold text-amber-600 dark:text-amber-400 tabular-nums flex items-center gap-1">
                   <Coins className="w-3 h-3 inline shrink-0" />
-                  {formatRewardAmount(estCountdownCoins)} {t('timer.liveReward.coinUnit')}
+                  {formatRewardAmount(liveCoins)} {t('timer.liveReward.coinUnit')}
+                  {showLiveBonusBadge && (
+                    <span
+                      data-testid="live-coin-bonus-chip"
+                      className="text-[10px] text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/60 px-1 py-0.2 rounded font-medium tabular-nums"
+                    >
+                      +{formatRewardAmount(activeBonusRate * 100)}%
+                    </span>
+                  )}
                 </span>
                 <span>,</span>
                 <span className="font-semibold text-indigo-600 dark:text-indigo-400 tabular-nums flex items-center gap-0.5">
                   <Award className="w-3 h-3 inline shrink-0" />
-                  {formatRewardAmount(estCountdownXp)} {t('timer.liveReward.xpUnit')}
+                  {formatRewardAmount(liveXp)} {t('timer.liveReward.xpUnit')}
                 </span>
               </span>
             ) : (
-              <span className="flex items-center gap-1">
+              <span className="flex items-center gap-1 flex-wrap justify-center">
                 <span className="text-slate-500 dark:text-slate-400">{t('timer.liveReward.accumulatedLabel')}</span>
-                <span className="font-semibold text-amber-600 dark:text-amber-400 tabular-nums flex items-center gap-0.5">
+                <span className="font-semibold text-amber-600 dark:text-amber-400 tabular-nums flex items-center gap-1">
                   <Coins className="w-3 h-3 inline shrink-0" />
-                  {formatRewardAmount(estStopwatchCoins)} {t('timer.liveReward.coinUnit')}
+                  {formatRewardAmount(liveCoins)} {t('timer.liveReward.coinUnit')}
+                  {showLiveBonusBadge && (
+                    <span
+                      data-testid="live-coin-bonus-chip"
+                      className="text-[10px] text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/60 px-1 py-0.2 rounded font-medium tabular-nums"
+                    >
+                      +{formatRewardAmount(activeBonusRate * 100)}%
+                    </span>
+                  )}
                 </span>
                 <span>,</span>
                 <span className="font-semibold text-indigo-600 dark:text-indigo-400 tabular-nums flex items-center gap-0.5">
                   <Award className="w-3 h-3 inline shrink-0" />
-                  {formatRewardAmount(estStopwatchXp)} {t('timer.liveReward.xpUnit')}
+                  {formatRewardAmount(liveXp)} {t('timer.liveReward.xpUnit')}
                 </span>
                 {!isStopwatchEligible && (
                   <span data-testid="stopwatch-min-note" className="text-[10px] text-slate-400 dark:text-slate-500">
@@ -994,8 +970,13 @@ export const TimerView: React.FC<TimerViewProps> = ({
                     <div className="flex items-center justify-around">
                       <div className="flex items-center gap-1.5">
                         <Coins className="w-4 h-4 text-amber-500" />
-                        <span className="text-sm font-bold text-amber-600 dark:text-amber-400 tabular-nums">
+                        <span className="text-sm font-bold text-amber-600 dark:text-amber-400 tabular-nums flex items-center gap-1">
                           +{formatRewardAmount(modalFinishCoins)} {t('timer.modal.coinsUnit')}
+                          {showLiveBonusBadge && (
+                            <span className="text-[10px] text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/60 px-1 py-0.2 rounded font-medium tabular-nums">
+                              +{formatRewardAmount(activeBonusRate * 100)}%
+                            </span>
+                          )}
                         </span>
                       </div>
                       <div className="h-4 w-px bg-slate-200 dark:bg-slate-700" />
@@ -1015,7 +996,7 @@ export const TimerView: React.FC<TimerViewProps> = ({
                           })
                         : t('timer.modal.swFinishNote', {
                             minutes: actualFocusMins,
-                            multiplier: swMultiplier.toFixed(1),
+                            multiplier: modalFinishMultiplier.toFixed(1),
                           })}
                     </div>
                   </div>
@@ -1083,39 +1064,22 @@ export const TimerView: React.FC<TimerViewProps> = ({
   // -------------------------------------------------------------
   // STATE 3: IDLE (Timer Setup & Start)
   // -------------------------------------------------------------
-  let previewMultiplier = 1.0;
-  let estimatedCoins = 0;
-  let estimatedXp = 0;
-
-  const coinBonusMultiplier = 1 + activeBonusRate;
-
-  if (selectedPrimaryTab === 'COUNTDOWN') {
-    previewMultiplier = MultiplierRules.getCountdownMultiplier(targetMinutes);
-    estimatedCoins =
-      DEFAULT_REWARD_CONFIG.countdownBaseCoinPerMinute * targetMinutes * previewMultiplier * coinBonusMultiplier;
-    estimatedXp = DEFAULT_REWARD_CONFIG.countdownBaseXpPerMinute * targetMinutes * previewMultiplier;
-  } else if (selectedPrimaryTab === 'POMODORO') {
-    const intervalDuration =
-      pomoConfig.focusIntervalDurationMinutes ?? pomoConfig.focusDurationMinutes ?? 25;
-    const intervalsPerCycle =
-      pomoConfig.focusIntervalsPerCycle ?? pomoConfig.targetFocusSessions ?? 4;
-    const cycles = pomoConfig.numberOfCycles ?? 3;
-
-    if (pomodoroSubMode === 'POMODORO_COUNTDOWN') {
-      const totalIntervals = intervalsPerCycle * cycles;
-      const totalFocusMinutes = intervalDuration * totalIntervals;
-      previewMultiplier = MultiplierRules.getCountdownMultiplier(totalFocusMinutes);
-      estimatedCoins =
-        DEFAULT_REWARD_CONFIG.countdownBaseCoinPerMinute * totalFocusMinutes * previewMultiplier * coinBonusMultiplier;
-      estimatedXp = DEFAULT_REWARD_CONFIG.countdownBaseXpPerMinute * totalFocusMinutes * previewMultiplier;
-    } else {
-      // POMODORO_STOPWATCH: Per Interval Reward with 1.0x preview multiplier, using Stopwatch base rate (1.0 Coin/min, 3.0 XP/min)
-      previewMultiplier = 1.0;
-      estimatedCoins =
-        DEFAULT_REWARD_CONFIG.stopwatchBaseCoinPerMinute * intervalDuration * previewMultiplier * coinBonusMultiplier;
-      estimatedXp = DEFAULT_REWARD_CONFIG.stopwatchBaseXpPerMinute * intervalDuration * previewMultiplier;
-    }
-  }
+  const setupMode: SessionMode =
+    selectedPrimaryTab === 'COUNTDOWN'
+      ? 'COUNTDOWN'
+      : selectedPrimaryTab === 'STOPWATCH'
+      ? 'STOPWATCH'
+      : pomodoroSubMode;
+  const setupPreview = getSessionRewardPreview({
+    mode: setupMode,
+    status: 'IDLE',
+    targetMinutes,
+    coinBonusRate: activeBonusRate,
+    pomodoroConfig: pomoConfig,
+  });
+  const previewMultiplier = setupPreview.multiplier;
+  const estimatedCoins = setupPreview.coins;
+  const estimatedXp = setupPreview.xp;
 
   const allowedCount = activeProfile?.allowedDomains.length || 0;
 
@@ -1314,8 +1278,8 @@ export const TimerView: React.FC<TimerViewProps> = ({
                     <span className="flex items-center gap-1 font-semibold text-amber-600 dark:text-amber-400 tabular-nums">
                       <Coins className="w-3.5 h-3.5" /> +{formatRewardAmount(estimatedCoins)}
                       {activeBonusRate > 0 && (
-                        <span className="text-[10px] text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/60 px-1 py-0.2 rounded font-medium">
-                          +{Math.round(activeBonusRate * 100)}%
+                        <span className="text-[10px] text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/60 px-1 py-0.2 rounded font-medium tabular-nums">
+                          +{formatRewardAmount(activeBonusRate * 100)}%
                         </span>
                       )}
                     </span>
@@ -1527,8 +1491,8 @@ export const TimerView: React.FC<TimerViewProps> = ({
                       <span className="flex items-center gap-1 font-semibold text-amber-600 dark:text-amber-400 tabular-nums">
                         <Coins className="w-3.5 h-3.5" /> +{formatRewardAmount(estimatedCoins)}
                         {activeBonusRate > 0 && (
-                          <span className="text-[10px] text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/60 px-1 py-0.2 rounded font-medium">
-                            +{Math.round(activeBonusRate * 100)}%
+                          <span className="text-[10px] text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/60 px-1 py-0.2 rounded font-medium tabular-nums">
+                            +{formatRewardAmount(activeBonusRate * 100)}%
                           </span>
                         )}
                       </span>

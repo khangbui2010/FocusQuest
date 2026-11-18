@@ -1,7 +1,7 @@
 # FOCUS QUEST — PROJECT STATUS
 Cập nhật lần cuối: 2026-11-18
-Giai đoạn hiện tại: **Milestone UX — Giai đoạn UX-3** *(Sửa lớp tối rừng chưa mở lên trên cây với hằng số dùng chung + hệ số cây, bỏ lưới viền ô đã mở & canh zoom bội pixel nguyên chống khe hở, đồng bộ `#sprites`)* **ĐÃ HOÀN TẤT** — Bước kế tiếp: **DỪNG chờ người dùng duyệt Giai đoạn UX-3** *(và duyệt Giai đoạn 3 / 5B.5 trước khi sang Giai đoạn 2a hoặc 5c)*.
-Trạng thái: Verified (554/554 Tests PASS 3/3 lần | Build PASS | Lint PASS — UI chạy qua React SSR `renderToString`, backend dùng mock adapters; kiểm tra trên Chrome popup thật chưa thực hiện)
+Giai đoạn hiện tại: **Milestone UX — Giai đoạn UX-4** *(Đồng bộ hiển thị phần thưởng qua Một Nguồn Chân Lý `getSessionRewardPreview`, cập nhật CoinBonus trực tiếp, tách ranh giới `notificationFormatter.ts` và chuẩn hóa `formatRewardAmount` thập phân half-up tối đa 2 chữ số thập phân)* **ĐÃ HOÀN TẤT** — Bước kế tiếp: **DỪNG chờ người dùng duyệt Giai đoạn UX-4** *(và duyệt UX-1/2/3, LOFI-2, Giai đoạn 3 / 5B.5 trước khi sang Giai đoạn 2a hoặc 5c)*.
+Trạng thái: Verified (561/561 Tests PASS 3/3 lần | Build PASS | Lint PASS — UI chạy qua React SSR `renderToString`, backend dùng mock adapters; kiểm tra trên Chrome popup thật chưa thực hiện)
 
 ---
 
@@ -51,6 +51,12 @@ Trạng thái: Verified (554/554 Tests PASS 3/3 lần | Build PASS | Lint PASS �
   - **Đưa lớp tối lên trên cây (`TerrainCellLayers.tsx`, `terrainDecor.ts`, `TileImage.tsx`, `MapGridView.tsx`, `SpriteGallery.tsx`):** Chuẩn hóa thứ tự lớp trong ô rừng chưa mở thành **nền đất → lớp cây → lớp tối (`bg-slate-950`)** dùng chung hằng số `LOCKED_FOREST_DARKEN_OPACITY = 0.44` và hệ số `LOCKED_TREE_DARKEN_FACTOR = 1.0` (kèm `computeLockedForestOpacities` để sau chỉ đổi 1 hằng số như `0.7` mà không sửa cấu trúc hay tạo viền sáng quanh cây). Dùng chung `TerrainCellLayers` cho cả `MapGridView` lẫn các khối xem trước trong `#sprites` (`SpriteGallery.tsx`) và cập nhật chú thích gallery khớp hành vi mới.
   - **Bỏ lưới từng ô ở vùng đã mở & chống hairline seam (`MapGridView.tsx`):** Gỡ bỏ `border-[0.5px] border-emerald-950/... dark:border-slate-900/...` trên `GridCell` đã mở (`border-0`), giữ nguyên hiệu ứng hover đặt công trình (`hover:after:bg-emerald-300/35`), ghost hợp lệ/lỗi, khung công trình, `Unlocked Chunk Boundaries` (`border-emerald-500/35`), Expansion Mode và thanh điều khiển zoom. Neo mọi bước zoom về bội của `1/16` (`snapZoomToIntegerPixels`, `computeExpansionFitZoom`, làm tròn `pan`, `image-rendering: pixelated`) để `CELL_SIZE * zoom` và `16 * zoom` luôn là số nguyên pixel, tránh khe hở sub-pixel giữa các ô. Ô chưa mở vốn đã dùng `border-0`.
   - **Kiểm thử:** Thêm `__tests__/ui/ux3MapAndForestUi.test.ts` (3 tests SSR) và cập nhật assertion thứ tự lớp cũ trong `__tests__/ui/terrainDecor.test.ts:471–496` (`554/554 PASS` 3/3 lần, Build PASS, Lint PASS).
+- **Milestone UX *(KHÔNG thuộc Phase 5 / 5B.5 / LOFI)* — Giai đoạn UX-4 (`2026-11-18` — ĐÃ HOÀN TẤT, DỪNG CHỜ DUYỆT):**
+  - **Không sửa lõi kinh tế & lưu trữ:** Giữ nguyên 100% công thức thưởng, `RewardEngine`, thời điểm quyết toán trên `SessionCoordinator`, và độ chính xác IEEE-754 đầy đủ trong ví/thống kê ngày (tuyệt đối không làm tròn non trong storage hay schema).
+  - **Một Nguồn Chân Lý cho hiển thị (`src/core/reward/rewardPreview.ts`):** Tạo hàm thuần `getSessionRewardPreview` & `getSessionRewardPreviewFromSnapshot` (trả về số thực thô chuẩn theo `RewardEngine` & `SessionCoordinator`). Tích hợp vào `TimerView.tsx` cho đủ 4 trạng thái (`Setup`, `Running/Paused`, `Finish Confirm Modal`, `Completed/Abandoned/Interrupted`), sửa lỗi màn Running & Completed thiếu `CoinBonus` (`7.5` thay vì `7.88` khi `+5%`), đồng bộ ngưỡng `< 5m` ở Stopwatch Completed, giữ All-or-Nothing Pomodoro Countdown từ UX-2.
+  - **Đồng bộ `CoinBonus` trực tiếp từ `App.tsx` (`PopupShell`):** `App.tsx` tính `civBonusRate` từ `aggregateCoinBonus(extractBuildingCoinBonuses(...))` trong `refreshState()` và truyền xuống `TimerView`, giúp đặt/gỡ công trình giữa phiên cập nhật tức thì chip `+{rate}%` và phần thưởng trên màn hình chạy.
+  - **Ranh giới hiển thị & Định dạng thập phân chuẩn (`formatters.ts`, `notificationFormatter.ts`):** Thay `Math.round` nhị phân trong `formatRewardAmount` bằng thuật toán chuỗi thập phân thuần **half-up tối đa 2 chữ số** (xử lý chuẩn `1.005 -> "1.01"`, `7.875 -> "7.88"`, `63.375 -> "63.38"`, khoa học `e/E`, bỏ số `0` dư cuối, dấu `.`, chặn `-0`/`NaN`/`Infinity`), đồng bộ `BuildingCatalogPanel.tsx` (`playerCoins`), `BuildingDetailsModal.tsx`, `LandExpansionModal.tsx`. Tách `formatSessionNotificationContent` ra `src/background/notificationFormatter.ts` để `SessionCoordinator` không còn import `ui/utils/formatters`.
+  - **Tài liệu & Kiểm thử:** Đồng bộ `PRODUCT_SPEC.md` §6.3; thêm `__tests__/ui/ux4RewardDisplayAndFormatting.test.ts` (7 tests gồm formatter edge cases, kịch bản `55.5 -> 63.375`, bảng 4 mode `0%` & `+5%`, Stopwatch `< 5m`, mid-session bonus sync, tích lũy `8 × 7.875 = 63` exact trong storage, và kiểm tra tĩnh biên import → `561/561 PASS` 3/3 lần, Build PASS, Lint PASS).
 - **Milestone LOFI *(KHÔNG thuộc Phase 5 / 5B.5)* — Giai đoạn LOFI-1 + LOFI-1b (`2026-11-17` — ĐÃ HOÀN TẤT, DỪNG CHỜ DUYỆT):**
   - **Chuyển nguồn nhạc từ đóng gói cục bộ sang Online Archive (`FocusQuest-LOFI-archive`):** Gỡ bỏ toàn bộ `MUSIC_CATALOG` hard-code, `public/assets/music/`, file audio cục bộ (`0` file `.mp3/.ogg/.wav/.m4a/.flac` trong `public/` & `dist/`), chuyển thông tin bản quyền về `/CREDITS.md`.
   - **Offscreen Document (`Chrome >= 116`) & Khôi phục qua mốc 30s:** `manifest.json` nâng `"minimum_chrome_version": "116"` để dùng `chrome.runtime.getContexts` chính thức cùng `"offscreen"`; `public/offscreen.html` + `src/offscreen/offscreen.ts` (CSP-safe) phát `<audio>` theo giao thức `target: 'offscreen' | 'background'` (`MUSIC_PLAY`, `MUSIC_PAUSE`, `MUSIC_STOP`, `MUSIC_SEEK`, `MUSIC_SET_VOLUME`, `MUSIC_GET_STATUS`), lưu `positionSec` bền vững qua `MUSIC_POSITION` để tái tạo và tua đúng vị trí khi Chrome đóng Offscreen lúc Pause > 30s (không dùng âm thanh im lặng giữ sống).
@@ -156,12 +162,12 @@ Trạng thái: Verified (554/554 Tests PASS 3/3 lần | Build PASS | Lint PASS �
 
 ## 3. KẾT QUẢ KIỂM ĐỊNH THỰC TẾ (VERIFIED REAL VERIFICATION RESULTS)
 
-*Lưu ý: Các số liệu dưới đây được xác minh trực tiếp bằng việc chạy lệnh thực tế trên repository sau khi hoàn tất **Milestone 5B.5 — Giai đoạn 3 (`statsAggregator.ts` & `StatsBarChart.tsx`)** (`2026-11-18`). Toàn bộ UI tests chạy qua React SSR (`renderToString`) trên Node.js và backend tests chạy qua mock Chrome adapters; **hiển thị trực quan biểu đồ trên Web Preview `#sprites` và popup `400×600px` thật cần kiểm chứng trực tiếp trên trình duyệt Chrome (>= 116)**.*
+*Lưu ý: Các số liệu dưới đây được xác minh trực tiếp bằng việc chạy lệnh thực tế trên repository sau khi hoàn tất **Milestone UX — Giai đoạn UX-4** (`2026-11-18`). Toàn bộ UI tests chạy qua React SSR (`renderToString`) trên Node.js và backend tests chạy qua mock Chrome adapters; **hiển thị trực quan trên Chrome Popup `400×600px` thật cần kiểm chứng trực tiếp trên trình duyệt Chrome (>= 116)**.*
 
 ### 3.1. Production Build (`npm run clean && npm run build`)
-- **Trạng thái:** **PASS (Exit code 0)** — Vite `v8.3.8`, `1,738 modules transformed`, thời gian **`683ms`**.
-- **Kiểm tra Artifacts thư mục `dist/` (Tổng dung lượng: `1,076,744 B`):**
-  - `dist/background.js`: **CÓ (`87.39 kB`, gzip: `18.86 kB`)** — Service Worker độc lập (`0` `react-dom` trong background).
+- **Trạng thái:** **PASS (Exit code 0)** — Vite `v8.3.8`, `1,741 modules transformed`, thời gian **`652ms`**.
+- **Kiểm tra Artifacts thư mục `dist/` (Tổng dung lượng: `1,084,217 B`):**
+  - `dist/background.js`: **CÓ (`87.71 kB`, gzip: `18.87 kB`)** — Service Worker độc lập (`0` `react-dom` trong background).
   - `dist/offscreen.js`: **CÓ (`3.87 kB`, gzip: `1.48 kB`)** — Audio engine MV3 chạy trong Offscreen Document.
   - `dist/offscreen.html`: **CÓ (`264 B`)** — CSP-safe (0 inline script).
   - `dist/blocked.js`: **CÓ (`1.32 kB`, gzip: `0.60 kB`)** — Module CSP-safe điều khiển đa ngôn ngữ `blocked.html`.
@@ -170,18 +176,19 @@ Trạng thái: Verified (554/554 Tests PASS 3/3 lần | Build PASS | Lint PASS �
   - `dist/manifest.json`: **CÓ (`984 B`)** — Chrome MV3 Manifest (`"minimum_chrome_version": "116"`, `"default_locale": "en"`, `"offscreen"`).
   - `dist/_locales/`: **CÓ** — `en/messages.json` (`382 B`) và `vi/messages.json` (`440 B`).
   - `dist/icons/`: **CÓ** — Bộ icon đầy đủ (`icon16.png`, `icon32.png`, `icon48.png`, `icon128.png`, `icon.svg`).
-  - `dist/assets/popup-v67toHlJ.js`: **CÓ (`760.20 kB`, gzip: `200.62 kB`)** *(tăng `+9.21 kB` so với baseline `750.99 kB` trước Giai đoạn 3; còn cảnh báo Vite chunk > 500 kB, chủ ý hoãn tách chunk)*.
-  - `dist/assets/popup-CcbP-iLS.css`: **CÓ (`87.72 kB`, gzip: `13.73 kB`)**.
-  - `dist/assets/translator-CNup_GSb.js`: **CÓ (`51.90 kB`, gzip: `13.99 kB`)**.
-  - `dist/assets/statsAggregator-DM7wxVkB.js`: **CÓ (`53.96 kB`, gzip: `14.86 kB`)** *(shared chunk domain, thay tên chunk `domainNormalizer-*.js` `48.55 kB` trước đó)*.
+  - `dist/assets/popup-xM55En9Z.js`: **CÓ (`765.03 kB`, gzip: `201.49 kB`)** *(chủ ý hoãn tách chunk)*.
+  - `dist/assets/popup-D9z-9pA-.css`: **CÓ (`88.29 kB`, gzip: `13.79 kB`)**.
+  - `dist/assets/translator-B5-w4v6G.js`: **CÓ (`52.47 kB`, gzip: `14.14 kB`)**.
+  - `dist/assets/statsAggregator-DUdjfgHP.js`: **CÓ (`55.13 kB`, gzip: `15.31 kB`)**.
   - `dist/assets/storageKeys-BmLuJ1Do.js`: **CÓ (`0.37 kB`, gzip: `0.26 kB`)**.
   - `dist/assets/sprites/`: **CÓ** — Đủ `CREDITS.md`, `kenney-tiny-town` và `kenney-tiny-dungeon`.
   - `dist/assets/music/` & file audio cục bộ: **KHÔNG TỒN TẠI (`0` file audio)**.
 
 ### 3.2. Automated Tests (`npm test`)
-- **Trạng thái:** **PASS (Exit code 0) — 3/3 lần chạy liên tiếp** — **545 / 545 tests PASS (100%)**.
-  - Passed: **545** | Failed: **0** | Skipped: **0** | Cancelled: **0** | Todo: **0**.
-  - Đã kiểm chứng thêm `statsAggregator.test.ts` dưới `TZ=America/Los_Angeles` và `TZ=Asia/Ho_Chi_Minh`: `10 / 10 PASS` giống hệt nhau.
+- **Trạng thái:** **PASS (Exit code 0) — 3/3 lần chạy liên tiếp** — **561 / 561 tests PASS (100%)**.
+  - Lần 1: `561` Passed | `0` Failed | `0` Skipped | `0` Cancelled (`15,420.17 ms`).
+  - Lần 2: `561` Passed | `0` Failed | `0` Skipped | `0` Cancelled (`15,492.74 ms`).
+  - Lần 3: `561` Passed | `0` Failed | `0` Skipped | `0` Cancelled (`15,342.93 ms`).
 
 ### 3.3. Typecheck & Lint (`npm run lint` — `tsc --noEmit`)
 - **Trạng thái:** **PASS (Exit code 0)** — **0 errors, 0 warnings**.

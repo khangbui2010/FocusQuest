@@ -124,7 +124,7 @@ export const LandExpansionModal: React.FC<LandExpansionModalProps> = ({
               </span>
               <div className="text-right tabular-nums">
                 <div className="font-bold text-amber-700 dark:text-amber-300">
-                  {t('civ.expand.costValue', { cost: evaluation.cost })}
+                  {t('civ.expand.costValue', { cost: formatRewardAmount(evaluation.cost) })}
                 </div>
                 <div className="text-[10px] text-slate-500 dark:text-slate-400">
                   {t('civ.expand.equivFocus', {

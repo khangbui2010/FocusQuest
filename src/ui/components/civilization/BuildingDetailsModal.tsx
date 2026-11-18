@@ -185,7 +185,7 @@ export const BuildingDetailsModal: React.FC<BuildingDetailsModalProps> = ({
                   ? t('civ.details.upgradeMax')
                   : t('civ.details.upgradeNext', {
                       level: building.level + 1,
-                      cost: upgradeCost,
+                      cost: formatRewardAmount(upgradeCost),
                     })}
               </div>
             </div>

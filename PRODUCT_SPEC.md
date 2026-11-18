@@ -3,7 +3,7 @@
 **Document Version:** 1.4.1-synced  
 **Target Release:** MVP v1.0  
 **Role:** Senior Product Architect & Product Manager  
-**Status:** Formal Product Specification (Synced through Milestone UX-2)  
+**Status:** Formal Product Specification (Synced through Milestone UX-4)  
 
 ---
 
@@ -110,7 +110,10 @@ Sản phẩm áp dụng triết lý **Positive Reinforcement (Khen thưởng tí
 - **XP Độc lập Tuyệt đối:** XP không chịu bất kỳ ảnh hưởng nào từ CoinBonus của Civilization, bảo đảm thăng cấp Level phản ánh trung thực nỗ lực Focus:
   `XP = T × R_x × M(T)`
   Trong đó `R_x` là Base rate XP/phút (5.0 cho Countdown / Pomodoro Countdown, 3.0 cho Stopwatch / Pomodoro Stopwatch).
-- **Độ chính xác Số học (IEEE-754 Precision):** Số dư Focus Coins được bảo toàn số thập phân đầy đủ trong storage và daily stats, không làm tròn non ép buộc.
+- **Độ chính xác Số học (IEEE-754 Precision) & Chuẩn Hiển thị Số (UX-4):**
+  - **Trong storage và tính toán lõi (`RewardEngine`, `Economy`, `DailyStats`, `SessionCoordinator`):** Số dư Focus Coins, XP và lịch sử thưởng được tính và lưu theo độ chính xác IEEE-754 đầy đủ (ví dụ `+7.875` Coin từ Countdown 5 phút có công trình `+5%`), **tuyệt đối không** làm tròn non hoặc cắt tỉa trước khi cộng dồn vào ví hay thống kê ngày.
+  - **Tại ranh giới hiển thị UI & Thông báo hệ thống (`formatRewardAmount`):** Mọi giá trị số Coin, XP, % bonus và chi phí/số dư hiển thị trên giao diện (Header, Setup, Running/Finish Modal, Outcome, Thông báo Chrome, Stats, Catalog/Expansion/Details) đều dùng helper chuẩn hóa **làm tròn thập phân half-up tối đa 2 chữ số thập phân** (`7.875` → `7.88`, `63.375` → `63.38`, `1.005` → `1.01`), bỏ `.0`/số `0` vô nghĩa ở cuối (`7.50` → `7.5`, `55.00` → `55`), luôn dùng dấu `.` và không bao giờ hiện `-0`, `NaN` hay `Infinity`.
+  - **Đồng bộ Một Nguồn Chân Lý (`getSessionRewardPreview`):** Cả 4 màn hình Setup (`IDLE`), Running/Paused, Finish Confirm Modal và Outcome (`COMPLETED` / `ABANDONED` / `INTERRUPTED`) cùng đọc từ hàm preview thuần `getSessionRewardPreview` dùng chung công thức với `RewardEngine` và `SessionCoordinator` (áp dụng đúng `CoinBonus` đang hoạt động, ngưỡng `< 5 phút` của Stopwatch, và quy tắc All-or-Nothing của Pomodoro Countdown). Khi xây hoặc gỡ công trình văn minh trong lúc phiên đang chạy, `CoinBonus` hiển thị ở màn đang chạy đồng bộ theo trạng thái mới nhất khớp với số tiền sẽ quyết toán khi hoàn thành.
 
 ### 6.4. Công thức Cấp độ (Level Progression)
 - Để thăng từ Level `N` lên Level `N + 1`, người chơi cần `N × 100` XP riêng cho cấp đó:

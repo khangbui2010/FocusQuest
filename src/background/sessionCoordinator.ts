@@ -17,14 +17,13 @@ import {
   PomodoroState,
 } from '../types/session.ts';
 import { CoinBonus } from '../types/economy.ts';
+import { FocusProfile } from '../types/profiles.ts';
 import { FullSessionStateResponse } from '../types/messages.ts';
 import { LifecycleReason, LifecycleEventContext } from '../types/lifecycle.ts';
-import { FocusProfile } from '../types/profiles.ts';
-import { formatRewardAmount } from '../ui/utils/formatters.ts';
 import { getLocalDateKey } from '../core/utils/dateUtils.ts';
 import { calculateLifetimeFocusMinutes } from '../core/stats/statsAggregator.ts';
-import { resolveLocale, translate } from '../i18n/translator.ts';
-import { SupportedLocale, TranslationKey } from '../i18n/types.ts';
+import { formatSessionNotificationContent } from './notificationFormatter.ts';
+import { TranslationKey } from '../i18n/types.ts';
 
 export const ALARM_NAMES = {
   COUNTDOWN_FINISH: 'FQ_ALARM_COUNTDOWN_FINISH',
@@ -154,10 +153,15 @@ export class SessionCoordinator {
         return false;
       }
 
-      const locale = resolveLocale(settings?.language);
+      const { title, message } = formatSessionNotificationContent({
+        language: settings?.language,
+        titleKey: params.titleKey,
+        messageKey: params.messageKey,
+        messageParams: params.messageParams,
+      });
       await this.notifications.create(`fq_finish_${sessionId}`, {
-        title: translate(locale, params.titleKey),
-        message: translate(locale, params.messageKey, params.messageParams),
+        title,
+        message,
       });
 
       this.dispatchedCompletionNotificationIds.add(sessionId);
@@ -185,10 +189,15 @@ export class SessionCoordinator {
       if (settings && settings.notificationsEnabled === false) {
         return;
       }
-      const locale = resolveLocale(settings?.language);
+      const { title, message } = formatSessionNotificationContent({
+        language: settings?.language,
+        titleKey,
+        messageKey,
+        messageParams,
+      });
       await this.notifications.create(notificationId, {
-        title: translate(locale, titleKey),
-        message: translate(locale, messageKey, messageParams),
+        title,
+        message,
       });
     } catch (err) {
       console.warn('Failed to dispatch pomodoro phase notification:', err);
@@ -980,8 +989,8 @@ export class SessionCoordinator {
             messageParams: {
               count: completedIntervals,
               minutes: actualFocusMinutes > 0 ? actualFocusMinutes : rewardFocusMinutes,
-              coins: formatRewardAmount(finalCoins),
-              xp: formatRewardAmount(finalXp),
+              coins: finalCoins,
+              xp: finalXp,
             },
           });
         }
@@ -1065,8 +1074,8 @@ export class SessionCoordinator {
           messageKey: 'notif.stopwatchCompleteMsg',
           messageParams: {
             minutes: actualFocusMinutes,
-            coins: formatRewardAmount(rewardResult.coinsEarned),
-            xp: formatRewardAmount(rewardResult.xpEarned),
+            coins: rewardResult.coinsEarned,
+            xp: rewardResult.xpEarned,
           },
         });
       }
@@ -1159,8 +1168,8 @@ export class SessionCoordinator {
         messageKey: 'notif.countdownCompleteMsg',
         messageParams: {
           minutes: session.targetMinutes,
-          coins: formatRewardAmount(rewardResult.coinsEarned),
-          xp: formatRewardAmount(rewardResult.xpEarned),
+          coins: rewardResult.coinsEarned,
+          xp: rewardResult.xpEarned,
         },
       });
 
@@ -1391,8 +1400,8 @@ export class SessionCoordinator {
               messageKey: 'notif.pomoCompleteMsg',
               messageParams: {
                 minutes: plannedFocusMinutes,
-                coins: formatRewardAmount(totalCoins),
-                xp: formatRewardAmount(totalXp),
+                coins: totalCoins,
+                xp: totalXp,
               },
             });
 
@@ -1544,8 +1553,8 @@ export class SessionCoordinator {
           isLongBreak ? 'notif.longBreakTitle' : 'notif.shortBreakTitle',
           'notif.pomoSwBreakMsg',
           {
-            coins: formatRewardAmount(accumulatedCoins),
-            xp: formatRewardAmount(accumulatedXp),
+            coins: accumulatedCoins,
+            xp: accumulatedXp,
             minutes: breakDurationMinutes,
           }
         );

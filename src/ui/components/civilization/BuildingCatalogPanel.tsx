@@ -20,6 +20,7 @@ import {
 import { getAllBuildingDefinitions } from '../../../core/civilization/buildingCatalog.ts';
 import { PixelSprite, getBuildingSprite } from './spriteRegistry.ts';
 import { useTranslation } from '../../../i18n/I18nContext.tsx';
+import { formatRewardAmount } from '../../utils/formatters.ts';
 import { TranslationKey } from '../../../i18n/types.ts';
 import {
   getLocalizedBuildingDescription,
@@ -79,7 +80,7 @@ function getEffectSummary(
   }
   const parts = def.effects.map((eff) => {
     if (eff.type === 'COIN_BONUS') {
-      return t('civ.catalog.effect.coinBonus', { rate: Math.round(eff.rate * 100) });
+      return t('civ.catalog.effect.coinBonus', { rate: formatRewardAmount(eff.rate * 100) });
     }
     if (eff.type === 'FOCUS_FEATURE_UNLOCK') {
       return t('civ.catalog.effect.focusPreset');
@@ -133,7 +134,7 @@ export const BuildingCatalogPanel: React.FC<BuildingCatalogPanelProps> = ({
             <p className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
               {t('civ.catalog.summary', {
                 level: playerLevel,
-                coins: playerCoins,
+                coins: formatRewardAmount(playerCoins),
                 minutes: lifetimeFocusMinutes,
               })}
             </p>
@@ -193,7 +194,7 @@ export const BuildingCatalogPanel: React.FC<BuildingCatalogPanelProps> = ({
             } else if (eraLocked) {
               actionLabel = t('civ.catalog.lockedEra');
             } else if (insufficientCoins) {
-              actionLabel = t('civ.catalog.needCoins', { cost: def.baseCost });
+              actionLabel = t('civ.catalog.needCoins', { cost: formatRewardAmount(def.baseCost) });
             }
 
             const iconTone =
@@ -254,7 +255,7 @@ export const BuildingCatalogPanel: React.FC<BuildingCatalogPanelProps> = ({
                       </h3>
                       <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 dark:text-amber-300 tabular-nums whitespace-nowrap shrink-0">
                         <Coins className="w-3 h-3 text-amber-500 shrink-0" />
-                        <span>{def.baseCost}</span>
+                        <span>{formatRewardAmount(def.baseCost)}</span>
                       </span>
                     </div>
 
