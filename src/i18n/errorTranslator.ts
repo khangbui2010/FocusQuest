@@ -128,6 +128,13 @@ const EXACT_VI_ERROR_MAP: Record<string, string> = {
   "MUSIC_SET_REPEAT requires mode ('off' | 'all' | 'one').": 'Chế độ lặp lại không hợp lệ.',
   'Music coordinator is not initialized.': 'Trình điều phối nhạc chưa được khởi tạo.',
   'MusicCoordinator is not configured in MessageHandler.': 'Trình điều phối nhạc chưa được cấu hình.',
+
+  // Quest validation messages
+  'CLAIM_QUEST_REWARD requires payload with period and questId.':
+    'Yêu cầu nhận thưởng nhiệm vụ cần đầy đủ chu kỳ và mã nhiệm vụ.',
+  "CLAIM_QUEST_REWARD requires valid period ('DAILY' | 'WEEKLY').":
+    "Chu kỳ nhiệm vụ không hợp lệ (chỉ hỗ trợ 'DAILY' hoặc 'WEEKLY').",
+  'CLAIM_QUEST_REWARD requires valid questId.': 'Mã nhiệm vụ không hợp lệ.',
 };
 
 function translateDomainSubError(rawSubError: string): string {
@@ -317,6 +324,41 @@ export function localizeErrorMessage(
   );
   if (trackNotFoundMatch) {
     return `Không tìm thấy bài nhạc '${trackNotFoundMatch[1]}' trong thư viện nhạc Lofi.`;
+  }
+
+  // Quest coordinator parameterized errors
+  const unknownQuestMatch = trimmed.match(/^Unknown quest "(.+)"\.$/);
+  if (unknownQuestMatch) {
+    return `Không tìm thấy nhiệm vụ "${unknownQuestMatch[1]}".`;
+  }
+
+  const questPeriodMismatchMatch = trimmed.match(
+    /^Quest "(.+)" does not belong to period (DAILY|WEEKLY)\.$/
+  );
+  if (questPeriodMismatchMatch) {
+    const periodLabel = questPeriodMismatchMatch[2] === 'DAILY' ? 'Hàng ngày' : 'Hàng tuần';
+    return `Nhiệm vụ "${questPeriodMismatchMatch[1]}" không thuộc chu kỳ ${periodLabel}.`;
+  }
+
+  const questAlreadyClaimedMatch = trimmed.match(
+    /^Quest "(.+)" reward has already been claimed\.$/
+  );
+  if (questAlreadyClaimedMatch) {
+    return `Phần thưởng nhiệm vụ "${questAlreadyClaimedMatch[1]}" đã được nhận trước đó.`;
+  }
+
+  const questExpiredMatch = trimmed.match(
+    /^Quest "(.+)" reward expired after period reset\.$/
+  );
+  if (questExpiredMatch) {
+    return `Phần thưởng nhiệm vụ "${questExpiredMatch[1]}" đã hết hạn sau khi qua chu kỳ mới.`;
+  }
+
+  const questNotCompletedMatch = trimmed.match(
+    /^Quest "(.+)" is not completed yet \((\d+)\/(\d+)\)\.$/
+  );
+  if (questNotCompletedMatch) {
+    return `Nhiệm vụ "${questNotCompletedMatch[1]}" chưa hoàn thành (${questNotCompletedMatch[2]}/${questNotCompletedMatch[3]}).`;
   }
 
   return trimmed;

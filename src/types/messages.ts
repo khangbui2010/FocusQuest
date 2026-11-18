@@ -7,6 +7,7 @@ import { BuildingInstance } from '../core/civilization/buildingTypes.ts';
 import { CivilizationState } from '../core/civilization/civilizationState.ts';
 import { SupportedLocale } from '../i18n/types.ts';
 import { MusicPlayerState, MusicTrack, RepeatMode } from './music.ts';
+import { QuestPeriod, QuestResetCountdown, QuestState } from './quests.ts';
 
 export type MessageAction =
   | 'START_SESSION'
@@ -33,6 +34,8 @@ export type MessageAction =
   | 'PLACE_BUILDING'
   | 'REMOVE_BUILDING'
   | 'EXPAND_LAND'
+  | 'GET_QUEST_STATE'
+  | 'CLAIM_QUEST_REWARD'
   | 'SET_LANGUAGE'
   | 'SET_CHIME_ENABLED'
   | 'SET_MUSIC_PLAYER_EXPANDED'
@@ -93,6 +96,11 @@ export interface ExpandLandPayload {
   origin: GridCoordinate;
 }
 
+export interface ClaimQuestRewardPayload {
+  period: QuestPeriod;
+  questId: string;
+}
+
 export interface SetLanguagePayload {
   language: SupportedLocale;
 }
@@ -149,6 +157,19 @@ export interface ExpandLandResponseData {
   cost: number;
 }
 
+export interface GetQuestStateResponseData {
+  questState: QuestState;
+  resetCountdown: QuestResetCountdown;
+  unclaimedCount: number;
+}
+
+export interface ClaimQuestRewardResponseData {
+  questState: QuestState;
+  economy: PlayerEconomy;
+  claimedCoins: number;
+  claimedXp: number;
+}
+
 export type ExtensionMessage =
   | { action: 'START_SESSION'; payload: StartSessionPayload }
   | { action: 'PAUSE_SESSION' }
@@ -174,6 +195,8 @@ export type ExtensionMessage =
   | { action: 'PLACE_BUILDING'; payload: PlaceBuildingPayload }
   | { action: 'REMOVE_BUILDING'; payload: RemoveBuildingPayload }
   | { action: 'EXPAND_LAND'; payload: ExpandLandPayload }
+  | { action: 'GET_QUEST_STATE' }
+  | { action: 'CLAIM_QUEST_REWARD'; payload: ClaimQuestRewardPayload }
   | { action: 'SET_LANGUAGE'; payload: SetLanguagePayload }
   | { action: 'SET_CHIME_ENABLED'; payload: SetChimeEnabledPayload }
   | { action: 'SET_MUSIC_PLAYER_EXPANDED'; payload: SetMusicPlayerExpandedPayload }
@@ -194,6 +217,7 @@ export interface MessageResponse<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;
+  errorCode?: string;
 }
 
 export interface FullSessionStateResponse {

@@ -15,7 +15,11 @@ import {
   MusicSetVolumePayload,
   MusicSetShufflePayload,
   MusicSetRepeatPayload,
+  ClaimQuestRewardPayload,
+  ClaimQuestRewardResponseData,
+  GetQuestStateResponseData,
 } from '../../types/messages.ts';
+import { QuestErrorCode, QuestPeriod, QuestState } from '../../types/quests.ts';
 import {
   LOFI_BASE_URL,
   LOFI_CATALOG_CACHE_TTL_MS,
@@ -56,6 +60,17 @@ import { isSupportedLocale } from '../../i18n/translator.ts';
 import { DomainNormalizer } from '../../core/profiles/domainNormalizer.ts';
 import { getLocalDateKey } from '../../core/utils/dateUtils.ts';
 import { addDaysToDateKey, isValidDateKey } from '../../core/stats/statsAggregator.ts';
+import { ALL_QUEST_DEFINITIONS, getQuestDefinition } from '../../core/quests/questCatalog.ts';
+import { getResetCountdown } from '../../core/quests/questDates.ts';
+import {
+  applyCompletedSession,
+  claimQuest,
+  countUnclaimed,
+  createInitialQuestState,
+  makeClaimLedgerKey,
+  rolloverQuestState,
+  toQuestOutcomeDelta,
+} from '../../core/quests/questEngine.ts';
 
 const rewardEngine = new RewardEngine();
 
@@ -227,6 +242,21 @@ let mockProfiles: FocusProfile[] = [
 // Fallback in-memory mock civilization state
 let mockCivilizationState: CivilizationState = createInitialCivilizationState();
 let mockGridMap: GridMap = GridMap.fromSnapshot(mockCivilizationState.grid);
+
+function createInitialSimulatedQuestState(nowMs: number = Date.now()): QuestState {
+  const todayKey = getLocalDateKey(nowMs);
+  const initial = createInitialQuestState(nowMs);
+  return applyCompletedSession(
+    initial,
+    {
+      completedDateKey: todayKey,
+      completedFocusMinutes: 25,
+    },
+    nowMs
+  );
+}
+
+let mockQuestState: QuestState = createInitialSimulatedQuestState();
 
 // Fallback in-memory mock Music Player state + dynamic online catalog cache + browser preview audio
 const PREVIEW_CATALOG_CACHE_KEY = 'fq_preview_music_catalog_cache';
@@ -771,6 +801,10 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
             mockState.economy.level = calculatePlayerLevel(mockState.economy.totalXP);
             mockState.lifetimeFocusMinutes =
               (mockState.lifetimeFocusMinutes ?? 0) + plannedFocusMinutes;
+            const questDelta = toQuestOutcomeDelta(completedSession, getLocalDateKey(now));
+            if (questDelta) {
+              mockQuestState = applyCompletedSession(mockQuestState, questDelta, now);
+            }
             syncSimulatedMusicWithSession();
             return { success: true, data: completedSession as unknown as T };
           }
@@ -1078,6 +1112,11 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         if (isCompletedSession) {
           mockState.todayStats.completedSessions += 1;
         }
+      }
+
+      const questDelta = toQuestOutcomeDelta(updatedSession, getLocalDateKey(now));
+      if (questDelta) {
+        mockQuestState = applyCompletedSession(mockQuestState, questDelta, now);
       }
 
       syncSimulatedMusicWithSession();
@@ -1709,6 +1748,124 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
       return { success: true, data: stats as unknown as T };
     }
 
+    case 'GET_QUEST_STATE': {
+      mockQuestState = rolloverQuestState(mockQuestState, now);
+      const data: GetQuestStateResponseData = {
+        questState: mockQuestState,
+        resetCountdown: getResetCountdown(now, mockQuestState),
+        unclaimedCount: countUnclaimed(mockQuestState, now),
+      };
+      return { success: true, data: data as unknown as T };
+    }
+
+    case 'CLAIM_QUEST_REWARD': {
+      const rawPayload = (message as { payload?: unknown }).payload;
+      if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload)) {
+        return {
+          success: false,
+          error: 'CLAIM_QUEST_REWARD requires payload with period and questId.',
+          errorCode: 'INVALID_QUEST_PAYLOAD' satisfies QuestErrorCode,
+        };
+      }
+      const raw = rawPayload as Record<string, unknown>;
+      if (raw.period !== 'DAILY' && raw.period !== 'WEEKLY') {
+        return {
+          success: false,
+          error: "CLAIM_QUEST_REWARD requires valid period ('DAILY' | 'WEEKLY').",
+          errorCode: 'INVALID_QUEST_PAYLOAD' satisfies QuestErrorCode,
+        };
+      }
+      if (
+        typeof raw.questId !== 'string' ||
+        !raw.questId.trim() ||
+        raw.questId.length > 64 ||
+        /[\r\n\t<>"]/.test(raw.questId)
+      ) {
+        return {
+          success: false,
+          error: 'CLAIM_QUEST_REWARD requires valid questId.',
+          errorCode: 'INVALID_QUEST_PAYLOAD' satisfies QuestErrorCode,
+        };
+      }
+      const period: QuestPeriod = raw.period;
+      const questId = raw.questId.trim();
+      if (!ALL_QUEST_DEFINITIONS.some((def) => def.id === questId)) {
+        return {
+          success: false,
+          error: `Unknown quest "${questId}".`,
+          errorCode: 'UNKNOWN_QUEST' satisfies QuestErrorCode,
+        };
+      }
+      const def = getQuestDefinition(period, questId);
+      if (!def) {
+        return {
+          success: false,
+          error: `Quest "${questId}" does not belong to period ${period}.`,
+          errorCode: 'QUEST_PERIOD_MISMATCH' satisfies QuestErrorCode,
+        };
+      }
+
+      const preRolloverState = mockQuestState;
+      const rolled = rolloverQuestState(preRolloverState, now);
+      mockQuestState = rolled;
+
+      const didRoll =
+        (period === 'DAILY' && rolled.dailyDateKey !== preRolloverState.dailyDateKey) ||
+        (period === 'WEEKLY' && rolled.weeklyStartKey !== preRolloverState.weeklyStartKey);
+      const priorEntry =
+        period === 'DAILY'
+          ? preRolloverState.daily[questId]
+          : preRolloverState.weekly[questId];
+
+      const claimRes = claimQuest(rolled, period, questId, now);
+      if (!claimRes.claimed) {
+        const entry = period === 'DAILY' ? rolled.daily[questId] : rolled.weekly[questId];
+        const periodDateKey = period === 'DAILY' ? rolled.dailyDateKey : rolled.weeklyStartKey;
+        const ledgerKey = makeClaimLedgerKey(period, periodDateKey, questId);
+
+        if (entry?.claimed || rolled.recentClaimedKeys.includes(ledgerKey)) {
+          return {
+            success: false,
+            error: `Quest "${questId}" reward has already been claimed.`,
+            errorCode: 'QUEST_ALREADY_CLAIMED' satisfies QuestErrorCode,
+          };
+        }
+
+        if (didRoll && priorEntry && priorEntry.progress >= priorEntry.target && !priorEntry.claimed) {
+          return {
+            success: false,
+            error: `Quest "${questId}" reward expired after period reset.`,
+            errorCode: 'QUEST_EXPIRED' satisfies QuestErrorCode,
+          };
+        }
+
+        const progress = entry?.progress ?? 0;
+        const target = entry?.target ?? def.target;
+        return {
+          success: false,
+          error: `Quest "${questId}" is not completed yet (${progress}/${target}).`,
+          errorCode: 'QUEST_NOT_COMPLETED' satisfies QuestErrorCode,
+        };
+      }
+
+      mockQuestState = claimRes.state;
+      const newTotalXP = Math.max(0, mockState.economy.totalXP + claimRes.xp);
+      mockState.economy = {
+        ...mockState.economy,
+        focusCoins: mockState.economy.focusCoins + claimRes.coins,
+        totalXP: newTotalXP,
+        level: calculatePlayerLevel(newTotalXP),
+      };
+
+      const data: ClaimQuestRewardResponseData = {
+        questState: mockQuestState,
+        economy: { ...mockState.economy },
+        claimedCoins: claimRes.coins,
+        claimedXp: claimRes.xp,
+      };
+      return { success: true, data: data as unknown as T };
+    }
+
     default:
       return { success: true, data: undefined as unknown as T };
   }
@@ -1796,6 +1953,27 @@ export async function getDailyStatsClient(): Promise<
 > {
   return sendExtensionMessage<Record<string, DailyStatRecord>>({
     action: 'GET_DAILY_STATS',
+  });
+}
+
+/**
+ * Typed client helper: fetch Quest progression, reset countdowns, and unclaimed count.
+ */
+export async function getQuestStateClient(): Promise<MessageResponse<GetQuestStateResponseData>> {
+  return sendExtensionMessage<GetQuestStateResponseData>({
+    action: 'GET_QUEST_STATE',
+  });
+}
+
+/**
+ * Typed client helper: claim reward for a completed Quest.
+ */
+export async function claimQuestRewardClient(
+  payload: ClaimQuestRewardPayload
+): Promise<MessageResponse<ClaimQuestRewardResponseData>> {
+  return sendExtensionMessage<ClaimQuestRewardResponseData>({
+    action: 'CLAIM_QUEST_REWARD',
+    payload,
   });
 }
 

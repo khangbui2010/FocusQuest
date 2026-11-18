@@ -22,6 +22,12 @@ import {
   getCellDecor,
 } from '../../src/ui/components/civilization/terrainDecor.ts';
 
+import {
+  buildTerrainBitmapPlan,
+  renderTerrainBitmap,
+  TerrainCanvasContext2D,
+} from '../../src/ui/components/civilization/terrainBitmapRenderer.ts';
+
 function extractCellSlice(html: string, coord: string): string {
   const start = html.indexOf(`data-cell-coord="${coord}"`);
   assert.ok(start > -1, `Expected cell ${coord} to exist in rendered HTML`);
@@ -33,7 +39,7 @@ function extractCellSlice(html: string, coord: string): string {
   return html.slice(start, Math.min(end, start + 1400));
 }
 
-test('UX-3: Locked forest cells render ground -> tree -> dark scrim using shared opacity & tunable tree factor', () => {
+test('UX-3 + UX-5: Locked forest cells render ground -> tree -> dark scrim uniformly into MapGridView bitmap & TerrainCellLayers', () => {
   assert.equal(LOCKED_FOREST_DARKEN_OPACITY, 0.44);
   assert.equal(LOCKED_FOREST_OVERLAY_OPACITY, LOCKED_FOREST_DARKEN_OPACITY);
   assert.equal(LOCKED_TREE_DARKEN_FACTOR, 1.0);
@@ -48,37 +54,59 @@ test('UX-3: Locked forest cells render ground -> tree -> dark scrim using shared
     })
   );
 
-  // Locate a locked forest cell inside the margin that definitely has a tree overlay
-  let treeCoord: string | null = null;
-  let clearingCoord: string | null = null;
-  for (let y = -8; y < 16 && (!treeCoord || !clearingCoord); y++) {
-    for (let x = -8; x < 16 && (!treeCoord || !clearingCoord); x++) {
+  // UX-5: MapGridView uses a single terrain bitmap canvas (zero per-cell TileImage DOM layers)
+  assert.ok(mapHtml.includes('data-testid="map-terrain-bitmap"'));
+  assert.equal(mapHtml.includes('<img'), false);
+
+  // Locate a locked forest cell & clearing cell inside the margin and verify canvas draw order:
+  // baseTile drawImage -> overlayTile drawImage -> dark scrim fillRect(0.44)
+  let treeCell: { x: number; y: number; col: number; row: number } | null = null;
+  let clearingCell: { x: number; y: number; col: number; row: number } | null = null;
+  for (let y = -8; y < 16 && (!treeCell || !clearingCell); y++) {
+    for (let x = -8; x < 16 && (!treeCell || !clearingCell); x++) {
       if (x >= 0 && x < 8 && y >= 0 && y < 8) continue;
       const decor = getCellDecor(x, y, false, TERRAIN_DECOR_SEED);
-      if (decor.overlayTile !== null && !treeCoord) treeCoord = `${x},${y}`;
-      if (decor.overlayTile === null && !clearingCoord) clearingCoord = `${x},${y}`;
+      if (decor.overlayTile !== null && !treeCell) treeCell = { x, y, col: x + 8, row: y + 8 };
+      if (decor.overlayTile === null && !clearingCell) clearingCell = { x, y, col: x + 8, row: y + 8 };
     }
   }
-  assert.ok(treeCoord, 'Expected at least one locked forest tree cell in margin');
-  assert.ok(clearingCoord, 'Expected at least one locked forest clearing cell in margin');
+  assert.ok(treeCell, 'Expected at least one locked forest tree cell in margin');
+  assert.ok(clearingCell, 'Expected at least one locked forest clearing cell in margin');
 
-  const treeSlice = extractCellSlice(mapHtml, treeCoord);
-  const firstTileIdx = treeSlice.indexOf('data-tile-index="');
-  const secondTileIdx = treeSlice.indexOf('data-tile-index="', firstTileIdx + 16);
-  const scrimIdx = treeSlice.indexOf('data-locked-forest="true"');
-  assert.ok(firstTileIdx > -1, 'Tree cell must render ground baseTile');
-  assert.ok(secondTileIdx > firstTileIdx, 'Tree cell must render tree overlayTile after baseTile');
-  assert.ok(scrimIdx > secondTileIdx, 'Dark scrim must render AFTER tree overlayTile');
-  assert.ok(
-    treeSlice.includes(`opacity:${LOCKED_FOREST_DARKEN_OPACITY}`),
-    `Dark scrim must use LOCKED_FOREST_DARKEN_OPACITY (${LOCKED_FOREST_DARKEN_OPACITY})`
-  );
+  const ops: Array<{ op: 'drawImage' | 'fillRect'; dx: number; dy: number; alpha: number }> = [];
+  const fakeCtx: TerrainCanvasContext2D = {
+    imageSmoothingEnabled: true,
+    fillStyle: '',
+    globalAlpha: 1,
+    drawImage(_img, _sx, _sy, _sw, _sh, dx, dy) {
+      ops.push({ op: 'drawImage', dx, dy, alpha: fakeCtx.globalAlpha });
+    },
+    fillRect(x, y) {
+      ops.push({ op: 'fillRect', dx: x, dy: y, alpha: fakeCtx.globalAlpha });
+    },
+  };
+  const plan = buildTerrainBitmapPlan({
+    minX: -8,
+    minY: -8,
+    cols: 24,
+    rows: 24,
+    seed: TERRAIN_DECOR_SEED,
+    isCellUnlocked: (cx, cy) => cx >= 0 && cx < 8 && cy >= 0 && cy < 8,
+  });
+  renderTerrainBitmap(fakeCtx, plan, {});
 
-  const clearingSlice = extractCellSlice(mapHtml, clearingCoord);
-  const clearingBaseIdx = clearingSlice.indexOf('data-tile-index="');
-  const clearingScrimIdx = clearingSlice.indexOf('data-locked-forest="true"');
-  assert.ok(clearingScrimIdx > clearingBaseIdx);
-  assert.ok(clearingSlice.includes(`opacity:${LOCKED_FOREST_DARKEN_OPACITY}`));
+  const treeOps = ops.filter((o) => o.dx === treeCell!.col * 16 && o.dy === treeCell!.row * 16);
+  assert.equal(treeOps.length, 3, 'Locked tree cell must execute base drawImage -> tree drawImage -> scrim fillRect');
+  assert.equal(treeOps[0].op, 'drawImage');
+  assert.equal(treeOps[1].op, 'drawImage');
+  assert.equal(treeOps[2].op, 'fillRect');
+  assert.equal(treeOps[2].alpha, LOCKED_FOREST_DARKEN_OPACITY);
+
+  const clearingOps = ops.filter((o) => o.dx === clearingCell!.col * 16 && o.dy === clearingCell!.row * 16);
+  assert.equal(clearingOps.length, 2, 'Locked clearing cell must execute base drawImage -> scrim fillRect');
+  assert.equal(clearingOps[0].op, 'drawImage');
+  assert.equal(clearingOps[1].op, 'fillRect');
+  assert.equal(clearingOps[1].alpha, LOCKED_FOREST_DARKEN_OPACITY);
 
   // Tuning tree factor (e.g. 0.7) works purely via constant/prop without structural rewrite
   const tunedOps = computeLockedForestOpacities(true, 0.44, 0.7);

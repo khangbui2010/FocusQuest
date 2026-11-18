@@ -1,102 +1,125 @@
-# BÁO CÁO NGHIỆM THU — MILESTONE 5B.5 / GIAI ĐOẠN 2a & ĐỒNG BỘ TÀI LIỆU
+# BÁO CÁO NGHIỆM THU — MILESTONE UX / GIAI ĐOẠN UX-5
 
-**Giai đoạn:** Milestone 5B.5 — Giai đoạn 2a *(Đồng bộ tài liệu + Dọn mô tả quy tắc 0.5x + Types, Schema v3 `fq_quests`, Migration v3 & Pure Quest Engine — CHƯA nối vào `SessionCoordinator`, `MessageHandler` hay UI)*  
+**Giai đoạn:** Milestone UX — Giai đoạn UX-5 *(Sửa dứt điểm khe sáng / lưới mờ giữa các ô địa hình trên bản đồ bằng Composite Terrain Canvas Một Tấm — tách biệt hoàn toàn với 5B.5 / LOFI)*  
 **Ngày hoàn thành:** 2026-11-18  
-**File sao lưu báo cáo cũ:** `/respond_2a_prev.md` *(sao lưu từ báo cáo UX-4; `/respond_ux4_prev.md` vẫn giữ nguyên)*  
-**Trạng thái:** Đã hoàn tất kiểm định (`574 / 574` tests PASS 3/3 lần, Build PASS, Lint PASS) — **DỪNG chờ duyệt Giai đoạn 2a**
+**File sao lưu báo cáo cũ:** `/respond_ux5_prev.md` *(sao lưu từ báo cáo Stage 2a trước đó; các bản sao lưu lịch sử khác vẫn giữ nguyên)*  
+**Trạng thái:** `579 / 579` tests PASS 3/3 lần | `npm run lint` PASS | `npm run build` PASS — **CHƯA KIỂM CHỨNG TRỰC QUAN TRÊN CHROME THẬT** — **DỪNG chờ duyệt UX-5**
 
 ---
 
-## 1. BẤT BIẾN & PHẠM VI ĐƯỢC BẢO TOÀN
+## 1. BƯỚC 0 — ĐIỀU TRA NGUYÊN NHÂN GỐC & RÀNG BUỘC THỰC TẾ
 
-- **Toàn bộ bất biến lõi giữ nguyên 100%:** Zero Passive Income, All-or-Nothing (Pomodoro Countdown), Allowlist Lock, công thức thưởng Coins/XP & CoinBonus, độ chính xác IEEE-754 trong `chrome.storage`, và nút Upgrade công trình vẫn khóa `"Milestone 5C"`.
-- **Biên kiến trúc Giai đoạn 2a được giữ chặt:**
-  - Tuyệt đối **không** sửa `StorageManager.commitSessionOutcomeInternal`, `SessionCoordinator` (trừ JSDoc của `handleExtensionDisabledRecovery` ở mục dọn 0.5x), `MessageHandler`, `extensionClient.ts` hay bất kỳ component UI nào.
-  - Pure Quest Engine (`src/core/quests/*.ts`) đạt `0` lời gọi `Date.now()` và `0` lời gọi `Math.random()`.
-  - Migration v3 (`v3_questsSchema.ts`) idempotent, `0` backfill giả dữ liệu phiên cũ, và giữ tương thích hoàn toàn với các test v1/v2 hiện có.
+### 1.1. Vị trí phát sinh lỗi thực tế trong code (trước UX-5)
+1. **Hàng nghìn DOM node cắt riêng từng ô (`MapGridView.tsx` & `TileImage.tsx`):**
+   - Trong `MapGridView.tsx`, mỗi ô trong lưới `24×24` (`576` ô ban đầu, hoặc lớn hơn khi mở rộng chunk `4×4`) dựng một `<GridCell>` bọc `<TerrainCellLayers>` gồm 2–3 `<TileImage>` (`TileImage.tsx:72-99`, mỗi ô là `<span className="... overflow-hidden">` kèm `<img style={{ position: 'absolute', left: -col * size, top: -row * size }} />`) và thẻ phủ tối `div[data-locked-forest]` — tổng cộng ~`2,300–2,800` node DOM xếp cạnh nhau trên CSS Grid.
+2. **Các lớp biến đổi tọa độ lồng nhau quanh sân khấu bản đồ (`MapGridView.tsx:448-465`):**
+   - Khung bao `MapGridView` dùng `flex items-center justify-center` (`MapGridView.tsx:448`), căn giữa phần tử `data-testid="map-grid-stage"` có `transform: translate(${Math.round(pan.x)}px, ${Math.round(pan.y)}px) scale(${zoom})`, `transformOrigin: 'center center'`, cùng class `transition-transform duration-150 ease-out shadow-sm`.
+   - `transition-transform duration-150 ease-out` luôn bật kể cả trong lúc người dùng đang nhấn giữ chuột để kéo (`isDragging`) hoặc xoay con lăn zoom (`handleWheel`).
 
----
+### 1.2. Chứng minh số học vì sao bản UX-3 vẫn hở khe ở DPR / Zoom / Pan thực tế
+Bản UX-3 chỉ ép `CELL_SIZE * zoom` và `16 * zoom` thành số nguyên **pixel CSS** (`snapZoomToIntegerPixels` làm tròn theo mẫu số `ZOOM_PIXEL_DENOMINATOR = 16`). Tuy nhiên trình duyệt (Blink / Skia) raster hóa hình học từng node DOM theo **pixel vật lý = pixel CSS × `devicePixelRatio` (`dpr`)**:
+- **Zoom nguyên pixel CSS × DPR lẻ (Windows 125% / 150% / 175% / Zoom trình duyệt):**
+  - Với `zoom = 11/16 = 0.6875` → `cellCss = 32 × 0.6875 = 22` CSS px (nguyên):
+    - Trên `dpr = 1.25` (125%): `22 × 1.25 = 27.5` physical px *(lẻ `.5` px)*.
+    - Trên `dpr = 1.75` (175%): `22 × 1.75 = 38.5` physical px *(lẻ `.5` px)*.
+  - Với `zoom = 9/16 = 0.5625` → `cellCss = 18` CSS px (nguyên):
+    - Trên `dpr = 1.25`: `18 × 1.25 = 22.5` physical px; trên `dpr = 1.75`: `18 × 1.75 = 31.5` physical px.
+  - Ở bất kỳ giá trị nào mà `cellCss` không chia hết cho `4` (trên 125%/175%) hoặc `2` (trên 150%/250%), kích thước mỗi ô `GridCell` trong `screen space` trở thành số thập phân.
+- **Pan & Flex centering ở DPR khác 1 + nội suy `transition-transform`:**
+  - Khi người dùng kéo `pan.x = 1` CSS px (số lẻ từ `Math.round`), tại `dpr = 1.25` độ dời thành `1.25` physical px; tại `dpr = 1.5` thành `1.5` physical px.
+  - `flex items-center justify-center` đặt stage có kích thước `768×768` vào viewport chiều cao/rộng lẻ (ví dụ `427px` → offset `(427 - 768) / 2 = -170.5` CSS px).
+  - Trong `150ms` chạy `transition-transform`, Chromium nội suy ma trận `translate`/`scale` qua hàng loạt số thực liên tục mỗi khung hình.
+- **Hệ quả:** Mỗi `<span>` có `overflow: hidden` được Blink làm tròn hộp clip độc lập theo pixel vật lý → ranh giới giữa ô `c` và `c + 1` thường chênh `1` pixel vật lý, làm lọt màu nền container (`bg-slate-100` / `bg-slate-950`) thành **khe sáng dọc/ngang hoặc lưới mờ lúc ẩn lúc hiện** đúng như hiện tượng quan sát trên Chrome thật.
 
-## 2. PHẦN A — ĐỒNG BỘ TÀI LIỆU & TRẠNG THÁI NGHIỆM THU
-
-1. **`README.md`:**
-   - Cập nhật thông số bộ test lên `574/574`, sửa cụm `"Under 30 min (< 30 min)"`, bổ sung điểm nhấn LOFI Offscreen Streaming, 5-tab map-first, Stats SVG Engine, UX-4 formatting, nền tảng Quest Engine Stage 2a và mục `Roadmap` (`Stage 2b -> 5c -> Awards -> Milestone 5C`).
-   - Ghi rõ phạm vi kiểm chứng: automated tests chạy trên Node.js (`tsx --test`) với React SSR (`renderToString`) và mock Chrome adapters; đồng thời các luồng lõi (`400×600` popup, 5-tab, bản đồ/rừng/lớp tối, hoạt ảnh rìu chém, `blocked.html` DNR, `chrome.i18n`, `manifest`, Offscreen Audio kể cả Pause > 30s, fetch catalog nhạc) đã được nghiệm thu thủ công trên Chrome thật (`>= 116`).
-2. **`ARCHITECTURE.md` (`Version: 1.5.1`):** Cập nhật Schema v3 (`fq_quests` qua `v3_questsSchema.ts`) và ghi chú rõ hai message `GET_QUEST_STATE` / `CLAIM_QUEST_REWARD` chưa nối ở 2a (chờ Stage 2b).
-3. **`PRODUCT_SPEC.md` (`1.4.2-synced`):** Bổ sung `§13` tóm tắt đặc tả Quest Engine Stage 2a (đánh dấu rõ chưa nối vào runtime/UI).
-4. **`PROJECT_STATUS.md`:**
-   - Cập nhật trạng thái **ĐÃ DUYỆT** cho toàn bộ các giai đoạn trước: **UX-1, UX-2, UX-3, UX-4, LOFI-1, LOFI-1b, LOFI-2, 5B.5 Giai đoạn 1b & Giai đoạn 3**.
-   - Bỏ yêu cầu nghiệm thu Giai đoạn 3 & Giai đoạn 1b khỏi mục Bước tiếp theo (`§5`).
-   - Cập nhật `§3` và `§4.2` đúng thực tế: giữ rõ automated tests chạy qua React SSR & mock adapters, đồng thời chuyển **popup `400×600` (thanh 5 tab, bản đồ, rừng, lớp tối), hoạt ảnh rìu chém, `blocked.html` với DNR, `chrome.i18n`, `manifest`, Offscreen Audio (kể cả Pause > 30s) và fetch catalog nhạc** sang **đã nghiệm thu thủ công trên Chrome thật theo xác nhận của người dùng** (chỉ còn Quest Engine / Schema v3 là chưa nối UI vì thuộc 2b/5c).
-
----
-
-## 3. DỌN QUY TẮC 0.5x *(CHỈ TÀI LIỆU, COMMENT & TÊN TEST — KHÔNG ĐỔI LOGIC)*
-
-Theo quyết định đã chốt: quy tắc *"phạt 0.5x cho interval dở dang"* là **SAI và đã bị loại bỏ**. Quy tắc đúng (`PRODUCT_SPEC.md §5.3 & §9`): pha tập trung trong Pomodoro bị bỏ dở nhận **0 Coins / 0 XP**, nhưng số phút tập trung thực tế của interval đó vẫn được ghi vào Daily Stats.
-
-- **Các vị trí đã rà & cập nhật chính xác:**
-  1. `PROJECT_STATUS.md §2.4` (dòng `132`): Bỏ cụm *"tính phạt 0.5x cho interval dở dang nếu gián đoạn hợp lệ"*, thay bằng *"chỉ thưởng các interval đã hoàn thành trọn vẹn; interval đang dở dang không được thưởng nhưng số phút vẫn ghi vào Daily Stats (khớp `PRODUCT_SPEC.md` §5.3 & §9; đã loại bỏ mọi mô tả sai về \"phạt 0.5x\")"*.
-  2. `src/background/sessionCoordinator.ts` (`handleExtensionDisabledRecovery`, dòng `1658–1663`): Xóa khối JSDoc bị lặp hai lần và viết lại 1 khối JSDoc duy nhất đúng hành vi thực tế hiện tại trong thân hàm (`0` Coins/XP cho cả 4 chế độ; ghi nhận số phút tập trung hợp lệ vào Daily Stats ở Countdown, Pomodoro Countdown, Stopwatch và Pomodoro Stopwatch khớp `PRODUCT_SPEC §9`).
-  3. `__tests__/background/sessionIntegrity.test.ts` (dòng `146`): Đổi tiêu đề `Test 4` từ `... (0.5x penalty)` thành `"Session Integrity [Test 4]: Extension Disable/Re-enable interrupts Countdown and Stopwatch with 0 rewards"` (giữ nguyên 100% assertions; comment ở dòng `172` đã là `"// B. Stopwatch: 0 reward when extension disabled"` nên giữ nguyên).
-- **Đối chiếu sạch sẽ:** Các kết quả grep còn lại trong repo chỉ là kiểm tra chống hồi quy tại `__tests__/core/rewardEngine.test.ts:137-138` (`Must not award 50% penalty; must be 0 Coins/XP`), thuật ngữ lifecycle chung, và các báo cáo `respond_*.md` lịch sử (được giữ nguyên).
-- **Xác nhận baseline:** Trước khi thêm `+13` tests của Giai đoạn 2a, toàn bộ bộ test giữ nguyên `561 / 561 PASS` (`0` thay đổi hành vi runtime).
+### 1.3. Đối chiếu hiệu ứng phụ thuộc (Rìu chém 680ms, Hover, Buildings, Chunk Frames, `#sprites`)
+- **Rìu chém mở đất (`CivilizationScreen.tsx:120-134`, `expansionReveal.ts:7-9`):** Khi vừa mở chunk mới, `CivilizationScreen` giữ `unrevealedChunkOrigin` trong `680ms` (`EXPANSION_IMPACT_MS = 680`) rồi mới đặt về `null` khi rìu chạm đất và chạy rung `fq-map-shake-active` (`340ms`). Vì `MapGridView.tsx:263-271` đưa `unrevealedChunkOrigin` vào `isCellUnlockedFn`, `<canvas>` giữ 16 ô chunk mới ở trạng thái rừng tối tới đúng mốc `680ms`, rồi đổi `contentKey` để vẽ lại 1 lần duy nhất thành đất mở — giữ nguyên 100% nhịp điệu hoạt ảnh mà không có bất kỳ khe ô nào kể cả khi rung map.
+- **Lớp tương tác & UI phía trên (`MapGridView.tsx:490-700`):** Toàn bộ `hover:after:bg-emerald-300/35`, placement ghost, `PixelSprite` công trình (`z-10`), khung Chunk (`border-emerald-500/35`, `z-[2]`), nút chunk mở rộng (`z-20`) và toolbar zoom giữ nguyên vị trí tọa độ trên `map-grid-stage`.
 
 ---
 
-## 4. PHẦN B — TRIỂN KHAI GIAI ĐOẠN 2a (TYPES, SCHEMA v3 & PURE QUEST ENGINE)
+## 2. PHẠM VI BẢO TOÀN & GIẢI PHÁP ĐÃ TRIỂN KHAI
 
-### 4.1. Types & Storage Keys (`B1`)
-- **`src/types/quests.ts` (mới):** Định nghĩa `QuestPeriod` (`'DAILY' | 'WEEKLY'`), `QuestMetric` (`'COMPLETED_SESSIONS' | 'DAILY_FOCUS_MINUTES' | 'WEEKLY_ACTIVE_DAYS' | 'WEEKLY_LONG_SESSIONS' | 'WEEKLY_COMPLETED_SESSIONS'`), `QuestDefinition`, `QuestProgress`, `QuestStreak`, `QuestState`, `QuestOutcomeDelta`, `QuestResetCountdown`, `ClaimQuestResult`, `CURRENT_QUEST_STATE_VERSION = 1`, `MAX_RECENT_CLAIMED_KEYS = 14`, `MAX_PROCESSED_PERIOD_KEYS = 14`.
-- **`src/types/storageSchema.ts` & `src/types/index.ts`:** Thêm `quests?: QuestState` vào `StorageSchema` và re-export `./quests.ts`.
-- **`src/storage/storageKeys.ts`:** Bổ sung `STORAGE_KEYS.QUESTS = 'fq_quests'`.
+- **Bất biến giữ nguyên 100%:** Thuật toán đặt cây & 6 mẫu M1–M6 (`getCellDecor`, `TERRAIN_DECOR_SEED`, `computeLockedForestOpacities`, `LOCKED_FOREST_DARKEN_OPACITY = 0.44` trong `terrainDecor.ts`), logic mở đất, đặt/gỡ công trình, `GridMap`, civilization core, schema, kinh tế, `SessionCoordinator`, LOFI music, và Quest Engine Stage 2a hoàn toàn **không đụng**.
 
-### 4.2. Pure Quest Engine (`B2` — `src/core/quests/`)
-- **`src/core/quests/questCatalog.ts`:**
-  - **3 Daily Quests** (tổng tối đa cố định `40 Coins · 100 XP` / ngày):
-    1. `daily_first_spark` — Hoàn thành `1` phiên (`10 Coins · 25 XP`).
-    2. `daily_steady_rhythm` — Tổng `50` phút tập trung trong ngày (`15 Coins · 35 XP`).
-    3. `daily_double_tap` — Hoàn thành `2` phiên (`15 Coins · 40 XP`).
-  - **3 Weekly Quests** 3 trục trực giao (tổng tối đa cố định `150 Coins · 370 XP` / tuần):
-    1. `weekly_habit_builder` — Có `>= 4` ngày hoạt động trong tuần (`50 Coins · 120 XP`).
-    2. `weekly_deep_diver` — Hoàn thành `3` phiên sâu `>= 45` phút (`50 Coins · 125 XP`).
-    3. `weekly_tenacity_10` — Hoàn thành `10` phiên trong tuần (`50 Coins · 125 XP`).
-  - Hệ số & CoinBonus **không** nhân thêm vào phần thưởng nhiệm vụ (flat reward cố định).
-- **`src/core/quests/questDates.ts`:** Tái sử dụng `statsAggregator.ts` cho số học lịch Gregory thuần (`getLocalWeekStartKeyFromDateKey` tìm Thứ Hai đầu tuần an toàn qua mốc giao năm `2026-12-31 → 2027-01-01` và năm nhuận `29/02`; `getResetCountdown` tính chính xác mili-giây tới `00:00` ngày mới & Thứ Hai kế tiếp).
-- **`src/core/quests/questEngine.ts` & `index.ts`:**
-  - `createInitialQuestState`, `sanitizeQuestState` (tự phục hồi trạng thái corrupt mà không crash).
-  - `rolloverQuestState`: Đóng/mở kỳ ngày & tuần mới, cập nhật streak khi có phiên hoạt động, **bảo vệ chống lùi đồng hồ hệ thống** (anti-clock-rollback guard) và dọn bộ nhớ `recentClaimedKeys` / `processedDayKeys` / `processedWeekKeys` theo ring-buffer tối đa `14` mục.
-  - `applyCompletedSession`, `canClaim`, `claimQuest` (Manual Claim, chặn nhận 2 lần cùng kỳ kể cả sau rollover), `countUnclaimed`.
-  - `toQuestOutcomeDelta`: Ánh xạ đúng All-or-Nothing — Pomodoro Countdown chỉ tính khi `COMPLETED`, Pomodoro Stopwatch chỉ cộng `completedFocusCount × intervalDuration` khi có ít nhất 1 interval trọn vẹn (không cộng interval dở dang).
+### 2.1. Module vẽ Bitmap tổng hợp (`src/ui/components/civilization/terrainBitmapRenderer.ts` — MỚI)
+- **`buildTerrainBitmapPlan`:** Duyệt qua toàn bộ lưới `(cols × rows)` bắt đầu từ `(minX, minY)`, gọi `getCellDecor(gx, gy, isUnlocked, seed, isCellUnlocked)` và tạo **`contentKey`** chỉ từ `{ seed, minX, minY, cols, rows, darkenOpacity, treeDarkenFactor, unlockedBits }` — tuyệt đối không chứa trạng thái pan/zoom.
+- **`renderTerrainBitmap`:** Dựng một bitmap nguyên kích thước `(cols × 16) × (rows × 16)` px:
+  - Ép `ctx.imageSmoothingEnabled = false`, `ctx.clearRect?.(0, 0, bitmapWidth, bitmapHeight)`.
+  - Vẽ từng ô tại đúng tọa độ nguyên `(col * 16, row * 16, 16, 16)` theo đúng thứ tự lớp UX-3:
+    1. Nền đất (`baseTile` từ `tilemap_packed.png` qua `getTileSourceCoords`, hoặc màu phẳng `FALLBACK_TERRAIN_COLORS` nếu `tileSheet === null`).
+    2. Lớp bù nền tùy chọn (`opacities.groundUnderOverlayOpacity`) với `#020617` (`LOCKED_FOREST_SCRIM_COLOR`, xác minh khớp `--color-slate-950` trong Tailwind CSS v4).
+    3. Lớp phủ cây / bụi / mầm / nấm (`overlayTile`, hỗ trợ `treeBrightnessFactor` nếu tinh chỉnh `LOCKED_TREE_DARKEN_FACTOR < 1`).
+    4. Lớp phủ tối trên cùng (`opacities.topScrimOpacity`, mặc định `0.44`) đè đồng đều lên cả nền và cây.
+- **`renderTerrainBitmapIfNeeded`:** So sánh `${plan.contentKey}:${sheet ? 'sheet' : 'fallback'}`, **chỉ vẽ lại khi nội dung địa hình hoặc trạng thái tải ảnh thay đổi** (kéo/zoom trả về `drawn: false`).
+- **Tải ảnh singleton (`getCachedTinyTownTileSheet`, `loadTinyTownTileSheet`):** Tải `tilemap_packed.png` tối đa 1 lần mỗi vòng đời trang, an toàn SSR (`typeof Image === 'undefined'`), xử lý fallback màu phẳng không crash khi lỗi ảnh.
 
-### 4.3. Schema v3, Migration v3 & Storage Accessors (`B3`)
-- **`src/storage/migrations/v3_questsSchema.ts` (mới):** Nâng v2 → v3 bằng cách khởi tạo `fq_quests` sạch (`sanitizeQuestState` nếu đã có sẵn dữ liệu hợp lệ/corrupt), `0` backfill giả phiên lịch sử.
-- **`src/storage/migrations/migrationRunner.ts`:** Nâng `CURRENT_SCHEMA_VERSION = 3` và đăng ký `v3_questsSchema` (các test v1/v2 cũ không bị ảnh hưởng).
-- **`src/storage/storageManager.ts`:** Thêm `getQuests`, `setQuests`, `updateQuests` (tự sanitize khi đọc dữ liệu corrupt). **Không đụng** `commitSessionOutcomeInternal`.
+### 2.2. Component `<TerrainBitmapCanvas>` dùng chung (`src/ui/components/civilization/TerrainBitmapCanvas.tsx` — MỚI)
+- Render đúng 1 thẻ `<canvas>` kích thước buffer gốc `bitmapWidth × bitmapHeight` (`384×384` với bản đồ `24×24`, `256×176` với mẫu gallery `16×11`), kích thước hiển thị CSS `cols * cellSize × rows * cellSize` cùng `imageRendering: 'pixelated'`, `data-terrain-key={plan.contentKey}`, và quản lý cờ `cancelled` khi unmount trong lúc ảnh đang tải.
 
-### 4.4. Bộ Kiểm Thử Mới (`B4` — `+13` tests)
-- **`__tests__/core/questEngine.test.ts` (9 tests):** Khớp trần thưởng 40/100 & 150/370, rollover qua giao năm & `29/02`, tiến độ 6 quest + Manual Claim + chặn double-claim, 3 trục trực giao weekly, hết hạn claim sau rollover, anti-clock-rollback + giữ ring-buffer `14` phần tử, quy tắc Streak, ánh xạ 4 mode `toQuestOutcomeDelta`, kiểm tra tĩnh `0` `Date.now()`/`Math.random()` & tự vá state corrupt.
-- **`__tests__/storage/v3Migration.test.ts` (4 tests):** Bảo toàn Economy/Civilization/Profiles/Stats/Settings khi nâng v2 → v3 & `0` backfill, nâng từ schema rỗng/v1 → v3, idempotent & vá `fq_quests` corrupt, và kiểm chứng `StorageManager` + hồi quy `SessionCoordinator` (Coins/XP/Level/DailyStats giữ nguyên 100%, `fq_quests` không bị chạm).
+### 2.3. Tái cấu trúc `MapGridView.tsx`
+- Thay toàn bộ cây `<TerrainCellLayers>` / `<TileImage>` trong `GridCell` (`MapGridView.tsx:108-148`, `477-513`) bằng `<TerrainBitmapCanvas testId="map-terrain-bitmap" ... />` đặt ở đáy `map-shake-layer`, bên trên là lưới ô tương tác trong suốt `<div data-testid="map-interaction-grid">` chỉ chứa thuộc tính `data-cell-coord`, `data-unlocked`, hover highlight (`hover:after:bg-emerald-300/35`), cursor và click handler (`0` thẻ `<img>` địa hình).
+- Export `getMapStageClassName(isDragging, isZoomTransitionActive)` (`MapGridView.tsx:88-96`): gỡ bỏ `shadow-sm` khỏi stage, tắt hoàn toàn `transition-transform` khi kéo chuột (`isDragging === true`), ở trạng thái tĩnh và khi dùng con lăn (`handleWheel`); chỉ kích hoạt ngắn `160ms` khi người dùng chủ động bấm nút zoom `+` / `-` / `Reset` / `Recenter` (và hủy ngay lập tức trong `handleMouseDown`).
+
+### 2.4. Khối đối chiếu trong `#sprites` (`src/ui/components/civilization/SpriteGallery.tsx`)
+- Giữ nguyên 100% toàn bộ khối xem trước DOM hiện có (kể cả `data-testid="gallery-locked_forest_16x11"`), tách `GALLERY_16X11_IS_UNLOCKED`, và bổ sung khối `data-testid="gallery-terrain_bitmap_16x11"` (`"Map terrain bitmap (16×11 Locked Forest · UX-5 Single Canvas)"`) dùng chung `<TerrainBitmapCanvas>` vẽ đúng vùng `16×11` `(-8,-8)` để người dùng đối chiếu trực tiếp DOM grid phía trên và Canvas tổng hợp phía dưới trong `#sprites`.
 
 ---
 
-## 5. KẾT QUẢ KIỂM ĐỊNH THỰC TẾ (VERIFIED REAL OUTPUTS)
+## 3. DANH SÁCH FILE THAY ĐỔI & TEST CŨ ĐÃ CẬP NHẬT
+
+### 3.1. Code sản phẩm (Production)
+- **Tạo mới:**
+  - `src/ui/components/civilization/terrainBitmapRenderer.ts`
+  - `src/ui/components/civilization/TerrainBitmapCanvas.tsx`
+- **Chỉnh sửa:**
+  - `src/ui/components/civilization/MapGridView.tsx`
+  - `src/ui/components/civilization/SpriteGallery.tsx`
+- **Tài liệu:**
+  - `ARCHITECTURE.md` (`Version: 1.5.2`, cập nhật §6 kiến trúc UX-5 Composite Terrain Canvas)
+  - `PROJECT_STATUS.md` (bổ sung mục UX-5, cập nhật số liệu thực tế & ranh giới kiểm chứng Chrome)
+  - `respond_ux5_prev.md` (sao lưu báo cáo Stage 2a cũ), `respond.md` (báo cáo này)
+
+### 3.2. Bộ kiểm thử mới & Các test DOM-tile cũ buộc phải cập nhật
+- **Thêm mới (`+5` tests) — `__tests__/ui/ux5TerrainBitmap.test.ts`:**
+  1. Kiểm toán từng lệnh `drawImage` / `fillRect` trên `24×24`: tọa độ đích nguyên `(col*16, row*16, 16, 16)`, `0` khe hở/trùng lặp, thứ tự vẽ `nền → cây → scrim #020617` khớp `LOCKED_FOREST_DARKEN_OPACITY = 0.44` và `computeLockedForestOpacities(treeFactor=0.7)`, `imageSmoothingEnabled = false`, deterministic 2 lần liên tiếp.
+  2. Guard chống vẽ thừa (`renderTerrainBitmapIfNeeded` trả `drawn: false` khi `contentKey` giữ nguyên qua pan/zoom, vẽ lại khi mở chunk) & fallback màu phẳng khi `tileSheet = null`.
+  3. SSR & tương tác: `MapGridView` idle/placement/expansion có đúng 1 `<canvas data-testid="map-terrain-bitmap">`, `0` `<img>` địa hình, `image-rendering:pixelated`, giữ đủ `hover:after:bg-emerald-300/35` / công trình / khung chunk / slot mở đất / `map-controls-toolbar`, `getMapStageClassName` tắt `transition-transform` khi kéo, không có `shadow-sm`, và `SpriteGallery` có đủ cả 2 khối `16×11` đối chiếu.
+  4. Chứng minh số học qua ma trận `DPR [1, 1.25, 1.5, 1.75, 2, 2.5, 3]` × `zoom [0.375..2.0 + computeExpansionFitZoom]` × `pan [0, 1, -17, 43]`: các ô DOM cũ lệch fractional physical px (`22*1.25 = 27.5`), trong khi mọi ô trong bitmap nối khít `tile.dx + tile.dw === right.dx` độc lập với DPR/zoom/pan.
+  5. Tích hợp `GridMap`: mở rộng chunk `{ x: 8, y: 0 }` làm đổi `contentKey` sạch sẽ và mở sáng đúng ô góc chunk mới.
+- **Cập nhật 4 test DOM-tile cũ trên `MapGridView` (do `MapGridView` không còn render `TileImage` / `<img>` / `div[data-locked-forest]` cho từng ô; riêng các test của `SpriteGallery` & `TerrainCellLayers` giữ nguyên):**
+  1. `__tests__/ui/ux3MapAndForestUi.test.ts` (Test 1): đổi từ tìm chuỗi HTML `data-tile-index` / `data-locked-forest` trong `MapGridView` sang kiểm tra `<canvas data-testid="map-terrain-bitmap">`, `0` `<img>` trong `MapGridView`, và xác minh thứ tự vẽ canvas `drawImage → drawImage → fillRect(0.44)` qua `renderTerrainBitmap` (giữ nguyên các assertion `TerrainCellLayers` và `SpriteGallery`).
+  2. `__tests__/ui/terrainDecor.test.ts` (dòng `472–502`): đổi kiểm tra `data-locked-forest="true"` / `<TileImage>` trong HTML của `MapGridView` sang kiểm tra `<canvas data-testid="map-terrain-bitmap">` `width="384" height="384" pixelated`, `0` `<img>`, và kiểm tra trực tiếp `buildTerrainBitmapPlan` tại `(-8,-8)` tối + không có tile giải nghệ `27/28` (các kiểm tra `SpriteGallery` ngay sau đó giữ nguyên).
+  3. `__tests__/ui/spriteRegistry.test.ts` (dòng `248–251`, `397–405`): thay assertions URL `tilemap_packed.png` & `data-locked-forest="true"` trên `MapGridView` bằng `data-testid="map-terrain-bitmap"`, `image-rendering:pixelated`, `:0.44:` trong `data-terrain-key`, và `0` `<img>`.
+  4. `__tests__/ui/civilizationView.test.ts` (dòng `311–312`): thay assertion `data-locked-forest="true"` trên `MapGridView` bằng `data-testid="map-terrain-bitmap"` kèm `data-unlocked="false"`.
+
+---
+
+## 4. KẾT QUẢ KIỂM ĐỊNH THỰC TẾ (VERIFIED REAL OUTPUTS)
 
 - **`npm run lint` (`tsc --noEmit`):** **PASS** (`Exit code 0`, `0` errors).
-- **`npm run clean && npm run build`:** **PASS** (`Vite v8.3.8`, `1,746 modules transformed`, **`727ms`**, tổng dung lượng `dist/`: **`1,089,594 B`**):
-  - `dist/index.html`: `716 B` | `dist/assets/popup-07l23r0d.js`: `765,071 B` (`765.07 kB`, gzip: `201.50 kB`) | `dist/assets/popup-D9z-9pA-.css`: `88,298 B` (`88.29 kB`, gzip: `13.79 kB`)
-  - `dist/assets/translator-B5-w4v6G.js`: `52,477 B` (`52.47 kB`) | `dist/assets/statsAggregator-C5H9LvvS.js`: `55,154 B` (`55.15 kB`) | `dist/assets/storageKeys-C4hhw6ET.js`: `398 B` (`0.39 kB`)
-  - `dist/background.js`: `93,016 B` (`93.01 kB`, gzip: `20.37 kB`) | `dist/offscreen.js`: `3,878 B` (`3.87 kB`) | `dist/blocked.js`: `1,321 B` (`1.32 kB`)
-  - `dist/manifest.json`: `984 B` | `dist/offscreen.html`: `264 B` | `dist/blocked.html`: `1,810 B` | `dist/_locales/{en,vi}/messages.json`: `382 B` / `440 B`
+- **`npm run clean && npm run build`:** **PASS** (`Vite v8.3.8`, `1,748 modules transformed`, **`643ms`**, tổng dung lượng tệp `dist/`: **`1,095,217 B`**):
+  - **So sánh bundle `popup` Trước UX-5 (Stage 2a) → Sau UX-5:**
+    - `popup` JS: `765,071 B` (`765.07 kB`, gzip `201.50 kB`) → **`770,675 B` (`770.67 kB`, gzip `203.30 kB`)** (`+5,604 B` / `+5.60 kB`).
+    - `popup` CSS: `88,298 B` (`88.29 kB`, gzip `13.79 kB`) → **`88,317 B` (`88.31 kB`, gzip `13.80 kB`)** (`+19 B` / `+0.02 kB`).
+  - Các artifacts khác giữ nguyên: `dist/background.js` (`93,016 B` / `93.01 kB`), `dist/offscreen.js` (`3,878 B` / `3.87 kB`), `dist/blocked.js` (`1,321 B` / `1.32 kB`), `dist/assets/translator-B5-w4v6G.js` (`52,477 B`), `dist/assets/statsAggregator-C5H9LvvS.js` (`55,154 B`), `dist/assets/storageKeys-C4hhw6ET.js` (`398 B`), `dist/manifest.json` (`984 B`), `dist/index.html` (`716 B`).
 - **`npm test` — chạy 3 lần liên tiếp (sau toàn bộ chỉnh sửa cuối):**
-  - **Lần 1:** `574 / 574 PASS` (`0` fail, `0` skipped, `0` cancelled, `16,073.80 ms`, Exit `0`).
-  - **Lần 2:** `574 / 574 PASS` (`0` fail, `0` skipped, `0` cancelled, `15,952.22 ms`, Exit `0`).
-  - **Lần 3:** `574 / 574 PASS` (`0` fail, `0` skipped, `0` cancelled, `16,633.53 ms`, Exit `0`).
-  - *Phạm vi test:* Automated tests chạy trên Node.js qua React SSR (`renderToString`) và mock Chrome adapters; các luồng UI/extension hiện có (popup `400×600`, thanh 5 tab, bản đồ/rừng/lớp tối, hoạt ảnh rìu chém, `blocked.html` DNR, `chrome.i18n`, `manifest`, Offscreen Audio kể cả Pause > 30s và fetch catalog nhạc) đã có **nghiệm thu thủ công trên Chrome thật** bởi người dùng. Phần Quest Engine Stage 2a chưa nối vào UI/background nên hiện kiểm chứng ở tầng pure logic & migration tests.
+  - **Lần 1:** `579 / 579 PASS` (`0` fail, `0` skipped, `0` cancelled, `19,922.03 ms`, Exit `0`).
+  - **Lần 2:** `579 / 579 PASS` (`0` fail, `0` skipped, `0` cancelled, `15,918.03 ms`, Exit `0`).
+  - **Lần 3:** `579 / 579 PASS` (`0` fail, `0` skipped, `0` cancelled, `15,885.90 ms`, Exit `0`).
 
 ---
 
-## 6. BƯỚC TIẾP THEO (CHỜ DUYỆT GIAI ĐOẠN 2a)
+## 5. GIỚI HẠN HIỆN TẠI & 6 BƯỚC TỰ KIỂM TRA TRÊN CHROME THẬT
 
-- **DỪNG tại đây chờ người dùng duyệt Giai đoạn 2a.**
-- Sau khi được duyệt, sẽ bước sang **Giai đoạn 2b (`QuestCoordinator` & Atomic Wiring)**: nối nguyên tử `questOutcomeDelta` qua `commitSessionOutcomeInternal` dưới `StorageMutex`, bổ sung `GET_QUEST_STATE` & `CLAIM_QUEST_REWARD` vào `MessageHandler` + simulator `extensionClient.ts`, rồi tiếp tục **Giai đoạn 5c** để mở UI cho tab `Quests` & nâng cấp `StatsView`.
+- **Giới hạn kiểm chứng:** Bản UX-5 **CHƯA kiểm chứng trực quan trên Chrome thật** — toàn bộ kiểm tra vừa chạy là kiểm toán logic vẽ qua Node mock Canvas 2D context, kiểm tra HTML qua React SSR (`renderToString`), kiểm chứng số học DPR/zoom/pan, `tsc --noEmit` và build `dist/`.
+- **6 bước đề nghị bạn kiểm tra trực tiếp trên Chrome thật (`dist/` sau khi nạp unpacked hoặc Web Preview):**
+  1. **Kiểm tra ở nhiều tỉ lệ màn hình / zoom trình duyệt (`100%`, `125%`, `150%`, `175%` hoặc Dev Zoom `Ctrl+`/`Ctrl-`):** Quan sát vùng cỏ đã mở lẫn rừng tối xung quanh xem còn bất kỳ khe sáng dọc/ngang hay lưới mờ nào xuất hiện khi đứng yên hoặc lúc kéo bản đồ hay không.
+  2. **Mở Expansion Mode (auto-fit zoom):** Xác nhận bản đồ thu nhỏ vừa khung mà mặt đất + rừng vẫn liền khít 100%, viền xanh/hổ phách của 4×4 chunk mở rộng hiển thị đúng.
+  3. **Kiểm tra đặt công trình:** Chọn 1 công trình → rê chuột xem ô hover xanh (`hover:after:bg-emerald-300/35`), tooltip ghost đặt hợp lệ/lỗi, đặt xuống và bấm kiểm tra công trình đã đặt.
+  4. **Kiểm tra hoạt ảnh rìu chém khi mở đất:** Mở 1 chunk mới → xác nhận vùng rừng giữ nguyên tối liền lạc cho tới mốc rìu chạm đất `680ms` rồi mới lộ cỏ mở + rung nhẹ bản đồ không hở khe.
+  5. **Đối chiếu `#sprites` (Web Preview):** Kéo xuống phần cuối `Section 3` kiểm tra khối `"16×11 Locked Forest Algorithm Preview"` (DOM) và khối `"Map terrain bitmap (16×11 Locked Forest · UX-5 Single Canvas)"` ngay bên dưới khớp nhau về cây M1–M6, nền và độ tối `44%`.
+  6. **Kéo nhanh liên tục bản đồ:** Giữ chuột trái kéo đảo chiều liên tục trên cả vùng cỏ mở và rừng tối để xác nhận pan bám tay tức thì (không bị trễ `transition-transform`), không giật hoặc nháy lưới.
+
+---
+
+**DỪNG tại đây chờ bạn nghiệm thu trực quan và duyệt UX-5.**

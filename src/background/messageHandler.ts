@@ -8,18 +8,26 @@ import { isValidCoordinate } from '../core/civilization/placementValidator.ts';
 import { CHUNK_WIDTH, CHUNK_HEIGHT } from '../core/civilization/constants.ts';
 import { isSupportedLocale } from '../i18n/locale.ts';
 import { MusicCoordinator } from './musicCoordinator.ts';
+import {
+  QuestCoordinator,
+  QuestCoordinatorError,
+  validateClaimQuestPayload,
+} from './questCoordinator.ts';
 
 export class MessageHandler {
   private civilizationCoordinator: CivilizationCoordinator;
+  private questCoordinator: QuestCoordinator;
 
   constructor(
     private sessionCoordinator: SessionCoordinator,
     private profileManager: ProfileManager,
     private storage: StorageManager,
     civilizationCoordinator?: CivilizationCoordinator,
-    private musicCoordinator?: MusicCoordinator
+    private musicCoordinator?: MusicCoordinator,
+    questCoordinator?: QuestCoordinator
   ) {
     this.civilizationCoordinator = civilizationCoordinator ?? new CivilizationCoordinator(storage);
+    this.questCoordinator = questCoordinator ?? new QuestCoordinator(storage);
   }
 
   private getMusicCoordinator(): MusicCoordinator {
@@ -348,6 +356,18 @@ export class MessageHandler {
           return { success: true, data: result };
         }
 
+        // --- Quest Actions ---
+        case 'GET_QUEST_STATE': {
+          const questData = await this.questCoordinator.getQuestState();
+          return { success: true, data: questData };
+        }
+
+        case 'CLAIM_QUEST_REWARD': {
+          const validPayload = validateClaimQuestPayload(msg.payload);
+          const claimData = await this.questCoordinator.claimQuestReward(validPayload);
+          return { success: true, data: claimData };
+        }
+
         // --- Settings Actions ---
         case 'SET_LANGUAGE': {
           if (!msg.payload || typeof msg.payload !== 'object' || !isSupportedLocale(msg.payload.language)) {
@@ -488,6 +508,13 @@ export class MessageHandler {
           };
       }
     } catch (error) {
+      if (error instanceof QuestCoordinatorError) {
+        return {
+          success: false,
+          error: error.message,
+          errorCode: error.code,
+        };
+      }
       return {
         success: false,
         error: error instanceof Error ? error.message : String(error),

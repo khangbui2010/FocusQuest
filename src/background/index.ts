@@ -13,6 +13,7 @@ import { MessageHandler } from './messageHandler.ts';
 import { CivilizationCoordinator } from './civilizationCoordinator.ts';
 import { ChromeOffscreenAdapter } from '../chrome/offscreenAdapter.ts';
 import { MusicCoordinator, deriveMusicIntent } from './musicCoordinator.ts';
+import { QuestCoordinator } from './questCoordinator.ts';
 
 import { LifecycleReason } from '../types/lifecycle.ts';
 import { OffscreenMusicEvent } from '../types/music.ts';
@@ -31,6 +32,7 @@ const blockingCoordinator = new BlockingCoordinator(dnrAdapter, tabsAdapter);
 const civilizationCoordinator = new CivilizationCoordinator(storageManager);
 const offscreenAdapter = new ChromeOffscreenAdapter();
 const musicCoordinator = new MusicCoordinator(storageManager, offscreenAdapter);
+const questCoordinator = new QuestCoordinator(storageManager);
 
 const sessionCoordinator = new SessionCoordinator(
   storageManager,
@@ -53,7 +55,8 @@ const messageHandler = new MessageHandler(
   profileManager,
   storageManager,
   civilizationCoordinator,
-  musicCoordinator
+  musicCoordinator,
+  questCoordinator
 );
 
 // 2. Synchronous Top-Level Chrome Event Listeners Registration

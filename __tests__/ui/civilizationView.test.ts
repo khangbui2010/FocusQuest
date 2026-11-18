@@ -308,7 +308,8 @@ test('Civilization UI: MapGridView renders 8x8 unlocked chunks, darkened locked 
   assert.ok(html.includes('title="Zoom Out"'), 'must render zoom out control');
   assert.ok(html.includes('data-render-width="24"'), 'must include 2-chunk (8-cell) forest border around 8x8 grid');
   assert.ok(html.includes('data-render-height="24"'), 'must include 2-chunk (8-cell) forest border around 8x8 grid');
-  assert.ok(html.includes('data-locked-forest="true"'), 'must darken locked border cells');
+  assert.ok(html.includes('data-testid="map-terrain-bitmap"'), 'must render single composite terrain bitmap');
+  assert.ok(html.includes('data-unlocked="false"'), 'must preserve locked border interaction cells');
   assert.ok(!html.includes('data-terrain-id='), 'must not render V1 entity terrain nodes');
   assert.ok(!html.includes('data-expansion-candidate='), 'must not render expansion candidates in normal mode');
 

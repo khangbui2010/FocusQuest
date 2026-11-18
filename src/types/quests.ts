@@ -75,3 +75,12 @@ export interface ClaimQuestResult {
   readonly xp: number;
   readonly error?: string;
 }
+
+export type QuestErrorCode =
+  | 'INVALID_QUEST_PAYLOAD'
+  | 'UNKNOWN_QUEST'
+  | 'QUEST_PERIOD_MISMATCH'
+  | 'QUEST_NOT_COMPLETED'
+  | 'QUEST_ALREADY_CLAIMED'
+  | 'QUEST_EXPIRED';
+

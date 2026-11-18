@@ -10,6 +10,7 @@ import { createInitialCivilizationState } from '../../src/core/civilization/civi
 import { REUSED_TINY_TOWN_TILES } from '../../src/ui/components/civilization/spriteData.ts';
 import { MapGridView } from '../../src/ui/components/civilization/MapGridView.tsx';
 import { SpriteGallery } from '../../src/ui/components/civilization/SpriteGallery.tsx';
+import { buildTerrainBitmapPlan } from '../../src/ui/components/civilization/terrainBitmapRenderer.ts';
 import {
   CANOPY_CROSS_B_GREEN,
   CANOPY_CROSS_B_ORANGE,
@@ -468,7 +469,7 @@ test('Terrain Decor Stage 4a-3: unlocked boundary gating prevents clipped canopi
   assert.deepStrictEqual(allLocked, lBorder);
 });
 
-test('Terrain Decor Stage 4a-3 + UX-3: MapGridView ground->tree->scrim darkening order & SpriteGallery M1-M6 + 16x11 sample', () => {
+test('Terrain Decor Stage 4a-3 + UX-3 + UX-5: MapGridView bitmap ground->tree->scrim & SpriteGallery M1-M6 + 16x11 sample', () => {
   const baseState = createInitialCivilizationState();
   const mapHtml = renderToString(
     React.createElement(MapGridView, {
@@ -479,34 +480,26 @@ test('Terrain Decor Stage 4a-3 + UX-3: MapGridView ground->tree->scrim darkening
     })
   );
 
-  // UX-3: Verify layer order inside locked grid cell: baseTile -> overlayTile (if any) -> bg-slate-950 scrim
-  const lockedCellStart = mapHtml.indexOf('data-cell-coord="-8,-8"');
-  assert.ok(lockedCellStart > -1);
-  const lockedCellSnippet = mapHtml.slice(lockedCellStart, lockedCellStart + 900);
-  const baseIdx = lockedCellSnippet.indexOf('data-tile-index="');
-  const scrimIdx = lockedCellSnippet.indexOf('data-locked-forest="true"');
-  assert.ok(baseIdx > -1 && scrimIdx > baseIdx, 'Dark scrim must sit AFTER base grass tile');
-  const secondTileIdx = lockedCellSnippet.indexOf('data-tile-index="', baseIdx + 1);
-  if (secondTileIdx !== -1 && secondTileIdx < lockedCellSnippet.indexOf('data-cell-coord="', 10)) {
-    assert.ok(
-      secondTileIdx < scrimIdx,
-      'Tree overlay MUST render BEFORE dark scrim so ground and trees darken uniformly'
-    );
+  // UX-5: MapGridView renders a single terrain bitmap canvas (zero per-cell TileImage <img> layers)
+  assert.ok(mapHtml.includes('data-testid="map-terrain-bitmap"'));
+  assert.ok(mapHtml.includes('width="384" height="384"'));
+  assert.ok(mapHtml.includes('image-rendering:pixelated'));
+  assert.equal(mapHtml.includes('<img'), false);
+
+  const plan = buildTerrainBitmapPlan({
+    minX: -8,
+    minY: -8,
+    cols: 24,
+    rows: 24,
+    seed: TERRAIN_DECOR_SEED,
+    isCellUnlocked: (cx, cy) => cx >= 0 && cx < 8 && cy >= 0 && cy < 8,
+  });
+  const cornerCell = plan.cells.find((c) => c.gx === -8 && c.gy === -8);
+  assert.ok(cornerCell && cornerCell.decor.isDarkened);
+  for (const c of plan.cells) {
+    assert.notEqual(c.decor.overlayTile, 27, 'Retired pine 27 must never appear in MapGridView bitmap');
+    assert.notEqual(c.decor.overlayTile, 28, 'Retired pine 28 must never appear in MapGridView bitmap');
   }
-  // Regression guard: overlay TileImage with "absolute inset-0" must NEVER also have "relative"
-  // (Tailwind v4 outputs .relative after .absolute, which pushed overlays out of the overflow-hidden cell).
-  assert.equal(
-    /class="[^"]*\brelative\b[^"]*\babsolute\b[^"]*"/.test(mapHtml),
-    false,
-    'Overlay TileImage must not carry both relative and absolute classes'
-  );
-  assert.equal(
-    /class="[^"]*\babsolute\b[^"]*\brelative\b[^"]*"/.test(mapHtml),
-    false,
-    'Overlay TileImage must not carry both absolute and relative classes'
-  );
-  assert.ok(!mapHtml.includes('data-tile-index="27"'), 'Retired pine 27 must never render on MapGridView');
-  assert.ok(!mapHtml.includes('data-tile-index="28"'), 'Retired pine 28 must never render on MapGridView');
 
   const galleryHtml = renderToString(React.createElement(SpriteGallery));
   assert.ok(galleryHtml.includes('data-testid="gallery-locked_forest_16x11"'));

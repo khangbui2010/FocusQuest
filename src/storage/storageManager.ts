@@ -14,8 +14,12 @@ import {
 import { GridMap } from '../core/civilization/gridMap.ts';
 import { calculatePlayerLevel } from '../core/economy/levelSystem.ts';
 import { CachedMusicCatalog, MusicPlayerState } from '../types/music.ts';
-import { QuestState } from '../types/quests.ts';
-import { sanitizeQuestState } from '../core/quests/questEngine.ts';
+import { QuestOutcomeDelta, QuestState } from '../types/quests.ts';
+import {
+  applyCompletedSession,
+  rolloverQuestState,
+  sanitizeQuestState,
+} from '../core/quests/questEngine.ts';
 
 export class StorageManager {
   private mutex = new StorageMutex();
@@ -182,10 +186,12 @@ export class StorageManager {
       coins: number;
       xp: number;
     };
+    questOutcomeDelta?: QuestOutcomeDelta;
   }): Promise<{
     session: SessionSnapshot;
     economy: PlayerEconomy;
     dailyStats: Record<string, DailyStatRecord>;
+    questState?: QuestState;
   }> {
     const items: Record<string, unknown> = {
       [STORAGE_KEYS.CURRENT_SESSION]: params.session,
@@ -233,18 +239,41 @@ export class StorageManager {
       finalDailyStats = await this.getDailyStats();
     }
 
+    let finalQuestState: QuestState | undefined;
+    if (params.questOutcomeDelta) {
+      try {
+        const questNowMs =
+          typeof params.session.completedAt === 'number' &&
+          Number.isFinite(params.session.completedAt)
+            ? params.session.completedAt
+            : Date.now();
+        const rawQuests = await this.adapter.get<unknown>(STORAGE_KEYS.QUESTS);
+        const sanitizedQuests = sanitizeQuestState(rawQuests, questNowMs);
+        const rolledQuests = rolloverQuestState(sanitizedQuests, questNowMs);
+        finalQuestState = applyCompletedSession(rolledQuests, params.questOutcomeDelta, questNowMs);
+        items[STORAGE_KEYS.QUESTS] = finalQuestState;
+      } catch (questError) {
+        console.warn(
+          '[StorageManager] Isolated quest progress failure; committing session without quest delta:',
+          questError
+        );
+        finalQuestState = undefined;
+      }
+    }
+
     await this.adapter.setMultiple(items);
 
     return {
       session: params.session,
       economy: finalEconomy,
       dailyStats: finalDailyStats,
+      questState: finalQuestState,
     };
   }
 
   /**
-   * Atomically commits session state changes together with optional economy and daily stats updates
-   * in a single batch write (setMultiple) under mutex lock.
+   * Atomically commits session state changes together with optional economy, daily stats,
+   * and quest updates in a single batch write (setMultiple) under mutex lock.
    */
   async commitSessionOutcome(
     params: Parameters<typeof this.commitSessionOutcomeInternal>[0]
@@ -252,6 +281,7 @@ export class StorageManager {
     session: SessionSnapshot;
     economy: PlayerEconomy;
     dailyStats: Record<string, DailyStatRecord>;
+    questState?: QuestState;
   }> {
     return this.mutex.runExclusive(() => this.commitSessionOutcomeInternal(params));
   }
@@ -515,6 +545,10 @@ export class StorageManager {
 
   // --- Quests Storage (Schema v3) ---
 
+  async getRawQuestsInternal(): Promise<unknown> {
+    return this.adapter.get<unknown>(STORAGE_KEYS.QUESTS);
+  }
+
   async getQuests(nowMs: number = Date.now()): Promise<QuestState> {
     const raw = await this.adapter.get<unknown>(STORAGE_KEYS.QUESTS);
     return sanitizeQuestState(raw, nowMs);
@@ -534,6 +568,46 @@ export class StorageManager {
       await this.setQuests(updated);
       return updated;
     });
+  }
+
+  /**
+   * Atomically commits both Economy and QuestState in a single setMultiple call
+   * inside an already-acquired runExclusive transaction, with rollback compensation on failure.
+   */
+  async commitQuestClaimInternal(params: {
+    previousEconomy: PlayerEconomy;
+    nextEconomy: PlayerEconomy;
+    previousQuests: QuestState;
+    nextQuests: QuestState;
+  }): Promise<void> {
+    const items: Record<string, unknown> = {
+      [STORAGE_KEYS.ECONOMY]: params.nextEconomy,
+      [STORAGE_KEYS.QUESTS]: params.nextQuests,
+    };
+
+    try {
+      await this.adapter.setMultiple(items);
+    } catch (writeError) {
+      let rollbackError: unknown = null;
+      try {
+        await this.adapter.setMultiple({
+          [STORAGE_KEYS.ECONOMY]: params.previousEconomy,
+          [STORAGE_KEYS.QUESTS]: params.previousQuests,
+        });
+      } catch (rbErr) {
+        rollbackError = rbErr;
+      }
+
+      if (rollbackError) {
+        const rbMsg = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+        const wMsg = writeError instanceof Error ? writeError.message : String(writeError);
+        throw new Error(
+          `Quest claim write failed: "${wMsg}". Critical: Rollback compensation also failed: "${rbMsg}". Storage may be in an inconsistent state.`
+        );
+      }
+
+      throw writeError;
+    }
   }
 }
 

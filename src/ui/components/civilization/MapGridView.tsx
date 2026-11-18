@@ -14,11 +14,8 @@ import {
   PixelSprite,
   getBuildingSprite,
 } from './spriteRegistry.ts';
-import {
-  TERRAIN_DECOR_SEED,
-  getCellDecor,
-} from './terrainDecor.ts';
-import { TerrainCellLayers } from './TerrainCellLayers.tsx';
+import { TERRAIN_DECOR_SEED } from './terrainDecor.ts';
+import { TerrainBitmapCanvas } from './TerrainBitmapCanvas.tsx';
 import {
   ActiveExpansionReveal,
   EXPANSION_IMPACT_MS,
@@ -88,11 +85,20 @@ export function getPlacementPreviewLabel(
   return t('civ.map.placeOutside');
 }
 
+export function getMapStageClassName(
+  isDragging: boolean,
+  isZoomTransitionActive = false
+): string {
+  if (isDragging || !isZoomTransitionActive) {
+    return 'relative shrink-0';
+  }
+  return 'relative shrink-0 transition-transform duration-150 ease-out';
+}
+
 interface GridCellProps {
   x: number;
   y: number;
   isUnlocked: boolean;
-  isCellUnlockedFn: (cx: number, cy: number) => boolean;
   isPlacementMode: boolean;
   isExpansionMode: boolean;
   onHover: (coord: GridCoordinate) => void;
@@ -104,20 +110,17 @@ const GridCell = React.memo<GridCellProps>(
     x,
     y,
     isUnlocked,
-    isCellUnlockedFn,
     isPlacementMode,
     isExpansionMode,
     onHover,
     onCellClick,
   }) => {
-    const decor = getCellDecor(x, y, isUnlocked, TERRAIN_DECOR_SEED, isCellUnlockedFn);
     const clickableLocked = isExpansionMode && !isUnlocked;
 
     return (
       <div
         data-cell-coord={`${x},${y}`}
         data-unlocked={isUnlocked ? 'true' : 'false'}
-        data-decor-kind={decor.kind}
         onMouseEnter={isPlacementMode ? () => onHover({ x, y }) : undefined}
         onClick={
           isPlacementMode || clickableLocked
@@ -128,10 +131,10 @@ const GridCell = React.memo<GridCellProps>(
           width: CELL_SIZE,
           height: CELL_SIZE,
         }}
-        className={`relative box-border select-none overflow-hidden transition-colors ${
+        className={`box-border select-none ${
           isUnlocked
             ? isPlacementMode
-              ? 'border-0 after:absolute after:inset-0 after:pointer-events-none hover:after:bg-emerald-300/35 cursor-crosshair'
+              ? 'relative border-0 after:absolute after:inset-0 after:pointer-events-none hover:after:bg-emerald-300/35 cursor-crosshair'
               : 'border-0'
             : isPlacementMode
             ? 'border-0 cursor-crosshair'
@@ -139,14 +142,7 @@ const GridCell = React.memo<GridCellProps>(
             ? 'border-0 cursor-not-allowed'
             : 'border-0 pointer-events-none'
         }`}
-      >
-        <TerrainCellLayers
-          baseTile={decor.baseTile}
-          overlayTile={decor.overlayTile}
-          isDarkened={decor.isDarkened}
-          size={CELL_SIZE}
-        />
-      </div>
+      />
     );
   }
 );
@@ -199,10 +195,34 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [hoverCoord, setHoverCoord] = useState<GridCoordinate | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [isZoomTransitionActive, setIsZoomTransitionActive] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const wasExpansionModeRef = useRef<boolean>(isExpansionMode);
   const savedCameraRef = useRef<{ zoom: number; pan: { x: number; y: number } } | null>(null);
+  const zoomTransitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearZoomTransitionTimer = useCallback(() => {
+    if (zoomTransitionTimerRef.current !== null) {
+      clearTimeout(zoomTransitionTimerRef.current);
+      zoomTransitionTimerRef.current = null;
+    }
+  }, []);
+
+  const triggerButtonZoomTransition = useCallback(() => {
+    clearZoomTransitionTimer();
+    setIsZoomTransitionActive(true);
+    zoomTransitionTimerRef.current = setTimeout(() => {
+      setIsZoomTransitionActive(false);
+      zoomTransitionTimerRef.current = null;
+    }, 160);
+  }, [clearZoomTransitionTimer]);
+
+  useEffect(() => {
+    return () => {
+      clearZoomTransitionTimer();
+    };
+  }, [clearZoomTransitionTimer]);
 
   const hasMovedRef = useRef<boolean>(false);
   const dragStartRef = useRef<{
@@ -284,35 +304,47 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
   const handleZoomIn = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
+      triggerButtonZoomTransition();
       setZoom((z) => clampZoom(z + ZOOM_STEP));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeMinZoom]
+    [activeMinZoom, triggerButtonZoomTransition]
   );
 
   const handleZoomOut = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
+      triggerButtonZoomTransition();
       setZoom((z) => clampZoom(z - ZOOM_STEP));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeMinZoom]
+    [activeMinZoom, triggerButtonZoomTransition]
   );
 
-  const handleResetZoom = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    setZoom(1.0);
-  }, []);
+  const handleResetZoom = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      triggerButtonZoomTransition();
+      setZoom(1.0);
+    },
+    [triggerButtonZoomTransition]
+  );
 
-  const handleRecenter = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    setPan({ x: 0, y: 0 });
-    setZoom(1.0);
-  }, []);
+  const handleRecenter = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      triggerButtonZoomTransition();
+      setPan({ x: 0, y: 0 });
+      setZoom(1.0);
+    },
+    [triggerButtonZoomTransition]
+  );
 
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
     hasMovedRef.current = false;
+    clearZoomTransitionTimer();
+    setIsZoomTransitionActive(false);
     setIsDragging(true);
     dragStartRef.current = {
       clientX: e.clientX,
@@ -430,7 +462,7 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
           width: mapWidthPx,
           height: mapHeightPx,
         }}
-        className="relative shrink-0 transition-transform duration-150 ease-out shadow-sm"
+        className={getMapStageClassName(isDragging, isZoomTransitionActive)}
       >
         <div
           key={shouldShakeMap ? `shake-${activeExpansionReveal?.id}` : 'shake-idle'}
@@ -442,15 +474,29 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
               : 'relative w-full h-full'
           }
         >
-        {/* Base Grid Cells (Unlocked Landscape + Locked Dark Forest Margin) */}
+        {/* Single Composite Terrain Bitmap (Zero Inter-Tile Seams Across All DPR/Zoom/Pan) */}
+        <TerrainBitmapCanvas
+          testId="map-terrain-bitmap"
+          minX={renderBox.minX}
+          minY={renderBox.minY}
+          cols={renderBox.width}
+          rows={renderBox.height}
+          cellSize={CELL_SIZE}
+          seed={TERRAIN_DECOR_SEED}
+          isCellUnlocked={isCellUnlockedFn}
+          className="absolute inset-0 block pointer-events-none select-none"
+        />
+
+        {/* Transparent Interactive Cell Layer (Hover / Placement Click / Expansion Cursor Only) */}
         <div
+          data-testid="map-interaction-grid"
           style={{
             display: 'grid',
             gridTemplateColumns: `repeat(${renderBox.width}, ${CELL_SIZE}px)`,
             width: mapWidthPx,
             height: mapHeightPx,
-            imageRendering: 'pixelated',
           }}
+          className="relative z-[1] select-none"
         >
           {cells.map((cell) => (
             <GridCell
@@ -458,7 +504,6 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
               x={cell.x}
               y={cell.y}
               isUnlocked={cell.unlocked}
-              isCellUnlockedFn={isCellUnlockedFn}
               isPlacementMode={Boolean(placementDef)}
               isExpansionMode={isExpansionMode}
               onHover={handleHoverCell}
@@ -484,7 +529,7 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
             <div
               key={chunk.id}
               style={{ left, top, width, height }}
-              className="absolute pointer-events-none border border-emerald-500/35 dark:border-emerald-400/25"
+              className="absolute z-[2] pointer-events-none border border-emerald-500/35 dark:border-emerald-400/25"
             >
               <span className="absolute top-0.5 left-1 text-[8px] font-mono text-emerald-700/60 dark:text-emerald-300/50 tabular-nums">
                 {`(${chunk.origin.x},${chunk.origin.y})`}

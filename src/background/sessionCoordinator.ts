@@ -24,6 +24,7 @@ import { getLocalDateKey } from '../core/utils/dateUtils.ts';
 import { calculateLifetimeFocusMinutes } from '../core/stats/statsAggregator.ts';
 import { formatSessionNotificationContent } from './notificationFormatter.ts';
 import { TranslationKey } from '../i18n/types.ts';
+import { toQuestOutcomeDelta } from '../core/quests/questEngine.ts';
 
 export const ALARM_NAMES = {
   COUNTDOWN_FINISH: 'FQ_ALARM_COUNTDOWN_FINISH',
@@ -254,8 +255,8 @@ export class SessionCoordinator {
     await this.handleLifecycleEvent({ reason: 'SERVICE_WORKER_WAKE' });
   }
 
-  private getTodayDateKey(): string {
-    return getLocalDateKey();
+  private getTodayDateKey(nowMs?: number): string {
+    return getLocalDateKey(nowMs);
   }
 
   /**
@@ -955,7 +956,10 @@ export class SessionCoordinator {
             : undefined,
         };
 
-        // Atomically commit session, economy, and daily stats in one storage write
+        const completedDateKey = this.getTodayDateKey(now);
+        const questOutcomeDelta = toQuestOutcomeDelta(updated, completedDateKey) ?? undefined;
+
+        // Atomically commit session, economy, daily stats, and quests in one storage write
         await this.storage.commitSessionOutcomeInternal({
           session: updated,
           economyDelta: {
@@ -965,7 +969,7 @@ export class SessionCoordinator {
           dailyStatDelta:
             actualFocusMinutes > 0
               ? {
-                  date: this.getTodayDateKey(),
+                  date: completedDateKey,
                   focusMinutes: actualFocusMinutes,
                   isCompleted: completedIntervals > 0,
                   isAbandoned: false,
@@ -973,6 +977,7 @@ export class SessionCoordinator {
                   xp: finalXp,
                 }
               : undefined,
+          questOutcomeDelta,
         });
 
         await this.alarms.clearAll();
@@ -1041,7 +1046,10 @@ export class SessionCoordinator {
         lockedMultiplier: rewardResult.multiplier,
       };
 
-      // Atomically commit session, economy, and daily stats in one storage write
+      const completedDateKey = this.getTodayDateKey(now);
+      const questOutcomeDelta = toQuestOutcomeDelta(updated, completedDateKey) ?? undefined;
+
+      // Atomically commit session, economy, daily stats, and quests in one storage write
       await this.storage.commitSessionOutcomeInternal({
         session: updated,
         economyDelta: {
@@ -1051,7 +1059,7 @@ export class SessionCoordinator {
         dailyStatDelta:
           actualFocusMinutes > 0
             ? {
-                date: this.getTodayDateKey(),
+                date: completedDateKey,
                 focusMinutes: actualFocusMinutes,
                 isCompleted: rewardResult.isThresholdMet,
                 isAbandoned: !rewardResult.isThresholdMet,
@@ -1059,6 +1067,7 @@ export class SessionCoordinator {
                 xp: rewardResult.xpEarned,
               }
             : undefined,
+        questOutcomeDelta,
       });
 
       await this.alarms.clearAll();
@@ -1143,7 +1152,10 @@ export class SessionCoordinator {
         rewardProcessed: true,
       };
 
-      // Atomically commit session, economy, and daily stats in one storage write
+      const completedDateKey = this.getTodayDateKey(now);
+      const questOutcomeDelta = toQuestOutcomeDelta(updated, completedDateKey) ?? undefined;
+
+      // Atomically commit session, economy, daily stats, and quests in one storage write
       await this.storage.commitSessionOutcomeInternal({
         session: updated,
         economyDelta: {
@@ -1151,13 +1163,14 @@ export class SessionCoordinator {
           xp: rewardResult.xpEarned,
         },
         dailyStatDelta: {
-          date: this.getTodayDateKey(),
+          date: completedDateKey,
           focusMinutes: session.targetMinutes,
           isCompleted: true,
           isAbandoned: false,
           coins: rewardResult.coinsEarned,
           xp: rewardResult.xpEarned,
         },
+        questOutcomeDelta,
       });
 
       // Send Chrome Notification strictly once per session (error-isolated)
@@ -1370,6 +1383,9 @@ export class SessionCoordinator {
               },
             };
 
+            const completedDateKey = this.getTodayDateKey(now);
+            const questOutcomeDelta = toQuestOutcomeDelta(updated, completedDateKey) ?? undefined;
+
             // Settlement occurs ONCE at 100% mission completion
             await this.storage.commitSessionOutcomeInternal({
               session: updated,
@@ -1378,13 +1394,14 @@ export class SessionCoordinator {
                 xp: totalXp,
               },
               dailyStatDelta: {
-                date: this.getTodayDateKey(),
+                date: completedDateKey,
                 focusMinutes: plannedFocusMinutes,
                 isCompleted: true,
                 isAbandoned: false,
                 coins: totalCoins,
                 xp: totalXp,
               },
+              questOutcomeDelta,
             });
             console.log(`[POMODORO] Focus completion persisted: completedCount=${newCompletedCount}, totalFocusMins=${plannedFocusMinutes}`);
 

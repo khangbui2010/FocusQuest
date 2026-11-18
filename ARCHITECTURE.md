@@ -1,7 +1,7 @@
 # Focus Quest — Technical Architecture Specification (Manifest V3)
 
-**Version:** 1.5.1  
-**Status:** MV3 Background, Offscreen LOFI Streaming, Civilization Engine, Schema v3 Pure Quest Foundation & Full Bilingual Architecture  
+**Version:** 1.5.2  
+**Status:** MV3 Background, Offscreen LOFI Streaming, Civilization Engine (UX-5 Composite Terrain Bitmap), Schema v3 Pure Quest Foundation & Full Bilingual Architecture  
 **Target Platform:** Google Chrome Extension (Manifest V3, Chrome >= 116)  
 **Language & Stack:** TypeScript, React 19 (Popup & Blocked UI), Tailwind CSS 4, Chrome Extension APIs (`declarativeNetRequest`, `alarms`, `notifications`, `offscreen`, `storage`, `runtime`, `action`, `i18n`)  
 
@@ -178,9 +178,12 @@ Các action được hỗ trợ:
 
 ---
 
-## 6. Giao diện Popup, Cảnh quan UI & Blocked Page (Stages B–E)
+## 6. Giao diện Popup, Cảnh quan UI & Blocked Page (Stages B–E & UX-5)
 - **Điều hướng Popup 400×600px:** `Navbar.tsx` dùng 5 tab đáy (`Quests | Focus | Map | Awards | Stats`), mặc định mở `map` (`CivilizationScreen`), hỗ trợ đóng/mở `ProfileBottomSheet`, `RewardHelpModal`, `MusicPlayerSheet` và `SpriteGallery` (`#sprites` chỉ ở Web Preview).
-- **Cảnh quan & Hiệu ứng mở đất (thuần UI):** `terrainDecor.ts` dựng cảnh quan mở & rừng tối chunk `4×4` xác định (không lưu trong storage, không cản đặt công trình); `ExpansionRevealOverlay.tsx` + `expansionReveal.ts` chạy rìu chém rừng `127` + rung nhẹ lớp bản đồ trong `1150ms` sau commit, tôn trọng `prefers-reduced-motion`.
+- **Cảnh quan Canvas Tổng hợp Một Tấm (`UX-5`) & Hiệu ứng mở đất:**
+  - `terrainDecor.ts` giữ nguyên thuật toán đặt cảnh quan mở & 6 mẫu rừng tối M1–M6 xác định (không lưu trong storage, không cản đặt công trình).
+  - Toàn bộ nền địa hình của `MapGridView` được `terrainBitmapRenderer.ts` (`buildTerrainBitmapPlan`, `renderTerrainBitmap`, `renderTerrainBitmapIfNeeded`) + `TerrainBitmapCanvas.tsx` ghép sẵn vào **một `<canvas>` duy nhất** kích thước gốc `(cols × 16) × (rows × 16)` (`imageSmoothingEnabled = false`, `image-rendering: pixelated`), vẽ đúng thứ tự UX-3 (`nền -> lớp bù tối tùy chọn -> cây -> lớp phủ #020617` dùng `computeLockedForestOpacities`), có fallback màu phẳng khi ảnh spritesheet lỗi, và **chỉ vẽ lại khi `contentKey` đổi** (mở đất / hết hiệu ứng che / đổi seed — không bao giờ vẽ lại khi pan hoặc zoom), giúp triệt tiêu 100% khe sáng/lưới sub-pixel ở mọi mức DPR (`1..3`), zoom (kể cả Expansion auto-fit) và pan.
+  - Phía trên `<canvas>` là lưới ô tương tác trong suốt (`map-interaction-grid`, `0` thẻ `<img>` địa hình), giữ nguyên hover đặt công trình, khung chunk, công trình (`PixelSprite`), slot mở rộng, và hiệu ứng rìu chém rừng `127` (`ExpansionRevealOverlay.tsx` + `expansionReveal.ts`, lộ đất ở `680ms`, rung `340ms`, tổng `1150ms`). Sân khấu camera (`getMapStageClassName`) tắt `transition-transform` và `shadow-sm` trong khi kéo/tĩnh (chỉ bật `160ms` ngắn khi bấm nút zoom).
 - **Blocked Page CSP-Safe:** `public/blocked.html` ẩn thẻ bằng opacity anti-flash cho tới khi `blocked.js` (`src/blocked/blocked.ts`) đọc `fq_settings` từ `chrome.storage.local` để áp dụng ngôn ngữ EN/VI và lắng nghe `chrome.storage.onChanged`.
 
 ---

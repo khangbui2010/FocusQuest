@@ -1,7 +1,7 @@
 # FOCUS QUEST — PROJECT STATUS
 Cập nhật lần cuối: 2026-11-18
-Giai đoạn hiện tại: **Milestone 5B.5 — Giai đoạn 2a** *(Types, Schema v3 `fq_quests`, Migration v3 & Pure Quest Engine — chưa nối vào session/UI; kèm đồng bộ tài liệu & dọn mô tả quy tắc 0.5x)* **ĐÃ HOÀN TẤT** *(toàn bộ các giai đoạn trước: UX-1, UX-2, UX-3, UX-4, LOFI-1, LOFI-1b, LOFI-2, 5B.5 Giai đoạn 1b & 3 đều **ĐÃ DUYỆT**)* — Bước kế tiếp: **DỪNG chờ người dùng duyệt Giai đoạn 2a trước khi sang Giai đoạn 2b (nối nguyên tử vào `SessionCoordinator` & `MessageHandler`)**.
-Trạng thái: Verified (574/574 Tests PASS 3/3 lần | Build PASS | Lint PASS — test tự động chạy qua React SSR `renderToString` và backend mock Chrome adapters; đồng thời người dùng đã nghiệm thu thủ công trên Chrome thật cho popup 400×600, thanh 5 tab, bản đồ/rừng/lớp tối, hoạt ảnh rìu chém, `blocked.html` DNR, `chrome.i18n`, `manifest`, Offscreen Audio kể cả Pause > 30s và fetch catalog nhạc)
+Giai đoạn hiện tại: **Milestone 5B.5 — Giai đoạn 2a** *(Pure Quest Engine — ĐÃ HOÀN TẤT, DỪNG chờ duyệt)* + **Milestone UX — Giai đoạn UX-5** *(Composite Terrain Canvas Một Tấm sửa khe sáng/lưới mờ trên `MapGridView` — **ĐÃ HOÀN TẤT, DỪNG chờ người dùng duyệt & kiểm chứng trên Chrome thật**)* *(toàn bộ các giai đoạn trước: UX-1, UX-2, UX-3, UX-4, LOFI-1, LOFI-1b, LOFI-2, 5B.5 Giai đoạn 1b & 3 đều **ĐÃ DUYỆT**)*.
+Trạng thái: Verified (579/579 Tests PASS 3/3 lần | Build PASS | Lint PASS — test tự động chạy qua React SSR `renderToString`, mock 2D canvas context & mock Chrome adapters; **riêng thay đổi canvas UX-5 chưa kiểm chứng trực quan trên Chrome thật**; các luồng trước UX-5 gồm popup `400×600`, thanh 5 tab, rìu chém, `blocked.html` DNR, `chrome.i18n`, `manifest`, Offscreen Audio kể cả Pause > 30s và fetch catalog nhạc đã được người dùng nghiệm thu thủ công trên Chrome thật)
 
 ---
 
@@ -61,6 +61,12 @@ Trạng thái: Verified (574/574 Tests PASS 3/3 lần | Build PASS | Lint PASS �
   - **Đồng bộ `CoinBonus` trực tiếp từ `App.tsx` (`PopupShell`):** `App.tsx` tính `civBonusRate` từ `aggregateCoinBonus(extractBuildingCoinBonuses(...))` trong `refreshState()` và truyền xuống `TimerView`, giúp đặt/gỡ công trình giữa phiên cập nhật tức thì chip `+{rate}%` và phần thưởng trên màn hình chạy.
   - **Ranh giới hiển thị & Định dạng thập phân chuẩn (`formatters.ts`, `notificationFormatter.ts`):** Thay `Math.round` nhị phân trong `formatRewardAmount` bằng thuật toán chuỗi thập phân thuần **half-up tối đa 2 chữ số** (xử lý chuẩn `1.005 -> "1.01"`, `7.875 -> "7.88"`, `63.375 -> "63.38"`, khoa học `e/E`, bỏ số `0` dư cuối, dấu `.`, chặn `-0`/`NaN`/`Infinity`), đồng bộ `BuildingCatalogPanel.tsx` (`playerCoins`), `BuildingDetailsModal.tsx`, `LandExpansionModal.tsx`. Tách `formatSessionNotificationContent` ra `src/background/notificationFormatter.ts` để `SessionCoordinator` không còn import `ui/utils/formatters`.
   - **Tài liệu & Kiểm thử:** Đồng bộ `PRODUCT_SPEC.md` §6.3; thêm `__tests__/ui/ux4RewardDisplayAndFormatting.test.ts` (7 tests gồm formatter edge cases, kịch bản `55.5 -> 63.375`, bảng 4 mode `0%` & `+5%`, Stopwatch `< 5m`, mid-session bonus sync, tích lũy `8 × 7.875 = 63` exact trong storage, và kiểm tra tĩnh biên import → `561/561 PASS` 3/3 lần, Build PASS, Lint PASS).
+- **Milestone UX *(KHÔNG thuộc Phase 5 / 5B.5 / LOFI)* — Giai đoạn UX-5 (`2026-11-18` — ĐÃ HOÀN TẤT, DỪNG CHỜ DUYỆT):**
+  - **Không sửa lõi game & thuật toán rừng:** Giữ nguyên 100% `terrainDecor.ts` (`getCellDecor` / M1–M6), logic mở đất, đặt/gỡ công trình, `GridMap`, civilization core, schema, kinh tế, `SessionCoordinator`, LOFI và Quest Stage 2a.
+  - **Composite Terrain Canvas Một Tấm (`terrainBitmapRenderer.ts`, `TerrainBitmapCanvas.tsx`):** Vẽ toàn bộ địa hình (`cols×16 × rows×16`) vào **một `<canvas>` duy nhất** (`imageSmoothingEnabled = false`, `image-rendering: pixelated`) tại tọa độ nguyên `(col×16, row×16, 16, 16)`, giữ đúng thứ tự lớp UX-3 (`nền → bù nền tùy chọn → cây/tán lá → lớp phủ tối #020617` dùng `computeLockedForestOpacities`), cache singleton `tilemap_packed.png` + fallback màu phẳng nếu tải ảnh lỗi, và chỉ vẽ lại khi `contentKey` hoặc trạng thái sheet đổi (0 vẽ lại khi pan/zoom), triệt tiêu mọi khe sáng sub-pixel ở mọi DPR (`1..3`), zoom (gồm Expansion auto-fit) và pan.
+  - **Lưới ô tương tác trong suốt & Camera sạch (`MapGridView.tsx`):** Gỡ bỏ toàn bộ `<img>` / `<TerrainCellLayers>` từng ô trong `MapGridView`, thay bằng `<div data-testid="map-interaction-grid">` rỗng giữ nguyên `hover:after:bg-emerald-300/35`, placement ghost, công trình, viền chunk, Expansion Mode candidates & hoạt ảnh rìu chém mở đất (`unrevealedChunkOrigin` làm canvas lật đúng mốc `680ms`). Gỡ `shadow-sm`; thêm `getMapStageClassName` tắt `transition-transform` khi kéo/tĩnh/wheel (chỉ giữ `160ms` ngắn khi bấm nút zoom).
+  - **So sánh song song trong `#sprites` (`SpriteGallery.tsx`):** Giữ toàn bộ preview DOM cũ (`gallery-locked_forest_16x11`, v.v.) và bổ sung khối `"Map terrain bitmap"` (`gallery-terrain_bitmap_16x11`) dùng chung `TerrainBitmapCanvas` cho mẫu `16×11` `(-8,-8)`.
+  - **Kiểm thử:** Thêm `__tests__/ui/ux5TerrainBitmap.test.ts` (5 tests: kiểm chứng lệnh canvas 2D giả lập, cache guard & fallback, SSR + drag stage class, chứng minh số học DPR `1..3`/zoom/pan, tích hợp `GridMap` expand) và cập nhật 4 test DOM map cũ (`ux3MapAndForestUi.test.ts`, `terrainDecor.test.ts`, `spriteRegistry.test.ts`, `civilizationView.test.ts`) → `579/579 PASS` 3/3 lần.
 - **Milestone LOFI *(KHÔNG thuộc Phase 5 / 5B.5)* — Giai đoạn LOFI-1 + LOFI-1b (`2026-11-17` — ĐÃ DUYỆT):**
   - **Chuyển nguồn nhạc từ đóng gói cục bộ sang Online Archive (`FocusQuest-LOFI-archive`):** Gỡ bỏ toàn bộ `MUSIC_CATALOG` hard-code, `public/assets/music/`, file audio cục bộ (`0` file `.mp3/.ogg/.wav/.m4a/.flac` trong `public/` & `dist/`), chuyển thông tin bản quyền về `/CREDITS.md`.
   - **Offscreen Document (`Chrome >= 116`) & Khôi phục qua mốc 30s:** `manifest.json` nâng `"minimum_chrome_version": "116"` để dùng `chrome.runtime.getContexts` chính thức cùng `"offscreen"`; `public/offscreen.html` + `src/offscreen/offscreen.ts` (CSP-safe) phát `<audio>` theo giao thức `target: 'offscreen' | 'background'` (`MUSIC_PLAY`, `MUSIC_PAUSE`, `MUSIC_STOP`, `MUSIC_SEEK`, `MUSIC_SET_VOLUME`, `MUSIC_GET_STATUS`), lưu `positionSec` bền vững qua `MUSIC_POSITION` để tái tạo và tua đúng vị trí khi Chrome đóng Offscreen lúc Pause > 30s (không dùng âm thanh im lặng giữ sống).
@@ -166,11 +172,11 @@ Trạng thái: Verified (574/574 Tests PASS 3/3 lần | Build PASS | Lint PASS �
 
 ## 3. KẾT QUẢ KIỂM ĐỊNH THỰC TẾ (VERIFIED REAL VERIFICATION RESULTS)
 
-*Lưu ý: Các số liệu dưới đây được xác minh trực tiếp bằng việc chạy lệnh thực tế trên repository sau khi hoàn tất **Giai đoạn 2a (5B.5)** (`2026-11-18`). Toàn bộ test tự động chạy trên Node.js (`UI tests` qua React SSR `renderToString`, `backend tests` qua mock Chrome adapters). Đồng thời, **popup `400×600` (thanh 5 tab, bản đồ, rừng, lớp tối), hoạt ảnh rìu chém, `blocked.html` với DNR, `chrome.i18n`, `manifest`, Offscreen Audio (kể cả Pause > 30 giây) và fetch catalog nhạc** đã được người dùng **nghiệm thu thủ công trên Chrome thật**.*
+*Lưu ý: Các số liệu dưới đây được xác minh trực tiếp bằng việc chạy lệnh thực tế trên repository sau khi hoàn tất **Giai đoạn UX-5** (`2026-11-18`). Toàn bộ test tự động chạy trên Node.js (`UI tests` qua React SSR `renderToString` & mock 2D canvas context, `backend tests` qua mock Chrome adapters). Các luồng trước UX-5 (**popup `400×600` thanh 5 tab, bản đồ/rừng/lớp tối bản DOM, hoạt ảnh rìu chém, `blocked.html` DNR, `chrome.i18n`, `manifest`, Offscreen Audio kể cả Pause > 30 giây và fetch catalog nhạc**) đã được người dùng **nghiệm thu thủ công trên Chrome thật**; **riêng bản vẽ canvas UX-5 chưa kiểm trên Chrome thật**.*
 
 ### 3.1. Production Build (`npm run clean && npm run build`)
-- **Trạng thái:** **PASS (Exit code 0)** — Vite `v8.3.8`, `1,746 modules transformed`, thời gian **`727ms`**.
-- **Kiểm tra Artifacts thư mục `dist/` (Tổng dung lượng: `1,089,594 B`):**
+- **Trạng thái:** **PASS (Exit code 0)** — Vite `v8.3.8`, `1,748 modules transformed`, thời gian **`643ms`**.
+- **Kiểm tra Artifacts thư mục `dist/` (Tổng dung lượng tệp thực tế: `1,095,217 B`):**
   - `dist/background.js`: **CÓ (`93,016 B` / `93.01 kB`, gzip: `20.37 kB`)** — Service Worker độc lập (`0` `react-dom` trong background).
   - `dist/offscreen.js`: **CÓ (`3,878 B` / `3.87 kB`, gzip: `1.48 kB`)** — Audio engine MV3 chạy trong Offscreen Document.
   - `dist/offscreen.html`: **CÓ (`264 B`)** — CSP-safe (0 inline script).
@@ -180,8 +186,8 @@ Trạng thái: Verified (574/574 Tests PASS 3/3 lần | Build PASS | Lint PASS �
   - `dist/manifest.json`: **CÓ (`984 B`)** — Chrome MV3 Manifest (`"minimum_chrome_version": "116"`, `"default_locale": "en"`, `"offscreen"`).
   - `dist/_locales/`: **CÓ** — `en/messages.json` (`382 B`) và `vi/messages.json` (`440 B`).
   - `dist/icons/`: **CÓ** — Bộ icon đầy đủ (`icon16.png`, `icon32.png`, `icon48.png`, `icon128.png`, `icon.svg`).
-  - `dist/assets/popup-07l23r0d.js`: **CÓ (`765,071 B` / `765.07 kB`, gzip: `201.50 kB`)** *(chủ ý hoãn tách chunk)*.
-  - `dist/assets/popup-D9z-9pA-.css`: **CÓ (`88,298 B` / `88.29 kB`, gzip: `13.79 kB`)**.
+  - `dist/assets/popup-CVYx8GSo.js`: **CÓ (`770,675 B` / `770.67 kB`, gzip: `203.30 kB`)** *(trước UX-5: `765,071 B`, `+5,604 B`; chủ ý hoãn tách chunk)*.
+  - `dist/assets/popup-Cnjs0qfG.css`: **CÓ (`88,317 B` / `88.31 kB`, gzip: `13.80 kB`)** *(trước UX-5: `88,298 B`, `+19 B`)*.
   - `dist/assets/translator-B5-w4v6G.js`: **CÓ (`52,477 B` / `52.47 kB`, gzip: `14.14 kB`)**.
   - `dist/assets/statsAggregator-C5H9LvvS.js`: **CÓ (`55,154 B` / `55.15 kB`, gzip: `15.32 kB`)**.
   - `dist/assets/storageKeys-C4hhw6ET.js`: **CÓ (`398 B` / `0.39 kB`, gzip: `0.27 kB`)**.
@@ -189,10 +195,10 @@ Trạng thái: Verified (574/574 Tests PASS 3/3 lần | Build PASS | Lint PASS �
   - `dist/assets/music/` & file audio cục bộ: **KHÔNG TỒN TẠI (`0` file audio)**.
 
 ### 3.2. Automated Tests (`npm test`)
-- **Trạng thái:** **PASS (Exit code 0) — 3/3 lần chạy liên tiếp** — **574 / 574 tests PASS (100%)** *(baseline trước Stage 2a là `561/561`, `+13` tests của Stage 2a; test tự động chạy qua React SSR `renderToString` & mock Chrome adapters, kết hợp với nghiệm thu thủ công các luồng lõi trên Chrome thật)*.
-  - Lần 1: `574` Passed | `0` Failed | `0` Skipped | `0` Cancelled (`16,073.80 ms`).
-  - Lần 2: `574` Passed | `0` Failed | `0` Skipped | `0` Cancelled (`15,952.22 ms`).
-  - Lần 3: `574` Passed | `0` Failed | `0` Skipped | `0` Cancelled (`16,633.53 ms`).
+- **Trạng thái:** **PASS (Exit code 0) — 3/3 lần chạy liên tiếp** — **579 / 579 tests PASS (100%)** *(baseline trước UX-5 là `574/574`, `+5` tests của UX-5; test tự động chạy qua React SSR `renderToString`, mock 2D context & mock Chrome adapters)*.
+  - Lần 1: `579` Passed | `0` Failed | `0` Skipped | `0` Cancelled (`19,922.03 ms`).
+  - Lần 2: `579` Passed | `0` Failed | `0` Skipped | `0` Cancelled (`15,918.03 ms`).
+  - Lần 3: `579` Passed | `0` Failed | `0` Skipped | `0` Cancelled (`15,885.90 ms`).
 
 ### 3.3. Typecheck & Lint (`npm run lint` — `tsc --noEmit`)
 - **Trạng thái:** **PASS (Exit code 0)** — **0 errors, 0 warnings**.
@@ -205,19 +211,21 @@ Trạng thái: Verified (574/574 Tests PASS 3/3 lần | Build PASS | Lint PASS �
    - **Zero Passive Income & Economy:** Coins/XP/Multiplier/CoinBonus hoàn toàn nguyên vẹn; XP không chịu ảnh hưởng CoinBonus; các music hook của `SessionCoordinator` chạy ngoài `StorageMutex` và bọc `try/catch` nên không thể làm sai kết quả thưởng hay commit.
    - **All-or-Nothing Pomodoro Countdown & Allowlist Lock:** Giữ nguyên toàn bộ khóa bảo vệ trong phiên chạy/tạm dừng.
    - **Mở rộng đất & Schema:** Giữ nguyên công thức `cost(k)`, điều kiện `Player Level >= k + 2`, `fq_civilization` v2 (`GridMap`/coordinator/transaction), Schema v3 `CURRENT_SCHEMA_VERSION = 3` (`fq_quests` thuần ở Stage 2a, chưa nối vào `SessionCoordinator`), DNR blocking (`main_frame`), nút Upgrade khóa `"Milestone 5C"`.
-   - **Cảnh quan & Animation (Chặng B–C):** Thuần lớp hiển thị UI, không lưu trong storage, không cản đặt công trình.
+   - **Cảnh quan Canvas Một Tấm (`UX-5`) & Animation (Chặng B–C):** Thuần lớp hiển thị UI, giữ nguyên 100% `getCellDecor` / M1–M6 trong `terrainDecor.ts`, không lưu trong storage, không cản đặt công trình.
 2. **Tình trạng nghiệm thu thực tế trên Chrome thật (`>= 116`):**
-   - **Đã nghiệm thu trên Chrome thật theo xác nhận của người dùng:** Popup `400×600` (thanh điều hướng 5 tab, bản đồ, rừng, lớp tối), hoạt ảnh rìu chém rừng `1150ms`, `blocked.html` với DNR, `chrome.i18n`, `manifest.json`, Offscreen Audio (kể cả Pause > 30 giây) và fetch catalog nhạc từ `khangbui2010.github.io`.
+   - **Đã nghiệm thu trên Chrome thật trước UX-5 theo xác nhận của người dùng:** Popup `400×600` (thanh điều hướng 5 tab, kiến trúc bản đồ, rừng, lớp tối), hoạt ảnh rìu chém rừng `1150ms`, `blocked.html` với DNR, `chrome.i18n`, `manifest.json`, Offscreen Audio (kể cả Pause > 30 giây) và fetch catalog nhạc từ `khangbui2010.github.io`.
+   - **Chưa kiểm chứng trực quan trên Chrome thật:** Lớp render canvas `<TerrainBitmapCanvas>` mới của **UX-5** trên `MapGridView` (ở các mức scale Windows `100%/125%/150%/175%` / browser zoom, kéo bản đồ, Expansion auto-fit, rìu chém `680ms`, đối chiếu `#sprites`).
    - **Chưa nối để nghiệm thu UI trên Chrome:** Phần **Quest Engine & Schema v3 (Giai đoạn 2a)** hiện chỉ nằm ở tầng pure core / migration tests (chờ nối ở **Giai đoạn 2b** và mở UI ở **Giai đoạn 5c**).
 
 ---
 
 ## 5. BƯỚC TIẾP THEO (NEXT STEPS)
 
-1. **Nghiệm thu & Duyệt Giai đoạn 2a (`5B.5`):** Rà soát thiết kế Pure Quest Engine (`src/types/quests.ts`, `src/core/quests/`), Schema v3 (`fq_quests`, `v3_questsSchema.ts`), bản đồng bộ tài liệu (`README.md`, `PRODUCT_SPEC.md`, `ARCHITECTURE.md`, `PROJECT_STATUS.md`), mục dọn quy tắc 0.5x và bản cập nhật nghiệm thu Chrome thật trong `respond.md`. **DỪNG chờ duyệt trước khi sang Giai đoạn 2b.**
-2. **Các giai đoạn tiếp theo trong lộ trình 5B.5:**
+1. **Nghiệm thu & Duyệt UX-5 (`Map Terrain Bitmap`):** Người dùng kiểm tra trực quan bản đồ UX-5 trên Chrome thật theo 6 bước trong `respond.md` và phản hồi duyệt UX-5. **DỪNG chờ duyệt UX-5.**
+2. **Nghiệm thu & Duyệt Giai đoạn 2a (`5B.5`):** Rà soát thiết kế Pure Quest Engine (`src/types/quests.ts`, `src/core/quests/`), Schema v3 (`fq_quests`, `v3_questsSchema.ts`), bản đồng bộ tài liệu (`README.md`, `PRODUCT_SPEC.md`, `ARCHITECTURE.md`, `PROJECT_STATUS.md`) trước khi sang Giai đoạn 2b.
+3. **Các giai đoạn tiếp theo trong lộ trình 5B.5:**
    - **Giai đoạn 2b (`QuestCoordinator` & Atomic Wiring):** Mở rộng `StorageManager.commitSessionOutcomeInternal` nhận `questOutcomeDelta?` dưới `StorageMutex`, nối `SessionCoordinator` & `MessageHandler` (`GET_QUEST_STATE`, `CLAIM_QUEST_REWARD`) + simulator `extensionClient.ts`, kiểm chứng Coins/XP/Level/DailyStats hiện có hoàn toàn không đổi.
    - **Giai đoạn 5c (`QuestView` & `StatsView`):** Nâng cấp `StatsView` gắn Day/Month/Year + `StatsBarChart` + `FOCUS_STAT_UNLOCK` của `Elder's Hut`, hoàn thiện tab `Quests` (Manual Claim, huy hiệu chưa nhận, đồng hồ reset), rồi nghiệm thu phần giao diện mới này trên Chrome.
    - **Giai đoạn 6–7 & `Awards` thật:** Hoàn thiện i18n thông báo / `RewardHelpModal` / error codes và xây dựng hệ thống `Awards` thật.
-3. **CWS Hardening & Tối ưu Gói:** Thống nhất 1 lockfile (`package-lock.json` vs `bun.lock`), xem xét tách chunk Vite (`popup-*.js` > `500 kB`), và chuẩn bị thuyết minh quyền `web_accessible_resources` (`<all_urls>`) + `host_permissions` + `"offscreen"` khi lên Chrome Web Store.
-4. **Milestone 5C:** `UPGRADE_BUILDING`, chuyển kỷ nguyên sang Bronze Age và mở khóa nút nâng cấp trong `BuildingDetailsModal`.
+4. **CWS Hardening & Tối ưu Gói:** Thống nhất 1 lockfile (`package-lock.json` vs `bun.lock`), xem xét tách chunk Vite (`popup-*.js` > `500 kB`), và chuẩn bị thuyết minh quyền `web_accessible_resources` (`<all_urls>`) + `host_permissions` + `"offscreen"` khi lên Chrome Web Store.
+5. **Milestone 5C:** `UPGRADE_BUILDING`, chuyển kỷ nguyên sang Bronze Age và mở khóa nút nâng cấp trong `BuildingDetailsModal`.

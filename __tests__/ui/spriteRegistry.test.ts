@@ -245,8 +245,10 @@ test('MapGridView SSR (4a): renders Tiny Town grass tiles, building PixelSprites
     })
   );
 
-  // Terrain grass tiles rendered via TileImage
-  assert.ok(html.includes('/assets/sprites/kenney-tiny-town/tilemap_packed.png'));
+  // UX-5: Terrain rendered via single composite bitmap canvas (no per-cell TileImage <img>)
+  assert.ok(html.includes('data-testid="map-terrain-bitmap"'));
+  assert.ok(html.includes('image-rendering:pixelated'));
+  assert.equal(html.includes('<img'), false);
   // Stone Age building sprites rendered inline via PixelSprite
   assert.ok(html.includes('data-sprite-id="stone_age_campfire"'));
   assert.ok(html.includes('data-sprite-id="stone_age_food_cache"'));
@@ -395,8 +397,8 @@ test('MapGridView & SpriteGallery SSR (Stage B): MapGridView renders 24x24 stage
   // 8x8 initial grid + 2-chunk (8-cell) forest margin on each side -> 24x24 render stage
   assert.ok(mapHtml.includes('data-render-width="24"'));
   assert.ok(mapHtml.includes('data-render-height="24"'));
-  assert.ok(mapHtml.includes('data-locked-forest="true"'));
-  assert.ok(mapHtml.includes('opacity:0.4'));
+  assert.ok(mapHtml.includes('data-testid="map-terrain-bitmap"'));
+  assert.ok(mapHtml.includes(':0.44:'));
   assert.ok(mapHtml.includes('data-unlocked="true"'));
   assert.ok(mapHtml.includes('data-unlocked="false"'));
   assert.ok(!mapHtml.includes('data-terrain-id='));

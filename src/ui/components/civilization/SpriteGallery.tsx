@@ -21,7 +21,11 @@ import {
   getCellDecor,
 } from './terrainDecor.ts';
 import { TerrainCellLayers } from './TerrainCellLayers.tsx';
+import { TerrainBitmapCanvas } from './TerrainBitmapCanvas.tsx';
 import { StatsBarChart, StatsBarDatum } from '../StatsBarChart.tsx';
+
+const GALLERY_16X11_IS_UNLOCKED = (cx: number, cy: number): boolean =>
+  cx < -8 || cx >= 8 || cy < -8 || cy >= 3;
 import { useTranslation } from '../../../i18n/I18nContext.tsx';
 import {
   aggregateDayStats,
@@ -559,7 +563,7 @@ export const SpriteGallery: React.FC<SpriteGalleryProps> = ({ onBack }) => {
                       gy,
                       false,
                       TERRAIN_DECOR_SEED,
-                      (cx, cy) => cx < -8 || cx >= 8 || cy < -8 || cy >= 3
+                      GALLERY_16X11_IS_UNLOCKED
                     );
                     return (
                       <div key={`16x11-${gx},${gy}`} className="relative w-8 h-8 overflow-hidden">
@@ -573,6 +577,40 @@ export const SpriteGallery: React.FC<SpriteGalleryProps> = ({ onBack }) => {
                     );
                   })
                 )}
+              </div>
+            </div>
+          </div>
+
+          {/* UX-5: Single Composite Canvas Bitmap Preview of the Exact Same 16x11 Patch */}
+          <div
+            data-testid="gallery-terrain_bitmap_16x11"
+            className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-2 bg-slate-50/50 dark:bg-slate-800/30"
+          >
+            <div>
+              <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                Map terrain bitmap (16×11 Locked Forest · UX-5 Single Canvas)
+              </h3>
+              <p className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
+                Rendered with TerrainBitmapCanvas / renderTerrainBitmap (256×176 native px → 512×352 CSS px · pixelated) using the identical (-8,-8) 16×11 sample for direct comparison with the DOM grid above
+              </p>
+            </div>
+
+            <div className="overflow-x-auto">
+              <div
+                style={{ width: 16 * 32, height: 11 * 32 }}
+                className="rounded-lg overflow-hidden border border-slate-300 dark:border-slate-700 shadow-xs"
+              >
+                <TerrainBitmapCanvas
+                  testId="gallery-terrain-bitmap-canvas"
+                  minX={-8}
+                  minY={-8}
+                  cols={16}
+                  rows={11}
+                  cellSize={32}
+                  seed={TERRAIN_DECOR_SEED}
+                  isCellUnlocked={GALLERY_16X11_IS_UNLOCKED}
+                  className="block"
+                />
               </div>
             </div>
           </div>
