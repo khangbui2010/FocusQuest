@@ -21,8 +21,8 @@ Focus Quest transforms daily study and focused work into a civilization-building
     - `FOCUS_SUPPORT`: Unlocks statistics and focus insights (Elder's Hut, Meditation Cave).
     - `ECONOMY_EFFECT`: Grants additive CoinBonus percentages to focus session rewards (+2%, +3% per level).
 - **Focus Music Player (MV3 Offscreen Streaming):** Streams curated tracks from the online `FocusQuest-LOFI-archive` catalog through a Chrome Offscreen Document (`Chrome >= 116`), persisting playback position past Chrome's 30s audio idle cutoff with a session-scoped mini-player and expandable bottom sheet.
-- **Map-First 5-Tab Popup & Analytics Engine:** Compact `Quests | Focus | Map | Awards | Stats` bottom navigation (hidden inside active/post-focus sessions until Exit), pure Gregorian Day/Month/Year Stats aggregator with custom SVG bar charts, and half-up 2-decimal UI display (`formatRewardAmount`) preserving full IEEE-754 precision in storage.
-- **Quest Engine, Coordinator & Schema v3 (Stage 2b):** Daily & Weekly Quest engine (`src/core/quests/`), `QuestCoordinator` (`GET_QUEST_STATE`, `CLAIM_QUEST_REWARD` with typed `errorCode` + EN/VI localization), idempotent v3 storage migration, and atomic Session-Quest settlement under `StorageMutex` with rollback compensation (interactive `QuestView` & upgraded `StatsView` scheduled next for Stage 5c).
+- **Map-First 5-Tab Popup & Analytics Engine (`Stage 5c`):** Compact `Quests | Focus | Map | Awards | Stats` bottom navigation (hidden inside active/post-focus sessions until Exit), upgraded `StatsView` (`Day | Month | Year` navigation, custom SVG `StatsBarChart`, and `Focus Streak` gated by `Elder's Hut` `FOCUS_STAT_UNLOCK`), and half-up 2-decimal UI display (`formatRewardAmount`) preserving full IEEE-754 precision in storage.
+- **Daily & Weekly Quests (`Stage 2b` + `Stage 5c`):** Interactive `QuestView` (4 card states, manual claim via `CLAIM_QUEST_REWARD`, unclaimed badge on `Navbar`, live reset countdowns, Quest Streak with zero passive Coins), `QuestCoordinator`, Schema v3 migration, and atomic Session-Quest settlement under `StorageMutex` with rollback compensation.
 - **Full EN/VI Localization & MV3 CSP Compliance:** 100% EN/VI translations across UI, Chrome notifications, backend error mapper, Chrome `_locales`, and CSP-safe `blocked.html` + `blocked.js`.
 - **Concurrency & Transaction Safety:** All mutations execute inside atomic critical sections guarded by `StorageMutex` with rollback compensation.
 
@@ -68,7 +68,7 @@ npm install
 # Start local interactive dev preview (Port 3000)
 npm run dev
 
-# Run comprehensive test suite (595/595 tests)
+# Run comprehensive test suite (604/604 tests)
 npm test
 
 # Typecheck and lint codebase
@@ -84,8 +84,7 @@ npm run build
 
 ## 🗺️ Roadmap
 
-- **Quest UI & Analytics (`Stage 5c`):** Build the interactive `QuestView` (manual claim, unclaimed badge, live reset countdowns) and upgrade `StatsView` with Day/Month/Year views, `StatsBarChart`, and `FOCUS_STAT_UNLOCK` (`Quests` and `Awards` tabs currently show `"Coming soon"` placeholders).
-- **Awards System:** Implement achievement tracking and milestones to replace the `Awards` tab placeholder.
+- **Stage 6–7 & Awards System:** Complete notification/help/error polish and implement achievement tracking and milestones to replace the `Awards` tab `"Coming soon"` placeholder (`Quests` and `Stats` are now live in Stage 5c).
 - **Milestone 5C — Era Progression & Upgrades:** Enable `UPGRADE_BUILDING` (unlocking the currently locked `"Milestone 5C"` upgrade action) and advance civilization progression into the **Bronze Age** and subsequent historical eras.
 
 ---

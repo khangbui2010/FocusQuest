@@ -1,7 +1,7 @@
 # FOCUS QUEST — PROJECT STATUS
 Cập nhật lần cuối: 2026-11-18
-Giai đoạn hiện tại: **Milestone 5B.5 — Giai đoạn 2b** *(Atomic Session Integration, QuestCoordinator & Message Wiring — **ĐÃ HOÀN TẤT, DỪNG chờ duyệt**)* + **Milestone UX — Giai đoạn UX-5** *(Composite Terrain Canvas Một Tấm sửa khe sáng/lưới mờ trên `MapGridView` — ĐÃ HOÀN TẤT, chờ nghiệm thu trực quan Chrome thật)* *(toàn bộ các giai đoạn trước: UX-1..UX-4, LOFI-1/1b/2, 5B.5 Giai đoạn 1b & 3 đều **ĐÃ DUYỆT**)*.
-Trạng thái: Verified (595/595 Tests PASS 3/3 lần | Build PASS | Lint PASS — test tự động chạy qua Node.js, React SSR `renderToString`, mock 2D canvas context & mock Chrome adapters; **riêng Giai đoạn 2b trên Chrome Service Worker thật & canvas UX-5 chưa kiểm chứng trực quan trên Chrome thật**; các luồng trước UX-5 gồm popup `400×600`, thanh 5 tab, rìu chém, `blocked.html` DNR, `chrome.i18n`, `manifest`, Offscreen Audio kể cả Pause > 30s và fetch catalog nhạc đã được người dùng nghiệm thu thủ công trên Chrome thật)
+Giai đoạn hiện tại: **Milestone 5B.5 — Giai đoạn 5c** *(QuestView & StatsView nâng cấp — **ĐÃ HOÀN TẤT, DỪNG chờ duyệt**)* + **Milestone UX — Giai đoạn UX-5** *(Composite Terrain Canvas Một Tấm trên `MapGridView` — ĐÃ HOÀN TẤT, chờ nghiệm thu trực quan Chrome thật)* *(toàn bộ các giai đoạn trước: UX-1..UX-4, LOFI-1/1b/2, 5B.5 Giai đoạn 1b, 2b & 3 đều **ĐÃ DUYỆT**)*.
+Trạng thái: Verified (604/604 Tests PASS 3/3 lần | Build PASS | Lint PASS — test tự động chạy qua Node.js, React SSR `renderToString`, mock 2D canvas context & mock Chrome adapters; **giao diện Stage 5c, canvas UX-5 & Service Worker Stage 2b chưa kiểm chứng trực quan trên Chrome thật**; các luồng trước UX-5 gồm popup `400×600`, thanh 5 tab, rìu chém, `blocked.html` DNR, `chrome.i18n`, `manifest`, Offscreen Audio kể cả Pause > 30s và fetch catalog nhạc đã được người dùng nghiệm thu thủ công trên Chrome thật)
 
 ---
 
@@ -38,12 +38,17 @@ Trạng thái: Verified (595/595 Tests PASS 3/3 lần | Build PASS | Lint PASS �
        - Tạo `src/types/quests.ts` (`QuestPeriod`, `QuestMetric`, `QuestDefinition`, `QuestProgress`, `QuestStreak`, `QuestState`, `QuestOutcomeDelta`, `QuestResetCountdown`, `ClaimQuestResult`), thêm `quests?: QuestState` vào `StorageSchema` (`storageSchema.ts`), re-export qua `src/types/index.ts` và thêm `STORAGE_KEYS.QUESTS = 'fq_quests'` (`storageKeys.ts`).
        - Xây dựng Pure Quest Engine (`src/core/quests/{questCatalog,questDates,questEngine,index}.ts` — `0` lời gọi `Date.now()`, `0` lời gọi `Math.random()`): 3 Daily Quests (cap cố định `40 Coins · 100 XP`), 3 Weekly Quests 3 trục trực giao (cap cố định `150 Coins · 370 XP`), reset lịch Gregory Thứ Hai đầu tuần an toàn qua năm mới & năm nhuận `29/02`, cơ chế Manual Claim, đếm ngược reset (`getResetCountdown`), anti-clock-rollback & ring buffer `recentClaimedKeys` tối đa `14` kỳ, Streak (`0` Coin thụ động), bộ ánh xạ phiên `toQuestOutcomeDelta` đúng All-or-Nothing (Pomodoro Stopwatch chỉ tính `completedFocusCount × intervalDuration`, không cộng interval dở dang).
        - Tạo `src/storage/migrations/v3_questsSchema.ts`, nâng `CURRENT_SCHEMA_VERSION = 3` (`migrationRunner.ts`), thêm `getQuests` / `setQuests` / `updateQuests` (sanitize defensive khi dữ liệu corrupt) trong `StorageManager` mà **không đụng** `commitSessionOutcomeInternal`, `SessionCoordinator`, `MessageHandler`, hay UI. Thêm `questEngine.test.ts` (9 tests) & `v3Migration.test.ts` (4 tests) (+13 tests → `574/574 PASS`).
-    12. **Giai đoạn 2b (`2026-11-18` — Atomic Session Integration, QuestCoordinator & Message Wiring — ĐÃ HOÀN TẤT, DỪNG CHỜ DUYỆT):**
+    12. **Giai đoạn 2b (`2026-11-18` — Atomic Session Integration, QuestCoordinator & Message Wiring — ĐÃ DUYỆT):**
        - **Quyết toán nguyên tử (`StorageManager.commitSessionOutcomeInternal`):** Mở rộng nhận `questOutcomeDelta?`; chỉ khi phiên `COMPLETED` hợp lệ mới đọc `fq_quests` (tự phục hồi `sanitizeQuestState` / `createInitialQuestState` nếu thiếu/hỏng), chạy `rolloverQuestState` rồi `applyCompletedSession`, và ghi `CURRENT_SESSION + ECONOMY + DAILY_STATS + QUESTS` trong một `setMultiple` duy nhất dưới `StorageMutex` kèm rollback compensation khôi phục toàn bộ khóa cũ / xóa khóa mới nếu ghi thất bại; lỗi Quest được cô lập `try/catch` để không làm hỏng quyết toán phiên. Các nhánh `Give Up`, `INTERRUPTED` (kể cả `POMODORO_STOPWATCH BROWSER_CLOSED`), Stopwatch `< 5m`, Pomodoro Stopwatch `0` interval và `Reset` tuyệt đối không đụng tới `fq_quests`.
        - **Nối `SessionCoordinator` (`buildQuestOutcomeDeltaSafe`):** Gọi ở đúng 4 điểm `COMPLETED` (`finishStopwatch` Pomodoro Stopwatch & Stopwatch, `completeCountdown`, `advancePomodoroStage` Pomodoro Countdown 100%) dùng ngày hoàn thành địa phương `getLocalDateKey(now)` (phiên vắt qua `00:00` cộng cho ngày `N+1` đồng nhất với `fq_daily_stats`). Giữ nguyên 100% thưởng Coins/XP/Level/DailyStats và vị trí gọi LOFI hooks (`onSessionSyncHook`, `onSessionEndedHook`).
        - **`QuestCoordinator` & Messaging (`src/background/questCoordinator.ts`, `messageHandler.ts`, `background/index.ts`, `types/messages.ts`, `errorTranslator.ts`, `extensionClient.ts`):** Phục vụ `GET_QUEST_STATE` & `CLAIM_QUEST_REWARD` dưới `StorageMutex` với 6 `QuestErrorCode` song ngữ EN/VI, tái sử dụng `calculatePlayerLevel(totalXP)` khi claim qua `commitQuestClaimInternal`, **không ghi thưởng Claim vào `fq_daily_stats`**, và đồng bộ simulator `extensionClient.ts` (gồm auto-complete `COUNTDOWN` trong `GET_SESSION_STATE`).
        - **Kiểm thử:** Thêm `__tests__/background/questCoordinator.test.ts` (`+12` tests: kiểm toán Bước 0a, bất biến 4 mode + idempotency, nhánh không đủ điều kiện giữ sạch `fq_quests`, self-heal & cô lập lỗi, rollback partial `setMultiple` cả commit & claim, vượt mốc `00:00` + rollover + anti-rollback, thưởng phẳng + IEEE-754 + loại trừ `fq_daily_stats`, 6 `QuestErrorCode` + ledger, concurrency mutex, `MessageHandler`/`errorTranslator`, simulator) và cập nhật `__tests__/storage/v3Migration.test.ts` cho Giai đoạn 2b & ngày cục bộ.
-  - **Bước tiếp theo trong 5B.5:** Các giai đoạn trước đã hoàn tất; **Giai đoạn 2b đang DỪNG chờ người dùng duyệt** trước khi triển khai **Giai đoạn 5c** (`QuestView` tương tác, nâng cấp `StatsView` gắn Day/Month/Year + `StatsBarChart` + `FOCUS_STAT_UNLOCK`) → **Giai đoạn 6–7** & **Awards** thật.
+    13. **Giai đoạn 5c (`2026-11-18` — `QuestView` & `StatsView` nâng cấp — ĐÃ HOÀN TẤT, DỪNG CHỜ DUYỆT):**
+       - **Tab `Quests` tương tác (`src/ui/components/quests/QuestView.tsx`, `src/ui/utils/questFormatting.ts`):** Thay thế hoàn toàn khung tạm `quests-placeholder-view` ("Coming soon"); đọc động toàn bộ định nghĩa & cap Daily (`40C/100XP`), Weekly (`150C/370XP`) từ `questCatalog.ts`, hỗ trợ đủ 4 trạng thái thẻ (`IN_PROGRESS`, `READY`, `CLAIMED`, `EXPIRED`), đếm ngược reset 1s/giây kèm auto-refetch đơn tuyến khi chạm `0`, khóa chống bấm đúp theo khóa `period:questId` khi gọi `CLAIM_QUEST_REWARD`, banner nhận thưởng phẳng + cảnh báo lỗi bản địa hóa qua `errorTranslator.ts` (tự làm mới khi `QUEST_ALREADY_CLAIMED`/`QUEST_EXPIRED`), `role="progressbar"` chuẩn WCAG và thẻ Quest Streak (0 Coin thụ động).
+       - **Huy hiệu chưa nhận trên `Navbar.tsx`:** Thêm prop tùy chọn `unclaimedQuestCount = 0`; ẩn badge ở `0`, hiện `1..9`, giới hạn `9+` khi `>= 10` (`data-testid="quest-unclaimed-badge"` kèm `aria-label` song ngữ), đồng bộ live từ `App.tsx`. Giữ nguyên tab `Awards` ở trạng thái `"Coming soon"` (`awards-placeholder-view`).
+       - **Nâng cấp `StatsView.tsx` (`src/ui/utils/statsPeriod.ts`, `src/ui/utils/focusStatUnlock.ts`):** Chế độ 3 tab `Day | Month | Year` (`role="tablist"`), nút bước kỳ `‹`/`›` và nhảy nhanh `Today / This Month / This Year` khóa không vượt quá hôm nay (hỗ trợ năm nhuận 29/02 & vắt năm), neo ngày địa phương qua `getLocalDateKey()` (gỡ `.toISOString().slice(0, 10)`), tải đầy đủ lịch sử qua `GET_DAILY_STATS`, KPI tổng hợp + `completionRate` hiện `—` khi null + Peak Day / Best Month, biểu đồ cột SVG `<StatsBarChart />` (7 ngày / 28–31 ngày / 12 tháng), ghi chú tách biệt Coin/XP Focus với Quest Claim, và thẻ **Focus Streak** khóa/mở theo effect `FOCUS_STAT_UNLOCK` (`focus_metric_streak_analysis` của `stone_age_elder_hut`).
+       - **Bản địa hóa & Kiểm thử:** Xóa `quest.placeholder.*`, bổ sung khóa `quests.*`, `stats.*`, `nav.questsBadgeAria` bảo đảm parity 100% EN/VI; thêm `+9` tests (`__tests__/ui/questView.test.ts` `5` tests & `__tests__/ui/statsViewUpgrade.test.ts` `4` tests → **`604/604 PASS`** 3/3 lần).
+  - **Bước tiếp theo trong 5B.5:** Các giai đoạn 1a..3, 2a, 2b đã hoàn tất/duyệt; **Giai đoạn 5c đang DỪNG chờ người dùng duyệt** trước khi triển khai **Giai đoạn 6–7** & hệ thống **Awards** thật.
 - **Milestone UX *(KHÔNG thuộc Phase 5 / 5B.5 / LOFI)* — Giai đoạn UX-1 (`2026-11-17` — ĐÃ DUYỆT):**
   - **Định nghĩa `"ở trong phiên tập trung"` thuần từ snapshot (`src/ui/utils/sessionNavigation.ts`):** `isInFocusSession(session)` suy ra duy nhất từ `SessionSnapshot` ở background (`RUNNING` focus / nghỉ ngắn / nghỉ dài, `PAUSED`, và mọi trạng thái kết thúc `COMPLETED` / `ABANDONED` / `INTERRUPTED` chưa bấm `Exit`; không phụ thuộc modal/sheet cục bộ).
   - **Ẩn `<Navbar>` & giữ tab Tập trung trong phiên (`App.tsx`, `MusicPlayerSheet.tsx`, `TimerView.tsx`):** Khi `isInFocusSession` đúng, `<Navbar>` bị loại khỏi cây render hoàn toàn (không ẩn bằng CSS), tab hiệu lực khóa cứng về `'focus'` (nút brand trên `Header` cũng ngừng chuyển về Bản đồ), `MusicPlayerSheet` chuyển đáy `pb-[64px]` → `pb-0` và `STATE 1`/`STATE 2` trong `TimerView.tsx` dùng `min-h-0 overflow-y-auto` để giải phóng `64px` chiều cao mà không cắt giao diện ở `400×600`.
@@ -108,7 +113,7 @@ Trạng thái: Verified (595/595 Tests PASS 3/3 lần | Build PASS | Lint PASS �
   - Cơ chế chặt/dọn cây cối như dữ liệu game và cây cối biến thể theo từng Era.
   - Render virtualization khi bản đồ mở rộng rất lớn.
   - Tối ưu tách chunk bundle Vite cho `popup-*.js` (> 500 kB, đang chủ ý hoãn).
-  - Nối effect `FOCUS_STAT_UNLOCK` (`focus_metric_streak_analysis`) của công trình `stone_age_elder_hut` (Elder's Hut) vào logic hiển thị/khóa mở thống kê Streak trong `StatsView`.
+  - *(Đã nối xong ở Giai đoạn 5c)* Nối effect `FOCUS_STAT_UNLOCK` (`focus_metric_streak_analysis`) của công trình `stone_age_elder_hut` (Elder's Hut) vào thẻ `Focus Streak` trong `StatsView.tsx`.
 
 ---
 
@@ -125,7 +130,7 @@ Trạng thái: Verified (595/595 Tests PASS 3/3 lần | Build PASS | Lint PASS �
   - `BuildingInstance`: Thể hiện của công trình người chơi sở hữu trên bản đồ (`id`, `definitionId`, `position`, `level`, `placedAt`).
 - **Phân loại 3 nhóm công trình (Categories):**
   - `DECORATIVE`: Công trình trang trí thế giới (`stone_age_campfire` Campfire, `stone_age_totem` Ancient Totem). Không sinh coin/xp, không có bonus.
-  - `FOCUS_SUPPORT`: Công trình hỗ trợ Focus (Meditation Cave [`stone_age_study_cave`], Elder's Hut [`stone_age_elder_hut`]). Cung cấp effect `FOCUS_FEATURE_UNLOCK` và `FOCUS_STAT_UNLOCK` *(hiện `FOCUS_STAT_UNLOCK` chưa nối vào `StatsView`)*.
+  - `FOCUS_SUPPORT`: Công trình hỗ trợ Focus (Meditation Cave [`stone_age_study_cave`], Elder's Hut [`stone_age_elder_hut`]). Cung cấp effect `FOCUS_FEATURE_UNLOCK` và `FOCUS_STAT_UNLOCK` *(đã nối mở khóa thẻ `Focus Streak` trong `StatsView` ở Giai đoạn 5c)*.
   - `ECONOMY_EFFECT`: Công trình hỗ trợ kinh tế (Foraging Post [`stone_age_foraging_post`], Primitive Granary [`stone_age_food_cache`]). Cung cấp effect `COIN_BONUS` cộng dồn (+2%, +3% mỗi level) áp dụng **chỉ cho Coins** của phiên Focus hoàn thành, hoàn toàn không tác động lên XP.
 - **Quy tắc Zero Passive Income:** Tuyệt đối không sinh coin/xp thụ động theo thời gian. Mọi tài nguyên chỉ kiếm được qua phiên Focus thực tế *(và sắp tới có thêm thưởng nhiệm vụ Focus trong Giai đoạn 2a/2b cũng chỉ tiến triển khi hoàn thành Focus Session)*.
 - **Storage Schema v2 & v3 Migration:** `STORAGE_KEYS.CIVILIZATION = 'fq_civilization'` (v2, `8×8` grid) và `STORAGE_KEYS.QUESTS = 'fq_quests'` (v3 trong Giai đoạn 2a), nâng `CURRENT_SCHEMA_VERSION = 3` qua `v3_questsSchema.ts`, bảo toàn 100% tài sản và lịch sử người chơi cũ (không backfill giả phiên cũ).
@@ -177,12 +182,12 @@ Trạng thái: Verified (595/595 Tests PASS 3/3 lần | Build PASS | Lint PASS �
 
 ## 3. KẾT QUẢ KIỂM ĐỊNH THỰC TẾ (VERIFIED REAL VERIFICATION RESULTS)
 
-*Lưu ý: Các số liệu dưới đây được xác minh trực tiếp bằng việc chạy lệnh thực tế trên repository sau khi hoàn tất **Giai đoạn 2b** (`2026-11-18`). Toàn bộ test tự động chạy trên Node.js (`UI tests` qua React SSR `renderToString` & mock 2D canvas context, `backend tests` qua mock Chrome adapters). Các luồng trước UX-5 (**popup `400×600` thanh 5 tab, bản đồ/rừng/lớp tối bản DOM, hoạt ảnh rìu chém, `blocked.html` DNR, `chrome.i18n`, `manifest`, Offscreen Audio kể cả Pause > 30 giây và fetch catalog nhạc**) đã được người dùng **nghiệm thu thủ công trên Chrome thật**; **riêng Giai đoạn 2b trên Service Worker thật & bản vẽ canvas UX-5 chưa kiểm chứng trực quan trên Chrome thật**.*
+*Lưu ý: Các số liệu dưới đây được xác minh trực tiếp bằng việc chạy lệnh thực tế trên repository sau khi hoàn tất **Giai đoạn 5c** (`2026-11-18`). Toàn bộ test tự động chạy trên Node.js (`UI tests` qua React SSR `renderToString` & mock 2D canvas context, `backend tests` qua mock Chrome adapters). Các luồng trước UX-5 (**popup `400×600` thanh 5 tab, bản đồ/rừng/lớp tối bản DOM, hoạt ảnh rìu chém, `blocked.html` DNR, `chrome.i18n`, `manifest`, Offscreen Audio kể cả Pause > 30 giây và fetch catalog nhạc**) đã được người dùng **nghiệm thu thủ công trên Chrome thật**; **riêng giao diện Stage 5c (`QuestView`/`StatsView`), bản vẽ canvas UX-5 & Service Worker Stage 2b chưa kiểm chứng trực quan trên Chrome thật**.*
 
 ### 3.1. Production Build (`npm run clean && npm run build`)
-- **Trạng thái:** **PASS (Exit code 0)** — Vite `v8.3.8`, `1,749 modules transformed`, thời gian **`1.03s`**.
-- **Kiểm tra Artifacts thư mục `dist/` (Tổng dung lượng tệp thực tế: `1,111,022 B`):**
-  - `dist/background.js`: **CÓ (`93,530 B` / `93.53 kB`, gzip: `20.57 kB`)** *(trước Giai đoạn 2b ở UX-5: `93,016 B`, `+514 B`; Service Worker độc lập, `0` `react-dom` trong background)*.
+- **Trạng thái:** **PASS (Exit code 0)** — Vite `v8.3.8`, `1,753 modules transformed`, thời gian **`1.46s`**.
+- **Kiểm tra Artifacts thư mục `dist/` (Tổng dung lượng tệp thực tế: `1,167,221 B`):**
+  - `dist/background.js`: **CÓ (`93,534 B` / `93.53 kB`, gzip: `20.60 kB`)** *(giữ nguyên hoàn toàn lõi Service Worker so với Giai đoạn 2b, `0` `react-dom` trong background)*.
   - `dist/offscreen.js`: **CÓ (`3,878 B` / `3.87 kB`, gzip: `1.48 kB`)** — Audio engine MV3 chạy trong Offscreen Document.
   - `dist/offscreen.html`: **CÓ (`264 B`)** — CSP-safe (0 inline script).
   - `dist/blocked.js`: **CÓ (`1,321 B` / `1.32 kB`, gzip: `0.60 kB`)** — Module CSP-safe điều khiển đa ngôn ngữ `blocked.html`.
@@ -191,19 +196,19 @@ Trạng thái: Verified (595/595 Tests PASS 3/3 lần | Build PASS | Lint PASS �
   - `dist/manifest.json`: **CÓ (`984 B`)** — Chrome MV3 Manifest (`"minimum_chrome_version": "116"`, `"default_locale": "en"`, `"offscreen"`).
   - `dist/_locales/`: **CÓ** — `en/messages.json` (`382 B`) và `vi/messages.json` (`440 B`).
   - `dist/icons/`: **CÓ** — Bộ icon đầy đủ (`icon16.png`, `icon32.png`, `icon48.png`, `icon128.png`, `icon.svg`).
-  - `dist/assets/popup-5am1wdzk.js`: **CÓ (`774,872 B` / `774.87 kB`, gzip: `204.59 kB`)** *(chủ ý hoãn tách chunk)*.
-  - `dist/assets/popup-Cnjs0qfG.css`: **CÓ (`88,317 B` / `88.31 kB`, gzip: `13.80 kB`)**.
-  - `dist/assets/questEngine-C5pC2Fnz.js`: **CÓ (`66,252 B` / `66.25 kB`, gzip: `18.28 kB`)** *(shared pure chunk dùng chung cho popup simulator và background)*.
-  - `dist/assets/translator-B5-w4v6G.js`: **CÓ (`52,477 B` / `52.47 kB`, gzip: `14.14 kB`)**.
+  - `dist/assets/popup-g4nk-QMx.js`: **CÓ (`818,451 B` / `818.45 kB`, gzip: `212.11 kB`)** *(chủ ý hoãn tách chunk)*.
+  - `dist/assets/popup-Dt95uzvz.css`: **CÓ (`90,982 B` / `90.98 kB`, gzip: `14.11 kB`)**.
+  - `dist/assets/questEngine-Dy-NJjPT.js`: **CÓ (`66,805 B` / `66.80 kB`, gzip: `18.48 kB`)** *(shared pure chunk dùng chung cho popup và background)*.
+  - `dist/assets/translator-D7NoQwjU.js`: **CÓ (`61,875 B` / `61.87 kB`, gzip: `16.40 kB`)**.
   - `dist/assets/storageKeys-C4hhw6ET.js`: **CÓ (`398 B` / `0.39 kB`, gzip: `0.27 kB`)**.
   - `dist/assets/sprites/`: **CÓ** — Đủ `CREDITS.md`, `kenney-tiny-town` và `kenney-tiny-dungeon`.
   - `dist/assets/music/` & file audio cục bộ: **KHÔNG TỒN TẠI (`0` file audio)**.
 
 ### 3.2. Automated Tests (`npm test`)
-- **Trạng thái:** **PASS (Exit code 0) — 3/3 lần chạy liên tiếp** — **595 / 595 tests PASS (100%)** *(gồm `+12` tests mới cho Stage 2b trong `__tests__/background/questCoordinator.test.ts`; toàn bộ chạy trên Node.js qua React SSR `renderToString`, mock 2D context & mock Chrome adapters)*.
-  - Lần 1: `595` Passed | `0` Failed | `0` Skipped | `0` Cancelled (`25,514.85 ms`).
-  - Lần 2: `595` Passed | `0` Failed | `0` Skipped | `0` Cancelled (`24,657.47 ms`).
-  - Lần 3: `595` Passed | `0` Failed | `0` Skipped | `0` Cancelled (`22,424.03 ms`).
+- **Trạng thái:** **PASS (Exit code 0) — 3/3 lần chạy liên tiếp** — **604 / 604 tests PASS (100%)** *(gồm `+9` tests mới cho Stage 5c: `5` trong `__tests__/ui/questView.test.ts` & `4` trong `__tests__/ui/statsViewUpgrade.test.ts`; toàn bộ chạy trên Node.js qua React SSR `renderToString`, mock 2D context & mock Chrome adapters)*.
+  - Lần 1: `604` Passed | `0` Failed | `0` Skipped | `0` Cancelled (`39,008.59 ms`).
+  - Lần 2: `604` Passed | `0` Failed | `0` Skipped | `0` Cancelled (`31,786.63 ms`).
+  - Lần 3: `604` Passed | `0` Failed | `0` Skipped | `0` Cancelled (`31,948.09 ms`).
 
 ### 3.3. Typecheck & Lint (`npm run lint` — `tsc --noEmit`)
 - **Trạng thái:** **PASS (Exit code 0)** — **0 errors, 0 warnings**.
@@ -213,22 +218,21 @@ Trạng thái: Verified (595/595 Tests PASS 3/3 lần | Build PASS | Lint PASS �
 ## 4. ĐỐI CHIẾU TÀI LIỆU & KIỂM SOÁT RÀNG BUỘC
 
 1. **Các bất biến kinh tế & nghiệp vụ tiếp tục được bảo toàn:**
-   - **Zero Passive Income & Economy:** Coins/XP/Multiplier/CoinBonus của mọi phiên Focus giữ nguyên từng con số so với trước khi nối Quest; XP không chịu ảnh hưởng CoinBonus; các music hook của `SessionCoordinator` giữ nguyên vị trí gọi ngoài `StorageMutex` và bọc `try/catch`; thưởng Quest phẳng chỉ cộng vào ví khi bấm Claim thủ công và **không ghi vào `fq_daily_stats`**.
-   - **All-or-Nothing Pomodoro Countdown & Allowlist Lock:** Giữ nguyên toàn bộ khóa bảo vệ trong phiên chạy/tạm dừng và điều kiện hợp lệ Quest.
-   - **Mở rộng đất & Schema:** Giữ nguyên công thức `cost(k)`, điều kiện `Player Level >= k + 2`, `fq_civilization` v2 (`GridMap`/coordinator/transaction), Schema v3 `CURRENT_SCHEMA_VERSION = 3` (`fq_quests` nối nguyên tử qua `SessionCoordinator`/`StorageManager` + `QuestCoordinator` ở Stage 2b), DNR blocking (`main_frame`), nút Upgrade khóa `"Milestone 5C"`.
-   - **Cảnh quan Canvas Một Tấm (`UX-5`) & Animation (Chặng B–C):** Thuần lớp hiển thị UI, giữ nguyên 100% `getCellDecor` / M1–M6 trong `terrainDecor.ts`, không lưu trong storage, không cản đặt công trình.
+   - **Zero Passive Income & Economy:** Coins/XP/Multiplier/CoinBonus của mọi phiên Focus giữ nguyên 100%; không sửa lõi `RewardEngine`, `MultiplierRules`, `SessionCoordinator`, `StorageManager` hay `QuestCoordinator`; thưởng Quest phẳng chỉ cộng vào ví khi bấm Claim thủ công via `CLAIM_QUEST_REWARD` và **không ghi vào `fq_daily_stats`**.
+   - **All-or-Nothing Pomodoro Countdown & Allowlist Lock:** Giữ nguyên toàn bộ khóa bảo vệ trong phiên chạy/tạm dừng (`Navbar` và tab `Quests` ẩn trong phiên Focus tới khi bấm `Exit`), `Give Up` / `INTERRUPTED` không tạo tiến độ Quest.
+   - **Mở rộng đất, Schema & Placeholder:** Giữ nguyên công thức `cost(k)`, `Player Level >= k + 2`, `fq_civilization` v2, Schema v3 `CURRENT_SCHEMA_VERSION = 3`, DNR blocking (`main_frame`), nút Upgrade khóa `"Milestone 5C"`, và tab `Awards` giữ nguyên khung tạm `"Coming soon"` (`awards-placeholder-view`).
+   - **Cảnh quan Canvas Một Tấm (`UX-5`) & Animation (Chặng B–C):** Thuần lớp hiển thị UI, giữ nguyên 100% `getCellDecor` / M1–M6 trong `terrainDecor.ts`.
 2. **Tình trạng nghiệm thu thực tế trên Chrome thật (`>= 116`):**
    - **Đã nghiệm thu trên Chrome thật trước UX-5 theo xác nhận của người dùng:** Popup `400×600` (thanh điều hướng 5 tab, kiến trúc bản đồ, rừng, lớp tối), hoạt ảnh rìu chém rừng `1150ms`, `blocked.html` với DNR, `chrome.i18n`, `manifest.json`, Offscreen Audio (kể cả Pause > 30 giây) và fetch catalog nhạc từ `khangbui2010.github.io`.
-   - **Chưa kiểm chứng trực quan / DevTools trên Chrome thật:** Lớp render canvas `<TerrainBitmapCanvas>` của **UX-5** và luồng Service Worker / `fq_quests` thực tế của **Giai đoạn 2b** (`QuestView`/`StatsView` UI sẽ mở ở **Giai đoạn 5c**).
+   - **Chưa kiểm chứng trực quan / DevTools trên Chrome thật:** Giao diện tương tác **Giai đoạn 5c** (`QuestView`, huy hiệu `Navbar`, `StatsView` `Day/Month/Year` + `Focus Streak`), lớp render canvas `<TerrainBitmapCanvas>` của **UX-5**, và luồng Service Worker thực tế của **Giai đoạn 2b**.
 
 ---
 
 ## 5. BƯỚC TIẾP THEO (NEXT STEPS)
 
-1. **Nghiệm thu & Duyệt Giai đoạn 2b (`5B.5`):** Rà soát Bước 0, cơ chế ghi nguyên tử + rollback + cô lập lỗi Quest, `QuestCoordinator`, message contract `GET_QUEST_STATE`/`CLAIM_QUEST_REWARD`, và kiểm thử DevTools Service Worker theo `respond.md`. **DỪNG chờ duyệt Giai đoạn 2b.**
-2. **Nghiệm thu & Duyệt UX-5 (`Map Terrain Bitmap`):** Nếu chưa kiểm trực quan trên Chrome thật, đối chiếu 6 bước trong `respond_2b_prev.md`.
-3. **Các giai đoạn tiếp theo trong lộ trình 5B.5 (sau khi duyệt 2b):**
-   - **Giai đoạn 5c (`QuestView` & `StatsView`):** Nâng cấp `StatsView` gắn Day/Month/Year + `StatsBarChart` + `FOCUS_STAT_UNLOCK` của `Elder's Hut`, hoàn thiện tab `Quests` (Manual Claim, huy hiệu chưa nhận, đồng hồ reset), rồi nghiệm thu phần giao diện mới này trên Chrome thật.
+1. **Nghiệm thu & Duyệt Giai đoạn 5c (`5B.5`):** Kiểm tra trực quan tab `Quests`, huy hiệu chưa nhận trên `Navbar`, `StatsView` (`Day | Month | Year` + `Focus Streak` khóa/mở theo `Elder's Hut`) và kiểm thử trên Chrome Popup `400×600` theo checklist trong `respond.md`. **DỪNG chờ duyệt Giai đoạn 5c.**
+2. **Nghiệm thu trực quan phần còn lại nếu cần:** UX-5 `<TerrainBitmapCanvas>` (`respond_2b_prev.md`) & Service Worker `fq_quests` (`respond_5c_prev.md`).
+3. **Các giai đoạn tiếp theo trong lộ trình 5B.5 (sau khi duyệt 5c):**
    - **Giai đoạn 6–7 & `Awards` thật:** Hoàn thiện i18n thông báo / `RewardHelpModal` / error codes và xây dựng hệ thống `Awards` thật.
 4. **CWS Hardening & Tối ưu Gói:** Thống nhất 1 lockfile (`package-lock.json` vs `bun.lock`), xem xét tách chunk Vite (`popup-*.js` > `500 kB`), và chuẩn bị thuyết minh quyền `web_accessible_resources` (`<all_urls>`) + `host_permissions` + `"offscreen"` khi lên Chrome Web Store.
 5. **Milestone 5C:** `UPGRADE_BUILDING`, chuyển kỷ nguyên sang Bronze Age và mở khóa nút nâng cấp trong `BuildingDetailsModal`.

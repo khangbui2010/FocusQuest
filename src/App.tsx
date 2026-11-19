@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { ScrollText, Trophy } from 'lucide-react';
+import { Trophy } from 'lucide-react';
 import { Header } from './ui/components/Header.tsx';
 import { Navbar, ActiveTab } from './ui/components/Navbar.tsx';
 import { TimerView } from './ui/components/TimerView.tsx';
 import { ProfileBottomSheet } from './ui/components/ProfileBottomSheet.tsx';
 import { StatsView } from './ui/components/StatsView.tsx';
+import { QuestView } from './ui/components/quests/QuestView.tsx';
 import { RewardHelpModal } from './ui/components/RewardHelpModal.tsx';
 import { MusicPlayerSheet } from './ui/components/MusicPlayerSheet.tsx';
 import { CivilizationScreen } from './ui/components/civilization/CivilizationScreen.tsx';
@@ -15,6 +16,7 @@ import {
   onStorageChange,
   getCivilizationStateClient,
   getMusicStateClient,
+  getQuestStateClient,
 } from './ui/services/extensionClient.ts';
 import { skipPomodoroBreakAction } from './ui/services/sessionActions.ts';
 import {
@@ -22,12 +24,16 @@ import {
   resolveEffectiveTab,
   executeExitSessionAction,
 } from './ui/utils/sessionNavigation.ts';
-import { FullSessionStateResponse, MusicStateResponseData } from './types/messages.ts';
+import {
+  ClaimQuestRewardResponseData,
+  FullSessionStateResponse,
+  MusicStateResponseData,
+} from './types/messages.ts';
 import { SessionSnapshot, SessionMode, PomodoroConfig } from './types/session.ts';
 import { FocusProfile } from './types/profiles.ts';
 import { PlayerEconomy } from './types/economy.ts';
 import { DailyStatRecord, UserSettings } from './types/storageSchema.ts';
-import { CivilizationEra } from './core/civilization/buildingTypes.ts';
+import { BuildingInstance, CivilizationEra } from './core/civilization/buildingTypes.ts';
 import { extractBuildingCoinBonuses } from './core/civilization/civilizationBonusHelper.ts';
 import { aggregateCoinBonus } from './core/economy/coinBonus.ts';
 import { MusicPlayerState, MusicTrack, RepeatMode } from './types/music.ts';
@@ -85,6 +91,11 @@ interface PopupShellProps {
   isSessionActive: boolean;
   civEra: CivilizationEra;
   civBonusRate?: number;
+  civBuildings?: readonly BuildingInstance[];
+  unclaimedQuestCount?: number;
+  questStateVersion?: number;
+  onUnclaimedQuestCountChange?: (count: number) => void;
+  onQuestClaimed?: (result: ClaimQuestRewardResponseData) => void | Promise<void>;
   settings: UserSettings | null;
   isLoading: boolean;
   activeTab: ActiveTab;
@@ -141,6 +152,11 @@ export const PopupShell: React.FC<PopupShellProps> = ({
   isSessionActive,
   civEra,
   civBonusRate = 0,
+  civBuildings,
+  unclaimedQuestCount = 0,
+  questStateVersion = 0,
+  onUnclaimedQuestCountChange,
+  onQuestClaimed,
   settings,
   isLoading,
   activeTab,
@@ -229,25 +245,11 @@ export const PopupShell: React.FC<PopupShellProps> = ({
         )}
 
         {effectiveTab === 'quests' && (
-          <section
-            data-testid="quests-placeholder-view"
-            className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-3"
-          >
-            <div className="w-11 h-11 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/80 dark:border-indigo-800/60 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
-              <ScrollText className="w-5 h-5" />
-            </div>
-            <div className="space-y-1">
-              <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100">
-                {t('quest.placeholder.title')}
-              </h2>
-              <p className="inline-block px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/50 border border-amber-200/80 dark:border-amber-800/60 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
-                {t('quest.placeholder.comingSoon')}
-              </p>
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-[260px] leading-relaxed">
-              {t('quest.placeholder.description')}
-            </p>
-          </section>
+          <QuestView
+            refreshTrigger={questStateVersion}
+            onUnclaimedCountChange={onUnclaimedQuestCountChange}
+            onQuestClaimed={onQuestClaimed}
+          />
         )}
 
         {effectiveTab === 'focus' && (
@@ -294,7 +296,9 @@ export const PopupShell: React.FC<PopupShellProps> = ({
           </section>
         )}
 
-        {effectiveTab === 'stats' && <StatsView todayStats={todayStats} />}
+        {effectiveTab === 'stats' && (
+          <StatsView todayStats={todayStats} buildings={civBuildings} />
+        )}
       </main>
 
       {showMusicPlayer && (
@@ -324,6 +328,7 @@ export const PopupShell: React.FC<PopupShellProps> = ({
           onChangeTab={handleChangeTab}
           isSessionActive={isSessionActive}
           session={session}
+          unclaimedQuestCount={unclaimedQuestCount}
         />
       )}
 
@@ -379,6 +384,9 @@ export const App: React.FC<AppProps> = ({
   const [isBlockingActive, setIsBlockingActive] = useState(false);
   const [civEra, setCivEra] = useState<CivilizationEra>('STONE_AGE');
   const [civBonusRate, setCivBonusRate] = useState<number>(0);
+  const [civBuildings, setCivBuildings] = useState<readonly BuildingInstance[]>([]);
+  const [unclaimedQuestCount, setUnclaimedQuestCount] = useState<number>(0);
+  const [questStateVersion, setQuestStateVersion] = useState<number>(0);
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [musicState, setMusicState] = useState<MusicPlayerState>(DEFAULT_MUSIC_STATE);
   const [musicCatalog, setMusicCatalog] = useState<readonly MusicTrack[]>([]);
@@ -446,6 +454,7 @@ export const App: React.FC<AppProps> = ({
           if (civRes.data.era) {
             setCivEra(civRes.data.era);
           }
+          setCivBuildings(civRes.data.buildings);
           setCivBonusRate(
             aggregateCoinBonus(extractBuildingCoinBonuses(civRes.data.buildings))
           );
@@ -459,13 +468,34 @@ export const App: React.FC<AppProps> = ({
         }
       });
 
-      await Promise.all([statePromise, profilesPromise, civPromise, musicPromise]);
+      const questPromise = getQuestStateClient().then((questRes) => {
+        if (questRes.success && questRes.data) {
+          setUnclaimedQuestCount(questRes.data.unclaimedCount);
+          setQuestStateVersion((v) => v + 1);
+        }
+      });
+
+      await Promise.all([
+        statePromise,
+        profilesPromise,
+        civPromise,
+        musicPromise,
+        questPromise,
+      ]);
     } catch {
       // Non-blocking fallback
     } finally {
       setHasResolvedInitialSession(true);
     }
   }, []);
+
+  const handleQuestClaimed = useCallback(
+    async (result: ClaimQuestRewardResponseData) => {
+      setEconomy(result.economy);
+      await refreshState();
+    },
+    [refreshState]
+  );
 
   useEffect(() => {
     refreshState();
@@ -795,6 +825,11 @@ export const App: React.FC<AppProps> = ({
       isSessionActive={isSessionActive}
       civEra={civEra}
       civBonusRate={civBonusRate}
+      civBuildings={civBuildings}
+      unclaimedQuestCount={unclaimedQuestCount}
+      questStateVersion={questStateVersion}
+      onUnclaimedQuestCountChange={setUnclaimedQuestCount}
+      onQuestClaimed={handleQuestClaimed}
       settings={settings}
       isLoading={isLoading}
       activeTab={activeTab}

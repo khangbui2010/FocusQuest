@@ -1,7 +1,7 @@
 # Focus Quest — Technical Architecture Specification (Manifest V3)
 
-**Version:** 1.6.0  
-**Status:** MV3 Background, Offscreen LOFI Streaming, Civilization Engine (UX-5 Composite Terrain Bitmap), Schema v3 QuestCoordinator & Atomic Session-Quest Settlement (5B.5 Stage 2b), Full Bilingual Architecture  
+**Version:** 1.7.0  
+**Status:** MV3 Background, Offscreen LOFI Streaming, Civilization Engine (UX-5 Composite Terrain Bitmap), Schema v3 QuestCoordinator & Atomic Settlement (Stage 2b), Interactive QuestView & Upgraded StatsView (Stage 5c), Full Bilingual Architecture  
 **Target Platform:** Google Chrome Extension (Manifest V3, Chrome >= 116)  
 **Language & Stack:** TypeScript, React 19 (Popup & Blocked UI), Tailwind CSS 4, Chrome Extension APIs (`declarativeNetRequest`, `alarms`, `notifications`, `offscreen`, `storage`, `runtime`, `action`, `i18n`)  
 
@@ -133,7 +133,7 @@ Các action được hỗ trợ:
 - Civilization & Quests (Storage Schema v3, `CURRENT_SCHEMA_VERSION = 3`): `fq_civilization` giữ nguyên cấu trúc v2 (lưới `8×8` / chunk `4×4` mở rộng theo `origin`, `Level >= k + 2`). `fq_quests` (`STORAGE_KEYS.QUESTS`) được nối hoàn chỉnh vào vòng đời phiên và giao thức nhắn ở **Giai đoạn 2b**:
   - **Quyết toán nguyên tử (`StorageManager.commitSessionOutcomeInternal`):** Chỉ khi phiên kết thúc hợp lệ (`COMPLETED` qua `toQuestOutcomeDelta`), đọc `fq_quests` (tự phục hồi bằng `sanitizeQuestState` nếu thiếu/hỏng), chạy `rolloverQuestState` rồi `applyCompletedSession`, và ghi đồng thời `CURRENT_SESSION + ECONOMY + DAILY_STATS + QUESTS` trong một `setMultiple` duy nhất dưới `StorageMutex` kèm rollback compensation nếu ghi thất bại; lỗi Quest được cô lập hoàn toàn để không bao giờ làm hỏng quyết toán phiên. Nhánh `Give Up` / `INTERRUPTED` / Stopwatch `< 5m` / Pomodoro Stopwatch `0` interval / `Reset` không đụng tới `fq_quests`.
   - **`QuestCoordinator` (`src/background/questCoordinator.ts`):** Quản lý `GET_QUEST_STATE` (persist khi rollover ngày/tuần mới, trả `questState`, `resetCountdown`, `unclaimedCount`) và `CLAIM_QUEST_REWARD` (chỉ trả thưởng phẳng vào `ECONOMY` qua `commitQuestClaimInternal`, dùng đúng `calculatePlayerLevel(totalXP)` và **không bao giờ ghi vào `fq_daily_stats`**). Trả `errorCode` chuẩn hóa (`INVALID_QUEST_PAYLOAD`, `UNKNOWN_QUEST`, `QUEST_PERIOD_MISMATCH`, `QUEST_ALREADY_CLAIMED`, `QUEST_EXPIRED`, `QUEST_NOT_COMPLETED`).
-  - Messages: `GET_CIVILIZATION_STATE`, `PLACE_BUILDING`, `REMOVE_BUILDING`, `EXPAND_LAND`, `GET_QUEST_STATE`, `CLAIM_QUEST_REWARD`. *(Giao diện `QuestView` & `StatsView` nâng cấp sẽ triển khai ở **Giai đoạn 5c**.)*
+  - Messages: `GET_CIVILIZATION_STATE`, `PLACE_BUILDING`, `REMOVE_BUILDING`, `EXPAND_LAND`, `GET_QUEST_STATE`, `CLAIM_QUEST_REWARD`. *(Đã nối hoàn chỉnh lên `QuestView`, badge `Navbar` và `StatsView` ở **Giai đoạn 5c**.)*
 - Preferences: `SET_LANGUAGE`, `SET_CHIME_ENABLED`, `SET_MUSIC_PLAYER_EXPANDED`.
 - Focus Music Player: `MUSIC_GET_STATE`, `MUSIC_GET_CATALOG`, `MUSIC_REFRESH_CATALOG`, `MUSIC_PLAY_TRACK`, `MUSIC_PAUSE`, `MUSIC_RESUME`, `MUSIC_STOP`, `MUSIC_NEXT`, `MUSIC_PREVIOUS`, `MUSIC_SEEK`, `MUSIC_SET_VOLUME`, `MUSIC_SET_SHUFFLE`, `MUSIC_SET_REPEAT`.
 - SW ↔ Offscreen Document (lọc bằng `target: 'offscreen' | 'background'`): `MUSIC_PLAY`, `MUSIC_PAUSE`, `MUSIC_STOP`, `MUSIC_SEEK`, `MUSIC_SET_VOLUME`, `MUSIC_GET_STATUS` ↔ `MUSIC_POSITION`, `MUSIC_ENDED`, `MUSIC_ERROR`.
@@ -179,8 +179,11 @@ Các action được hỗ trợ:
 
 ---
 
-## 6. Giao diện Popup, Cảnh quan UI & Blocked Page (Stages B–E & UX-5)
-- **Điều hướng Popup 400×600px:** `Navbar.tsx` dùng 5 tab đáy (`Quests | Focus | Map | Awards | Stats`), mặc định mở `map` (`CivilizationScreen`), hỗ trợ đóng/mở `ProfileBottomSheet`, `RewardHelpModal`, `MusicPlayerSheet` và `SpriteGallery` (`#sprites` chỉ ở Web Preview).
+## 6. Giao diện Popup, Cảnh quan UI, Quests & Stats (Stages B–E, UX-5 & 5c)
+- **Điều hướng Popup 400×600px:** `Navbar.tsx` dùng 5 tab đáy (`Quests | Focus | Map | Awards | Stats`), mặc định mở `map` (`CivilizationScreen`), hỗ trợ huy hiệu phần thưởng chưa nhận (`quest-unclaimed-badge` ẩn khi `0`, `1..9`, `9+` khi `>=10`) trên tab `Quests`, và đóng/mở `ProfileBottomSheet`, `RewardHelpModal`, `MusicPlayerSheet` và `SpriteGallery` (`#sprites` chỉ ở Web Preview).
+- **Tab Quests & Stats nâng cấp (Giai đoạn 5c):**
+  - `src/ui/components/quests/QuestView.tsx` + `src/ui/utils/questFormatting.ts`: đọc động định nghĩa và cap Daily/Weekly từ `questCatalog.ts`, hiển thị 4 trạng thái thẻ (`IN_PROGRESS`, `READY`, `CLAIMED`, `EXPIRED`), đếm ngược reset 1s/giây kèm auto-refetch 1 lần khi chạm `0`, khóa chống bấm đúp khi gọi `CLAIM_QUEST_REWARD`, thẻ Quest Streak (0 Coin thụ động), và thông báo lỗi bản địa hóa qua `errorTranslator.ts`.
+  - `src/ui/components/StatsView.tsx` + `src/ui/utils/statsPeriod.ts` + `src/ui/utils/focusStatUnlock.ts`: nâng cấp 3 chế độ `Day | Month | Year` trên nền `statsAggregator.ts` & `StatsBarChart.tsx` (neo ngày địa phương via `getLocalDateKey`, khóa không bước qua tương lai, xử lý năm nhuận 29/02 và `completionRate === null`), kèm thẻ `Focus Streak` khóa/mở theo effect `FOCUS_STAT_UNLOCK` (`focus_metric_streak_analysis` của `stone_age_elder_hut`). Chỉ còn tab `Awards` giữ chỗ `"Coming soon"`.
 - **Cảnh quan Canvas Tổng hợp Một Tấm (`UX-5`) & Hiệu ứng mở đất:**
   - `terrainDecor.ts` giữ nguyên thuật toán đặt cảnh quan mở & 6 mẫu rừng tối M1–M6 xác định (không lưu trong storage, không cản đặt công trình).
   - Toàn bộ nền địa hình của `MapGridView` được `terrainBitmapRenderer.ts` (`buildTerrainBitmapPlan`, `renderTerrainBitmap`, `renderTerrainBitmapIfNeeded`) + `TerrainBitmapCanvas.tsx` ghép sẵn vào **một `<canvas>` duy nhất** kích thước gốc `(cols × 16) × (rows × 16)` (`imageSmoothingEnabled = false`, `image-rendering: pixelated`), vẽ đúng thứ tự UX-3 (`nền -> lớp bù tối tùy chọn -> cây -> lớp phủ #020617` dùng `computeLockedForestOpacities`), có fallback màu phẳng khi ảnh spritesheet lỗi, và **chỉ vẽ lại khi `contentKey` đổi** (mở đất / hết hiệu ứng che / đổi seed — không bao giờ vẽ lại khi pan hoặc zoom), giúp triệt tiêu 100% khe sáng/lưới sub-pixel ở mọi mức DPR (`1..3`), zoom (kể cả Expansion auto-fit) và pan.

@@ -3,7 +3,7 @@
 **Document Version:** 1.4.2-synced  
 **Target Release:** MVP v1.0  
 **Role:** Senior Product Architect & Product Manager  
-**Status:** Formal Product Specification (Synced through Milestone UX-5 & Milestone 5B.5 Stage 2b)  
+**Status:** Formal Product Specification (Synced through Milestone UX-5 & Milestone 5B.5 Stage 5c)  
 
 ---
 
@@ -193,13 +193,13 @@ Sản phẩm áp dụng triết lý **Positive Reinforcement (Khen thưởng tí
 
 ## 12. Phong cách & Kiến trúc Giao diện (UI Architecture)
 - **Công nghệ UI:** **React 19 + Tailwind CSS 4** cho Popup (`index.html`), Blocked Page (`blocked.html` + module `blocked.js` tuân thủ CSP MV3) và Chrome `_locales` (`en`, `vi`).
-- **Điều hướng & Song ngữ:** Thanh điều hướng đáy 5 tab cố định (`Quests | Focus | Map | Awards | Stats`), mặc định mở màn hình bản đồ `Map` ở giữa; song ngữ 100% EN/VI (UI, lỗi từ backend qua `errorTranslator`, thông báo Chrome, trang chặn `blocked.html`). `Quests` và `Awards` hiện ở trạng thái giữ chỗ "Coming soon".
+- **Điều hướng & Song ngữ:** Thanh điều hướng đáy 5 tab cố định (`Quests | Focus | Map | Awards | Stats`), mặc định mở màn hình bản đồ `Map` ở giữa; song ngữ 100% EN/VI (UI, lỗi từ backend qua `errorTranslator`, thông báo Chrome, trang chặn `blocked.html`). Tab `Quests` (Manual Claim, huy hiệu chưa nhận) và `Stats` (Day/Month/Year + `Focus Streak` mở qua `Elder's Hut`) đã hoàn thiện ở Giai đoạn 5c; hiện chỉ còn `Awards` ở trạng thái giữ chỗ `"Coming soon"`.
 - **Ranh giới:** UI là view/controller mỏng; **tuyệt đối không trực tiếp quyết định thời gian tập trung chính thức hoặc tự trao Coins/XP**.
 
 ---
 
-## 13. Hệ thống Nhiệm vụ Hàng ngày & Hàng tuần (Quest Engine & Coordinator — Stage 2b)
-> **Trạng thái tích hợp:** Phần domain thuần (`src/core/quests/`), types (`src/types/quests.ts`), Schema v3 (`fq_quests`, `v3_questsSchema.ts`), **quyết toán nguyên tử cùng phiên Focus trong `SessionCoordinator` / `StorageManager`**, `QuestCoordinator` (`GET_QUEST_STATE`, `CLAIM_QUEST_REWARD`), `errorTranslator`, và simulator `extensionClient.ts` đã hoàn tất ở **Giai đoạn 2b**. Phần thưởng khi Claim chỉ cộng phẳng Coins/XP vào `ECONOMY` (dùng đúng `calculatePlayerLevel`, **không ghi vào `fq_daily_stats`**). Giao diện người dùng `QuestView` & `StatsView` nâng cấp giữ nguyên lịch thực hiện ở **Giai đoạn 5c**.
+## 13. Hệ thống Nhiệm vụ Hàng ngày & Hàng tuần (Quest Engine, Coordinator & UI — Stages 2b & 5c)
+> **Trạng thái tích hợp:** Phần domain thuần (`src/core/quests/`), types (`src/types/quests.ts`), Schema v3 (`fq_quests`, `v3_questsSchema.ts`), **quyết toán nguyên tử cùng phiên Focus trong `SessionCoordinator` / `StorageManager`**, `QuestCoordinator` (`GET_QUEST_STATE`, `CLAIM_QUEST_REWARD`), `errorTranslator`, simulator `extensionClient.ts` (Giai đoạn 2b) **và giao diện `QuestView`, badge `Navbar` cùng `StatsView` Day/Month/Year + `FOCUS_STAT_UNLOCK` (Giai đoạn 5c)** đã hoàn tất. Phần thưởng khi Claim chỉ cộng phẳng Coins/XP vào `ECONOMY` (dùng đúng `calculatePlayerLevel`, **không ghi vào `fq_daily_stats`**). Các bước tiếp theo là Giai đoạn 6–7 & `Awards` thật.
 
 - **Nhiệm vụ Hàng ngày (Daily Quests — Cap: `40 Coins · 100 XP / ngày`):**
   1. `daily_first_spark` (*First Spark*): Hoàn thành `1` phiên Focus hợp lệ → `10 Coins · 25 XP`.

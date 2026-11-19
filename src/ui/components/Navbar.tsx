@@ -10,6 +10,7 @@ export interface NavbarProps {
   onChangeTab: (tab: ActiveTab) => void;
   isSessionActive: boolean;
   session?: SessionSnapshot | null;
+  unclaimedQuestCount?: number;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -17,8 +18,15 @@ export const Navbar: React.FC<NavbarProps> = ({
   onChangeTab,
   isSessionActive,
   session,
+  unclaimedQuestCount = 0,
 }) => {
   const { t } = useTranslation();
+
+  const safeUnclaimedCount =
+    typeof unclaimedQuestCount === 'number' && Number.isFinite(unclaimedQuestCount)
+      ? Math.max(0, Math.floor(unclaimedQuestCount))
+      : 0;
+  const unclaimedBadgeText = safeUnclaimedCount > 9 ? '9+' : String(safeUnclaimedCount);
 
   const isPaused = session?.status === 'PAUSED';
   const isBreakPhase = Boolean(
@@ -70,10 +78,25 @@ export const Navbar: React.FC<NavbarProps> = ({
           data-testid="nav-tab-quests"
           data-active={activeTab === 'quests' ? 'true' : 'false'}
           aria-current={activeTab === 'quests' ? 'page' : undefined}
+          aria-label={
+            safeUnclaimedCount > 0
+              ? `${t('nav.quests')} · ${t('nav.questsBadgeAria', { count: safeUnclaimedCount })}`
+              : t('nav.quests')
+          }
           onClick={() => handleSelectTab('quests')}
           className={tabClassName(activeTab === 'quests')}
         >
-          <ScrollText className="w-5 h-5 shrink-0" />
+          <span className="relative inline-flex items-center justify-center">
+            <ScrollText className="w-5 h-5 shrink-0" />
+            {safeUnclaimedCount > 0 && (
+              <span
+                data-testid="quest-unclaimed-badge"
+                className="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold leading-4 text-center tabular-nums shadow-sm"
+              >
+                {unclaimedBadgeText}
+              </span>
+            )}
+          </span>
           <span className="text-[10px] font-medium leading-none whitespace-nowrap">
             {t('nav.quests')}
           </span>
