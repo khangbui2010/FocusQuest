@@ -15,6 +15,7 @@ import { GridMap } from '../core/civilization/gridMap.ts';
 import { calculatePlayerLevel } from '../core/economy/levelSystem.ts';
 import { CachedMusicCatalog, MusicPlayerState } from '../types/music.ts';
 import { QuestOutcomeDelta, QuestState } from '../types/quests.ts';
+import { isValidDateKey } from '../core/stats/statsAggregator.ts';
 import {
   applyCompletedSession,
   rolloverQuestState,
@@ -240,7 +241,15 @@ export class StorageManager {
     }
 
     let finalQuestState: QuestState | undefined;
-    if (params.questOutcomeDelta) {
+    const hasValidQuestDelta = Boolean(
+      params.questOutcomeDelta &&
+        isValidDateKey(params.questOutcomeDelta.completedDateKey) &&
+        typeof params.questOutcomeDelta.completedFocusMinutes === 'number' &&
+        Number.isFinite(params.questOutcomeDelta.completedFocusMinutes) &&
+        params.questOutcomeDelta.completedFocusMinutes > 0
+    );
+
+    if (hasValidQuestDelta && params.questOutcomeDelta) {
       try {
         const questNowMs =
           typeof params.session.completedAt === 'number' &&
@@ -261,7 +270,46 @@ export class StorageManager {
       }
     }
 
-    await this.adapter.setMultiple(items);
+    const keysToWrite = Object.keys(items);
+    const previousSnapshot = await this.adapter.getMultiple<Record<string, unknown>>(keysToWrite);
+
+    try {
+      await this.adapter.setMultiple(items);
+    } catch (writeError) {
+      let rollbackError: unknown = null;
+      try {
+        const restoreItems: Record<string, unknown> = {};
+        const keysToRemove: string[] = [];
+        for (const key of keysToWrite) {
+          if (
+            Object.prototype.hasOwnProperty.call(previousSnapshot, key) &&
+            previousSnapshot[key] !== undefined
+          ) {
+            restoreItems[key] = previousSnapshot[key];
+          } else {
+            keysToRemove.push(key);
+          }
+        }
+        if (Object.keys(restoreItems).length > 0) {
+          await this.adapter.setMultiple(restoreItems);
+        }
+        for (const key of keysToRemove) {
+          await this.adapter.remove(key);
+        }
+      } catch (rbErr) {
+        rollbackError = rbErr;
+      }
+
+      if (rollbackError) {
+        const rbMsg = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+        const wMsg = writeError instanceof Error ? writeError.message : String(writeError);
+        throw new Error(
+          `Session outcome write failed: "${wMsg}". Critical: Rollback compensation also failed: "${rbMsg}". Storage may be in an inconsistent state.`
+        );
+      }
+
+      throw writeError;
+    }
 
     return {
       session: params.session,

@@ -3,7 +3,7 @@
 **Document Version:** 1.4.2-synced  
 **Target Release:** MVP v1.0  
 **Role:** Senior Product Architect & Product Manager  
-**Status:** Formal Product Specification (Synced through Milestone UX-4 & Milestone 5B.5 Stage 2a)  
+**Status:** Formal Product Specification (Synced through Milestone UX-5 & Milestone 5B.5 Stage 2b)  
 
 ---
 
@@ -198,8 +198,8 @@ Sản phẩm áp dụng triết lý **Positive Reinforcement (Khen thưởng tí
 
 ---
 
-## 13. Hệ thống Nhiệm vụ Hàng ngày & Hàng tuần (Quest Engine — Stage 2a, chưa nối vào session)
-> **Trạng thái tích hợp:** Phần domain thuần (`src/core/quests/`), types (`src/types/quests.ts`) và Schema v3 (`fq_quests`, `v3_questsSchema.ts`) đã hoàn tất ở **Giai đoạn 2a**, **chưa nối vào `SessionCoordinator` / `MessageHandler` / `QuestView`** (dự kiến thực hiện ở **Giai đoạn 2b** và **5c**).
+## 13. Hệ thống Nhiệm vụ Hàng ngày & Hàng tuần (Quest Engine & Coordinator — Stage 2b)
+> **Trạng thái tích hợp:** Phần domain thuần (`src/core/quests/`), types (`src/types/quests.ts`), Schema v3 (`fq_quests`, `v3_questsSchema.ts`), **quyết toán nguyên tử cùng phiên Focus trong `SessionCoordinator` / `StorageManager`**, `QuestCoordinator` (`GET_QUEST_STATE`, `CLAIM_QUEST_REWARD`), `errorTranslator`, và simulator `extensionClient.ts` đã hoàn tất ở **Giai đoạn 2b**. Phần thưởng khi Claim chỉ cộng phẳng Coins/XP vào `ECONOMY` (dùng đúng `calculatePlayerLevel`, **không ghi vào `fq_daily_stats`**). Giao diện người dùng `QuestView` & `StatsView` nâng cấp giữ nguyên lịch thực hiện ở **Giai đoạn 5c**.
 
 - **Nhiệm vụ Hàng ngày (Daily Quests — Cap: `40 Coins · 100 XP / ngày`):**
   1. `daily_first_spark` (*First Spark*): Hoàn thành `1` phiên Focus hợp lệ → `10 Coins · 25 XP`.

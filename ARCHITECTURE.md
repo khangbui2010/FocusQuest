@@ -1,7 +1,7 @@
 # Focus Quest — Technical Architecture Specification (Manifest V3)
 
-**Version:** 1.5.2  
-**Status:** MV3 Background, Offscreen LOFI Streaming, Civilization Engine (UX-5 Composite Terrain Bitmap), Schema v3 Pure Quest Foundation & Full Bilingual Architecture  
+**Version:** 1.6.0  
+**Status:** MV3 Background, Offscreen LOFI Streaming, Civilization Engine (UX-5 Composite Terrain Bitmap), Schema v3 QuestCoordinator & Atomic Session-Quest Settlement (5B.5 Stage 2b), Full Bilingual Architecture  
 **Target Platform:** Google Chrome Extension (Manifest V3, Chrome >= 116)  
 **Language & Stack:** TypeScript, React 19 (Popup & Blocked UI), Tailwind CSS 4, Chrome Extension APIs (`declarativeNetRequest`, `alarms`, `notifications`, `offscreen`, `storage`, `runtime`, `action`, `i18n`)  
 
@@ -94,17 +94,15 @@ File cấu hình Manifest V3 (`public/manifest.json`):
 │                   │                              │                     │
 │                   ▼                              ▼                     │
 │   ┌─────────────────────────────┐  ┌─────────────────────────────┐     │
-│   │ SessionCoordinator         │  │ ProfileManager              │     │
-│   │ - startSession              │  │ - create/rename/delete      │     │
-│   │ - pauseSession (max 2)      │  │ - add/remove domain         │     │
-│   │ - resumeSession (auto-res)  │  │ - get/set active profile    │     │
-│   │ - completeCountdown         │  └──────────────┬──────────────┘     │
-│   │ - finishStopwatch           │                 │                    │
-│   │ - giveUpCountdown           │                 │                    │
-│   │ - recoverSession (startup)  │                 │                    │
-│   └──────┬──────────────┬───────┘                 │                    │
-│          │              │                         │                    │
-│          ▼              ▼                         ▼                    │
+│   │ SessionCoordinator         │  │ ProfileManager / QuestCoord.│     │
+│   │ - startSession / pause/res.│  │ - Profile CRUD & allowlist  │     │
+│   │ - completeCountdown        │  │ - getQuestState (rollover)  │     │
+│   │ - finishStopwatch          │  │ - claimQuestReward (atomic) │     │
+│   │ - giveUpCountdown          │  └──────────────┬──────────────┘     │
+│   │ - recoverSession (startup) │                 │                    │
+│   └──────┬──────────────┬──────┘                 │                    │
+│          │              │                        │                    │
+│          ▼              ▼                        ▼                    │
 │   ┌─────────────┐ ┌─────────────┐ ┌──────────────────────────────┐     │
 │   │ Alarms      │ │ Notify      │ │ BlockingCoordinator (DNR)    │     │
 │   │ Adapter     │ │ Adapter     │ │ - applyAllowlistRules        │     │
@@ -114,7 +112,7 @@ File cấu hình Manifest V3 (`public/manifest.json`):
 │                                                   │                    │
 │   ┌───────────────────────────────────────────────┴──────────────┐     │
 │   │ StorageManager & Mutex (chrome.storage.local)                │     │
-│   │ - Ground Truth Snapshot, Economy, Daily Stats, Profiles      │     │
+│   │ - Atomic batch: Session, Economy, Daily Stats, Quests, Civ   │     │
 │   └──────────────────────────────────────────────────────────────┘     │
 └────────────────────────────────────────────────────────────────────────┘
 ```
@@ -132,11 +130,14 @@ Các action được hỗ trợ:
 - Session & Pomodoro: `GET_SESSION_STATE`, `START_SESSION`, `PAUSE_SESSION`, `RESUME_SESSION`, `GIVE_UP_SESSION`, `FINISH_STOPWATCH`, `SKIP_POMODORO_BREAK`, `ADVANCE_POMODORO_STAGE`, `RESET_SESSION`, `HEARTBEAT`.
 - Profiles: `GET_PROFILES`, `GET_ACTIVE_PROFILE`, `SWITCH_PROFILE`, `CREATE_PROFILE`, `RENAME_PROFILE`, `DELETE_PROFILE`, `ADD_DOMAIN`, `REMOVE_DOMAIN`.
 - Economy & Stats: `GET_ECONOMY`, `GET_DAILY_STATS`.
-- Civilization & Storage Schema v3 (`CURRENT_SCHEMA_VERSION = 3`): `fq_civilization` giữ nguyên cấu trúc v2 (lưới `8×8` / chunk `4×4` mở rộng theo `origin`, `Level >= k + 2`); bổ sung `fq_quests` (`STORAGE_KEYS.QUESTS`) qua `v3_questsSchema.ts` cho lõi Daily/Weekly Quest thuần ở Stage 2a. Messages: `GET_CIVILIZATION_STATE`, `PLACE_BUILDING`, `REMOVE_BUILDING`, `EXPAND_LAND`. *(Lưu ý: `GET_QUEST_STATE` & `CLAIM_QUEST_REWARD` chưa được nối vào `MessageHandler` / `SessionCoordinator` ở Stage 2a — dự kiến Giai đoạn 2b.)*
+- Civilization & Quests (Storage Schema v3, `CURRENT_SCHEMA_VERSION = 3`): `fq_civilization` giữ nguyên cấu trúc v2 (lưới `8×8` / chunk `4×4` mở rộng theo `origin`, `Level >= k + 2`). `fq_quests` (`STORAGE_KEYS.QUESTS`) được nối hoàn chỉnh vào vòng đời phiên và giao thức nhắn ở **Giai đoạn 2b**:
+  - **Quyết toán nguyên tử (`StorageManager.commitSessionOutcomeInternal`):** Chỉ khi phiên kết thúc hợp lệ (`COMPLETED` qua `toQuestOutcomeDelta`), đọc `fq_quests` (tự phục hồi bằng `sanitizeQuestState` nếu thiếu/hỏng), chạy `rolloverQuestState` rồi `applyCompletedSession`, và ghi đồng thời `CURRENT_SESSION + ECONOMY + DAILY_STATS + QUESTS` trong một `setMultiple` duy nhất dưới `StorageMutex` kèm rollback compensation nếu ghi thất bại; lỗi Quest được cô lập hoàn toàn để không bao giờ làm hỏng quyết toán phiên. Nhánh `Give Up` / `INTERRUPTED` / Stopwatch `< 5m` / Pomodoro Stopwatch `0` interval / `Reset` không đụng tới `fq_quests`.
+  - **`QuestCoordinator` (`src/background/questCoordinator.ts`):** Quản lý `GET_QUEST_STATE` (persist khi rollover ngày/tuần mới, trả `questState`, `resetCountdown`, `unclaimedCount`) và `CLAIM_QUEST_REWARD` (chỉ trả thưởng phẳng vào `ECONOMY` qua `commitQuestClaimInternal`, dùng đúng `calculatePlayerLevel(totalXP)` và **không bao giờ ghi vào `fq_daily_stats`**). Trả `errorCode` chuẩn hóa (`INVALID_QUEST_PAYLOAD`, `UNKNOWN_QUEST`, `QUEST_PERIOD_MISMATCH`, `QUEST_ALREADY_CLAIMED`, `QUEST_EXPIRED`, `QUEST_NOT_COMPLETED`).
+  - Messages: `GET_CIVILIZATION_STATE`, `PLACE_BUILDING`, `REMOVE_BUILDING`, `EXPAND_LAND`, `GET_QUEST_STATE`, `CLAIM_QUEST_REWARD`. *(Giao diện `QuestView` & `StatsView` nâng cấp sẽ triển khai ở **Giai đoạn 5c**.)*
 - Preferences: `SET_LANGUAGE`, `SET_CHIME_ENABLED`, `SET_MUSIC_PLAYER_EXPANDED`.
 - Focus Music Player: `MUSIC_GET_STATE`, `MUSIC_GET_CATALOG`, `MUSIC_REFRESH_CATALOG`, `MUSIC_PLAY_TRACK`, `MUSIC_PAUSE`, `MUSIC_RESUME`, `MUSIC_STOP`, `MUSIC_NEXT`, `MUSIC_PREVIOUS`, `MUSIC_SEEK`, `MUSIC_SET_VOLUME`, `MUSIC_SET_SHUFFLE`, `MUSIC_SET_REPEAT`.
 - SW ↔ Offscreen Document (lọc bằng `target: 'offscreen' | 'background'`): `MUSIC_PLAY`, `MUSIC_PAUSE`, `MUSIC_STOP`, `MUSIC_SEEK`, `MUSIC_SET_VOLUME`, `MUSIC_GET_STATUS` ↔ `MUSIC_POSITION`, `MUSIC_ENDED`, `MUSIC_ERROR`.
-- UI hiển thị lỗi qua `src/i18n/errorTranslator.ts` để giữ nguyên thông điệp chuẩn khi dùng EN và dịch tự nhiên khi dùng VI.
+- UI hiển thị lỗi qua `src/i18n/errorTranslator.ts` để giữ nguyên thông điệp chuẩn khi dùng EN và dịch tự nhiên khi dùng VI (gồm đầy đủ 6 lỗi `QuestCoordinator`).
 
 ### 3.2. Idempotent Reward Processing & Session Persistence
 1. **Idempotency Guard:**

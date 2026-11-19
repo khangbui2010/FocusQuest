@@ -603,12 +603,55 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
   switch (action) {
     case 'GET_SESSION_STATE': {
       const currentSession = mockState.currentSession;
-      const pomodoroState = currentSession?.pomodoroState;
-      const pomodoroConfig = currentSession?.pomodoroConfig;
+      if (currentSession?.status === 'RUNNING' && currentSession.mode === 'COUNTDOWN') {
+        const targetFinish =
+          currentSession.startedAt +
+          currentSession.targetMinutes * 60 * 1000 +
+          currentSession.totalPauseMs;
+        if (now >= targetFinish && !currentSession.rewardProcessed) {
+          const coinBonuses = extractBuildingCoinBonuses(mockCivilizationState.buildings);
+          const rewardResult = rewardEngine.calculateReward({
+            mode: 'COUNTDOWN',
+            status: 'COMPLETED',
+            targetMinutes: currentSession.targetMinutes,
+            actualFocusMinutes: currentSession.targetMinutes,
+            lockedMultiplier: currentSession.lockedMultiplier,
+            coinBonuses,
+          });
+          const completedSession: SessionSnapshot = {
+            ...currentSession,
+            status: 'COMPLETED',
+            currentPauseStartedAt: null,
+            completedAt: now,
+            rewardProcessed: true,
+          };
+          mockState.currentSession = completedSession;
+          mockState.isBlockingActive = false;
+          mockState.economy.focusCoins += rewardResult.coinsEarned;
+          mockState.economy.totalXP += rewardResult.xpEarned;
+          mockState.economy.level = calculatePlayerLevel(mockState.economy.totalXP);
+          mockState.lifetimeFocusMinutes =
+            (mockState.lifetimeFocusMinutes ?? 0) + currentSession.targetMinutes;
+          if (mockState.todayStats) {
+            mockState.todayStats.totalFocusMinutes += currentSession.targetMinutes;
+            mockState.todayStats.completedSessions += 1;
+            mockState.todayStats.coinsEarned += rewardResult.coinsEarned;
+            mockState.todayStats.xpEarned += rewardResult.xpEarned;
+          }
+          const questDelta = toQuestOutcomeDelta(completedSession, getLocalDateKey(now));
+          if (questDelta) {
+            mockQuestState = applyCompletedSession(mockQuestState, questDelta, now);
+          }
+          syncSimulatedMusicWithSession();
+        }
+      }
+      const pomodoroSession = mockState.currentSession;
+      const pomodoroState = pomodoroSession?.pomodoroState;
+      const pomodoroConfig = pomodoroSession?.pomodoroConfig;
       if (
-        currentSession?.status === 'RUNNING' &&
-        (currentSession.mode === 'POMODORO_COUNTDOWN' ||
-          currentSession.mode === 'POMODORO_STOPWATCH') &&
+        pomodoroSession?.status === 'RUNNING' &&
+        (pomodoroSession.mode === 'POMODORO_COUNTDOWN' ||
+          pomodoroSession.mode === 'POMODORO_STOPWATCH') &&
         pomodoroState &&
         pomodoroConfig
       ) {

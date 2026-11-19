@@ -17,7 +17,9 @@ import { CivilizationState, createInitialCivilizationState } from '../../src/cor
 import {
   applyCompletedSession,
   claimQuest,
+  createInitialQuestState,
   DAILY_QUEST_DEFINITIONS,
+  formatLocalDateKey,
   WEEKLY_QUEST_DEFINITIONS,
 } from '../../src/core/quests/index.ts';
 import {
@@ -214,16 +216,18 @@ test('StorageManager Quests accessors work cleanly & Stage 2a does NOT alter exi
   await new MigrationRunner(adapter).runMigrations();
   const manager = new StorageManager(adapter);
 
-  const initialQuests = await manager.getQuests(new Date(2026, 10, 18, 9, 0, 0).getTime());
-  assert.strictEqual(initialQuests.dailyDateKey, '2026-11-18');
+  const nowMs = Date.now();
+  const initialQuests = await manager.getQuests(nowMs);
+  assert.strictEqual(initialQuests.dailyDateKey, formatLocalDateKey(nowMs));
 
   const mutated = await manager.updateQuests((curr) =>
     applyCompletedSession(curr, { completedDateKey: curr.dailyDateKey, completedFocusMinutes: 25 }, curr.lastSettledTimestamp)
   );
   assert.strictEqual(mutated.daily.daily_first_spark.progress, 1);
 
-  // Reset quests snapshot and verify SessionCoordinator settlement across modes is 100% unchanged
-  await manager.setQuests(initialQuests);
+  // Reset quests snapshot cleanly to current day and verify SessionCoordinator settlement across modes
+  const testNowMs = Date.now();
+  await manager.setQuests(createInitialQuestState(testNowMs));
   const { coordinator, profileManager } = createSessionHarness(manager);
   const profile = await profileManager.createProfile('Stage2a Check', ['example.com']);
 
@@ -272,7 +276,15 @@ test('StorageManager Quests accessors work cleanly & Stage 2a does NOT alter exi
   assert.strictEqual(pomo.lockedMultiplier, 1.2);
   assert.strictEqual(pomo.pomodoroConfig?.focusIntervalsPerCycle, 2);
 
-  // Stage 2a: fq_quests MUST remain untouched by SessionCoordinator
-  const questsAfterSessions = await manager.getQuests(new Date(2026, 10, 18, 9, 0, 0).getTime());
-  assert.deepStrictEqual(questsAfterSessions, initialQuests);
+  // Stage 2b: completed 25m Countdown + Give Up (0) + 30m Stopwatch -> 2 sessions, 55m credited to fq_quests
+  const questsAfterSessions = await manager.getQuests(Date.now());
+  assert.strictEqual(questsAfterSessions.daily.daily_first_spark.progress, 1);
+  assert.strictEqual(questsAfterSessions.daily.daily_first_spark.completed, true);
+  assert.strictEqual(questsAfterSessions.daily.daily_double_tap.progress, 2);
+  assert.strictEqual(questsAfterSessions.daily.daily_double_tap.completed, true);
+  assert.strictEqual(questsAfterSessions.daily.daily_steady_rhythm.progress, 55);
+  assert.strictEqual(questsAfterSessions.daily.daily_steady_rhythm.completed, false);
+  assert.strictEqual(questsAfterSessions.weekly.weekly_tenacity_10.progress, 2);
+  assert.strictEqual(questsAfterSessions.weekly.weekly_habit_builder.progress, 1);
+  assert.strictEqual(questsAfterSessions.streak.currentDays, 1);
 });

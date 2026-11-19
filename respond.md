@@ -1,125 +1,161 @@
-# BÁO CÁO NGHIỆM THU — MILESTONE UX / GIAI ĐOẠN UX-5
+# BÁO CÁO NGHIỆM THU — MILESTONE 5B.5 / GIAI ĐOẠN 2b
 
-**Giai đoạn:** Milestone UX — Giai đoạn UX-5 *(Sửa dứt điểm khe sáng / lưới mờ giữa các ô địa hình trên bản đồ bằng Composite Terrain Canvas Một Tấm — tách biệt hoàn toàn với 5B.5 / LOFI)*  
+**Giai đoạn:** Milestone 5B.5 — Giai đoạn 2b *(Atomic Session Integration, QuestCoordinator & Message Wiring — KHÔNG làm `QuestView`/`StatsView`, giữ nguyên cho Giai đoạn 5c)*  
 **Ngày hoàn thành:** 2026-11-18  
-**File sao lưu báo cáo cũ:** `/respond_ux5_prev.md` *(sao lưu từ báo cáo Stage 2a trước đó; các bản sao lưu lịch sử khác vẫn giữ nguyên)*  
-**Trạng thái:** `579 / 579` tests PASS 3/3 lần | `npm run lint` PASS | `npm run build` PASS — **CHƯA KIỂM CHỨNG TRỰC QUAN TRÊN CHROME THẬT** — **DỪNG chờ duyệt UX-5**
+**File sao lưu báo cáo cũ:** `/respond_2b_prev.md` *(sao lưu nguyên vẹn báo cáo UX-5 trước đó; các báo cáo lịch sử trước vẫn giữ nguyên)*  
+**Trạng thái:** `595 / 595` tests PASS 3/3 lần | `npm run lint` PASS | `npm run build` PASS — **CHƯA KIỂM CHỨNG TRỰC TIẾP TRÊN CHROME SERVICE WORKER THẬT** — **DỪNG chờ duyệt Giai đoạn 2b**
 
 ---
 
-## 1. BƯỚC 0 — ĐIỀU TRA NGUYÊN NHÂN GỐC & RÀNG BUỘC THỰC TẾ
+## 1. BƯỚC 0 — KIỂM TRA TRƯỚC KHI SỬA
 
-### 1.1. Vị trí phát sinh lỗi thực tế trong code (trước UX-5)
-1. **Hàng nghìn DOM node cắt riêng từng ô (`MapGridView.tsx` & `TileImage.tsx`):**
-   - Trong `MapGridView.tsx`, mỗi ô trong lưới `24×24` (`576` ô ban đầu, hoặc lớn hơn khi mở rộng chunk `4×4`) dựng một `<GridCell>` bọc `<TerrainCellLayers>` gồm 2–3 `<TileImage>` (`TileImage.tsx:72-99`, mỗi ô là `<span className="... overflow-hidden">` kèm `<img style={{ position: 'absolute', left: -col * size, top: -row * size }} />`) và thẻ phủ tối `div[data-locked-forest]` — tổng cộng ~`2,300–2,800` node DOM xếp cạnh nhau trên CSS Grid.
-2. **Các lớp biến đổi tọa độ lồng nhau quanh sân khấu bản đồ (`MapGridView.tsx:448-465`):**
-   - Khung bao `MapGridView` dùng `flex items-center justify-center` (`MapGridView.tsx:448`), căn giữa phần tử `data-testid="map-grid-stage"` có `transform: translate(${Math.round(pan.x)}px, ${Math.round(pan.y)}px) scale(${zoom})`, `transformOrigin: 'center center'`, cùng class `transition-transform duration-150 ease-out shadow-sm`.
-   - `transition-transform duration-150 ease-out` luôn bật kể cả trong lúc người dùng đang nhấn giữ chuột để kéo (`isDragging`) hoặc xoay con lăn zoom (`handleWheel`).
+### 1.1. Bước 0a — Đối chiếu `src/core/quests/questCatalog.ts`
+Toàn bộ định nghĩa nhiệm vụ & mức trần phần thưởng trong `src/core/quests/questCatalog.ts` **KHỚP 100%** với bảng chuẩn (không có sai lệch, đủ điều kiện triển khai tiếp):
 
-### 1.2. Chứng minh số học vì sao bản UX-3 vẫn hở khe ở DPR / Zoom / Pan thực tế
-Bản UX-3 chỉ ép `CELL_SIZE * zoom` và `16 * zoom` thành số nguyên **pixel CSS** (`snapZoomToIntegerPixels` làm tròn theo mẫu số `ZOOM_PIXEL_DENOMINATOR = 16`). Tuy nhiên trình duyệt (Blink / Skia) raster hóa hình học từng node DOM theo **pixel vật lý = pixel CSS × `devicePixelRatio` (`dpr`)**:
-- **Zoom nguyên pixel CSS × DPR lẻ (Windows 125% / 150% / 175% / Zoom trình duyệt):**
-  - Với `zoom = 11/16 = 0.6875` → `cellCss = 32 × 0.6875 = 22` CSS px (nguyên):
-    - Trên `dpr = 1.25` (125%): `22 × 1.25 = 27.5` physical px *(lẻ `.5` px)*.
-    - Trên `dpr = 1.75` (175%): `22 × 1.75 = 38.5` physical px *(lẻ `.5` px)*.
-  - Với `zoom = 9/16 = 0.5625` → `cellCss = 18` CSS px (nguyên):
-    - Trên `dpr = 1.25`: `18 × 1.25 = 22.5` physical px; trên `dpr = 1.75`: `18 × 1.75 = 31.5` physical px.
-  - Ở bất kỳ giá trị nào mà `cellCss` không chia hết cho `4` (trên 125%/175%) hoặc `2` (trên 150%/250%), kích thước mỗi ô `GridCell` trong `screen space` trở thành số thập phân.
-- **Pan & Flex centering ở DPR khác 1 + nội suy `transition-transform`:**
-  - Khi người dùng kéo `pan.x = 1` CSS px (số lẻ từ `Math.round`), tại `dpr = 1.25` độ dời thành `1.25` physical px; tại `dpr = 1.5` thành `1.5` physical px.
-  - `flex items-center justify-center` đặt stage có kích thước `768×768` vào viewport chiều cao/rộng lẻ (ví dụ `427px` → offset `(427 - 768) / 2 = -170.5` CSS px).
-  - Trong `150ms` chạy `transition-transform`, Chromium nội suy ma trận `translate`/`scale` qua hàng loạt số thực liên tục mỗi khung hình.
-- **Hệ quả:** Mỗi `<span>` có `overflow: hidden` được Blink làm tròn hộp clip độc lập theo pixel vật lý → ranh giới giữa ô `c` và `c + 1` thường chênh `1` pixel vật lý, làm lọt màu nền container (`bg-slate-100` / `bg-slate-950`) thành **khe sáng dọc/ngang hoặc lưới mờ lúc ẩn lúc hiện** đúng như hiện tượng quan sát trên Chrome thật.
+| ID (`questId`) | Chu kỳ | Metric & Mục tiêu (`target` / `minSessionMinutes`) | Thưởng trong code (`rewardCoins` / `rewardXp`) | Đối chiếu chuẩn | Kết quả |
+|---|---|---|---:|---:|---|
+| `daily_first_spark` | `DAILY` | `COMPLETED_SESSIONS`: `1` phiên | `10C` / `25XP` | `1 phiên · 10C / 25XP` | **KHỚP** |
+| `daily_steady_rhythm` | `DAILY` | `FOCUS_MINUTES`: `60` phút | `15C` / `35XP` | `60 phút · 15C / 35XP` | **KHỚP** |
+| `daily_double_tap` | `DAILY` | `COMPLETED_SESSIONS`: `2` phiên | `15C` / `40XP` | `2 phiên · 15C / 40XP` | **KHỚP** |
+| **Daily Cap (`DAILY_QUEST_CAP`)** | `DAILY` | Tổng 3 Daily Quests | **`40C` / `100XP`** | **`40C / 100XP / ngày`** | **KHỚP** |
+| `weekly_habit_builder` | `WEEKLY` | `ACTIVE_DAYS`: `4` ngày phân biệt | `50C` / `120XP` | `4 ngày · 50C / 120XP` | **KHỚP** |
+| `weekly_deep_diver` | `WEEKLY` | `DEEP_SESSIONS`: `3` phiên (`>= 45` phút) | `60C` / `150XP` | `3 phiên >=45p · 60C / 150XP` | **KHỚP** |
+| `weekly_tenacity_10` | `WEEKLY` | `COMPLETED_SESSIONS`: `10` phiên | `40C` / `100XP` | `10 phiên · 40C / 100XP` | **KHỚP** |
+| **Weekly Cap (`WEEKLY_QUEST_CAP`)** | `WEEKLY` | Tổng 3 Weekly Quests | **`150C` / `370XP`** | **`150C / 370XP / tuần`** | **KHỚP** |
 
-### 1.3. Đối chiếu hiệu ứng phụ thuộc (Rìu chém 680ms, Hover, Buildings, Chunk Frames, `#sprites`)
-- **Rìu chém mở đất (`CivilizationScreen.tsx:120-134`, `expansionReveal.ts:7-9`):** Khi vừa mở chunk mới, `CivilizationScreen` giữ `unrevealedChunkOrigin` trong `680ms` (`EXPANSION_IMPACT_MS = 680`) rồi mới đặt về `null` khi rìu chạm đất và chạy rung `fq-map-shake-active` (`340ms`). Vì `MapGridView.tsx:263-271` đưa `unrevealedChunkOrigin` vào `isCellUnlockedFn`, `<canvas>` giữ 16 ô chunk mới ở trạng thái rừng tối tới đúng mốc `680ms`, rồi đổi `contentKey` để vẽ lại 1 lần duy nhất thành đất mở — giữ nguyên 100% nhịp điệu hoạt ảnh mà không có bất kỳ khe ô nào kể cả khi rung map.
-- **Lớp tương tác & UI phía trên (`MapGridView.tsx:490-700`):** Toàn bộ `hover:after:bg-emerald-300/35`, placement ghost, `PixelSprite` công trình (`z-10`), khung Chunk (`border-emerald-500/35`, `z-[2]`), nút chunk mở rộng (`z-20`) và toolbar zoom giữ nguyên vị trí tọa độ trên `map-grid-stage`.
+### 1.2. Bước 0b — Bảng kiểm toán mọi điểm kết thúc / quyết toán phiên trong `SessionCoordinator` (`src/background/sessionCoordinator.ts`)
 
----
+| Điểm quyết toán / terminal trong `SessionCoordinator` | Vị trí dòng | Gọi `commitSessionOutcomeInternal` hiện tại | Có tạo tiến độ Quest? (`toQuestOutcomeDelta`) | Cơ sở nghiệp vụ |
+|---|---:|---|---|---|
+| `finishStopwatch()` nhánh `POMODORO_STOPWATCH` | `976–994` | Commit `session` (`COMPLETED`), `economyDelta`, `dailyStatDelta`, **`questOutcomeDelta`** | **CÓ** *(nếu `completedFocusCount > 0`)* | Chỉ tính `completedFocusCount × intervalDuration`; loại bỏ phút interval dở dang và nhánh `0` interval |
+| `finishStopwatch()` nhánh `STOPWATCH` thường | `1066–1084` | Commit `session` (`COMPLETED`), `economyDelta`, `dailyStatDelta`, **`questOutcomeDelta`** | **CÓ** *(nếu `actualFocusMinutes >= 5`)* | Ngưỡng tối thiểu `5` phút; `< 5` phút trả `null` -> không đụng `fq_quests` |
+| `completeCountdown()` (`COUNTDOWN`) | `1172–1187` | Commit `session` (`COMPLETED`), `economyDelta`, `dailyStatDelta`, **`questOutcomeDelta`** | **CÓ** | Hoàn thành `100%` `targetMinutes` |
+| `advancePomodoroStage()` nhánh `POMODORO_COUNTDOWN` khi `newCompletedCount >= totalPlannedIntervals` | `1403–1418` | Commit `session` (`COMPLETED`), `economyDelta`, `dailyStatDelta`, **`questOutcomeDelta`** | **CÓ** | Chỉ quyết toán duy nhất tại mốc `100%` toàn bộ pha & chu kỳ |
+| `advancePomodoroStage()` chuyển pha giữa chừng (`Break` / `Focus` tiếp theo) | `1474`, `1550`, `1635` | Chỉ gọi `setCurrentSession` (không quyết toán) | **KHÔNG** | Phiên đang `RUNNING`, chưa kết thúc |
+| `giveUpCountdown()` (`COUNTDOWN` / `POMODORO_*`) | `813–826` | Commit `session` (`ABANDONED`), chỉ ghi `dailyStatDelta` (0 Coin/XP) | **KHÔNG** | `status = ABANDONED` → `toQuestOutcomeDelta` trả `null`, không đụng `fq_quests` |
+| `handleExtensionDisabledRecovery()` (3 nhánh `COUNTDOWN`/`POMODORO_COUNTDOWN`, `POMODORO_STOPWATCH`, `STOPWATCH`) | `1744–1757`, `1786–1799`, `1822–1835` | Commit `session` (`INTERRUPTED`), chỉ ghi `dailyStatDelta` (0 Coin/XP) | **KHÔNG** | `status = INTERRUPTED` → không tạo tiến độ Quest |
+| `handleBrowserStartupRecovery()` nhánh `COUNTDOWN` | `2378–2391` | Commit `session` (`INTERRUPTED`), chỉ ghi `dailyStatDelta` (0 Coin/XP) | **KHÔNG** | `status = INTERRUPTED` → 0 tiến độ Quest |
+| `handleBrowserStartupRecovery()` nhánh `STOPWATCH` | `2457–2470` | Commit `session` (`INTERRUPTED`), chỉ ghi `dailyStatDelta` (0 Coin/XP) | **KHÔNG** | `status = INTERRUPTED` → 0 tiến độ Quest |
+| `handleBrowserStartupRecovery()` nhánh `POMODORO_STOPWATCH` (`BROWSER_CLOSED`) | `2532–2552` | Commit `session` (`INTERRUPTED`), có thể ghi `economyDelta` + `dailyStatDelta` cho các interval hoàn thành trước khi đóng trình duyệt | **KHÔNG** | Bất biến All-or-Nothing Quest: `status === 'INTERRUPTED'` nên **0** tiến độ Quest, dù Economy/Stats vẫn trao thưởng interval hoàn thành theo §9 |
+| `handleBrowserStartupRecovery()` nhánh `POMODORO_COUNTDOWN` | `2624–2638` | Commit `session` (`INTERRUPTED`), chỉ ghi `dailyStatDelta` (0 Coin/XP) | **KHÔNG** | All-or-Nothing `INTERRUPTED` → 0 Reward, 0 Quest |
+| `reconcileActiveSession()` (`RUNNING` / `PAUSED` quá hạn) | `2017`, `2041`, `2094`, `2120` | Ủy quyền sang `completeCountdown()` hoặc `advancePomodoroStage()` | *Theo 2 hàm đích ở trên* | Chỉ cộng Quest nếu hàm đích đưa phiên tới `COMPLETED` hợp lệ |
+| `resetSession()` | `2666–2679` | Đặt `CURRENT_SESSION = null` (chỉ khi terminal) | **KHÔNG** | Dọn UI quay về rảnh, không đụng ví/stats/quests |
 
-## 2. PHẠM VI BẢO TOÀN & GIẢI PHÁP ĐÃ TRIỂN KHAI
+### 1.3. Bước 0c — Cách tính `completedDateKey` & xử lý phiên vắt qua mốc `00:00`
+- Tại 4 điểm hoàn thành trong `SessionCoordinator`, `completedDateKey = this.getTodayDateKey(now)` (`src/background/sessionCoordinator.ts:259-261`, gọi `getLocalDateKey(now)` từ `src/core/utils/dateUtils.ts:7-13`), truyền vào `buildQuestOutcomeDeltaSafe(updated, completedDateKey)` và dùng chung `completedDateKey` cho `dailyStatDelta.date`.
+- **Khi một phiên bắt đầu trước `00:00` (Ngày `N`, ví dụ `23:50`) và kết thúc sau `00:00` (Ngày `N+1`, ví dụ `00:15`):**
+  - Cả `fq_daily_stats` lẫn `fq_quests` đều ghi nhận theo **ngày địa phương tại thời điểm hoàn thành (`N+1`)**.
+  - `StorageManager.commitSessionOutcomeInternal` lấy `questNowMs = session.completedAt` (`2026-11-23 00:15`), chạy `rolloverQuestState` để chốt sang ngày mới `N+1` (và sang tuần mới nếu `N+1` là Thứ Hai, làm hết hạn phần thưởng ngày/tuần cũ chưa claim), sau đó `applyCompletedSession` mới cộng tiến độ phiên này vào ngày `N+1` và tăng `streak.currentDays` nối tiếp giữa `N` và `N+1`.
 
-- **Bất biến giữ nguyên 100%:** Thuật toán đặt cây & 6 mẫu M1–M6 (`getCellDecor`, `TERRAIN_DECOR_SEED`, `computeLockedForestOpacities`, `LOCKED_FOREST_DARKEN_OPACITY = 0.44` trong `terrainDecor.ts`), logic mở đất, đặt/gỡ công trình, `GridMap`, civilization core, schema, kinh tế, `SessionCoordinator`, LOFI music, và Quest Engine Stage 2a hoàn toàn **không đụng**.
-
-### 2.1. Module vẽ Bitmap tổng hợp (`src/ui/components/civilization/terrainBitmapRenderer.ts` — MỚI)
-- **`buildTerrainBitmapPlan`:** Duyệt qua toàn bộ lưới `(cols × rows)` bắt đầu từ `(minX, minY)`, gọi `getCellDecor(gx, gy, isUnlocked, seed, isCellUnlocked)` và tạo **`contentKey`** chỉ từ `{ seed, minX, minY, cols, rows, darkenOpacity, treeDarkenFactor, unlockedBits }` — tuyệt đối không chứa trạng thái pan/zoom.
-- **`renderTerrainBitmap`:** Dựng một bitmap nguyên kích thước `(cols × 16) × (rows × 16)` px:
-  - Ép `ctx.imageSmoothingEnabled = false`, `ctx.clearRect?.(0, 0, bitmapWidth, bitmapHeight)`.
-  - Vẽ từng ô tại đúng tọa độ nguyên `(col * 16, row * 16, 16, 16)` theo đúng thứ tự lớp UX-3:
-    1. Nền đất (`baseTile` từ `tilemap_packed.png` qua `getTileSourceCoords`, hoặc màu phẳng `FALLBACK_TERRAIN_COLORS` nếu `tileSheet === null`).
-    2. Lớp bù nền tùy chọn (`opacities.groundUnderOverlayOpacity`) với `#020617` (`LOCKED_FOREST_SCRIM_COLOR`, xác minh khớp `--color-slate-950` trong Tailwind CSS v4).
-    3. Lớp phủ cây / bụi / mầm / nấm (`overlayTile`, hỗ trợ `treeBrightnessFactor` nếu tinh chỉnh `LOCKED_TREE_DARKEN_FACTOR < 1`).
-    4. Lớp phủ tối trên cùng (`opacities.topScrimOpacity`, mặc định `0.44`) đè đồng đều lên cả nền và cây.
-- **`renderTerrainBitmapIfNeeded`:** So sánh `${plan.contentKey}:${sheet ? 'sheet' : 'fallback'}`, **chỉ vẽ lại khi nội dung địa hình hoặc trạng thái tải ảnh thay đổi** (kéo/zoom trả về `drawn: false`).
-- **Tải ảnh singleton (`getCachedTinyTownTileSheet`, `loadTinyTownTileSheet`):** Tải `tilemap_packed.png` tối đa 1 lần mỗi vòng đời trang, an toàn SSR (`typeof Image === 'undefined'`), xử lý fallback màu phẳng không crash khi lỗi ảnh.
-
-### 2.2. Component `<TerrainBitmapCanvas>` dùng chung (`src/ui/components/civilization/TerrainBitmapCanvas.tsx` — MỚI)
-- Render đúng 1 thẻ `<canvas>` kích thước buffer gốc `bitmapWidth × bitmapHeight` (`384×384` với bản đồ `24×24`, `256×176` với mẫu gallery `16×11`), kích thước hiển thị CSS `cols * cellSize × rows * cellSize` cùng `imageRendering: 'pixelated'`, `data-terrain-key={plan.contentKey}`, và quản lý cờ `cancelled` khi unmount trong lúc ảnh đang tải.
-
-### 2.3. Tái cấu trúc `MapGridView.tsx`
-- Thay toàn bộ cây `<TerrainCellLayers>` / `<TileImage>` trong `GridCell` (`MapGridView.tsx:108-148`, `477-513`) bằng `<TerrainBitmapCanvas testId="map-terrain-bitmap" ... />` đặt ở đáy `map-shake-layer`, bên trên là lưới ô tương tác trong suốt `<div data-testid="map-interaction-grid">` chỉ chứa thuộc tính `data-cell-coord`, `data-unlocked`, hover highlight (`hover:after:bg-emerald-300/35`), cursor và click handler (`0` thẻ `<img>` địa hình).
-- Export `getMapStageClassName(isDragging, isZoomTransitionActive)` (`MapGridView.tsx:88-96`): gỡ bỏ `shadow-sm` khỏi stage, tắt hoàn toàn `transition-transform` khi kéo chuột (`isDragging === true`), ở trạng thái tĩnh và khi dùng con lăn (`handleWheel`); chỉ kích hoạt ngắn `160ms` khi người dùng chủ động bấm nút zoom `+` / `-` / `Reset` / `Recenter` (và hủy ngay lập tức trong `handleMouseDown`).
-
-### 2.4. Khối đối chiếu trong `#sprites` (`src/ui/components/civilization/SpriteGallery.tsx`)
-- Giữ nguyên 100% toàn bộ khối xem trước DOM hiện có (kể cả `data-testid="gallery-locked_forest_16x11"`), tách `GALLERY_16X11_IS_UNLOCKED`, và bổ sung khối `data-testid="gallery-terrain_bitmap_16x11"` (`"Map terrain bitmap (16×11 Locked Forest · UX-5 Single Canvas)"`) dùng chung `<TerrainBitmapCanvas>` vẽ đúng vùng `16×11` `(-8,-8)` để người dùng đối chiếu trực tiếp DOM grid phía trên và Canvas tổng hợp phía dưới trong `#sprites`.
+### 1.4. Bước 0d — Hàm tính Level hiện có & lý do Claim không ghi vào `fq_daily_stats`
+- **Tái sử dụng hàm tính Level duy nhất:** `QuestCoordinator.claimQuestReward` (`src/background/questCoordinator.ts:214`) và simulator (`src/ui/services/extensionClient.ts:1900`) gọi trực tiếp `calculatePlayerLevel(newTotalXP)` từ `src/core/economy/levelSystem.ts:62-64` — không tự viết lại công thức Level.
+- **Lý do Claim KHÔNG ghi vào `fq_daily_stats`:** `fq_daily_stats` lưu hồ sơ năng suất phiên Focus theo ngày (`totalFocusMinutes`, `completedSessions`, `abandonedSessions`, `coinsEarned`, `xpEarned` từ các phiên tập trung của ngày đó). Phần thưởng Quest là thưởng cột mốc phẳng do người dùng bấm **Claim thủ công** (có thể hoàn thành lúc cuối ngày nhưng bấm nhận sau hoặc tổng hợp từ Weekly Quest nhiều ngày), nên chỉ cộng phẳng vào `STORAGE_KEYS.ECONOMY` và đánh dấu `claimed` trên `STORAGE_KEYS.QUESTS` via `commitQuestClaimInternal` để giữ nguyên vẹn ý nghĩa biểu đồ & số liệu phiên Focus hằng ngày.
 
 ---
 
-## 3. DANH SÁCH FILE THAY ĐỔI & TEST CŨ ĐÃ CẬP NHẬT
+## 2. CHI TIẾT TRIỂN KHAI GIAI ĐOẠN 2b
+
+### 2.1. Quyết toán nguyên tử & Rollback (`src/storage/storageManager.ts`)
+- Mở rộng `commitSessionOutcomeInternal` nhận thêm `questOutcomeDelta?: QuestOutcomeDelta`:
+  - Kiểm tra `hasValidQuestDelta` (`isValidDateKey`, `Number.isFinite`, `completedFocusMinutes > 0`). Nếu **không có delta** (`Give Up`, `INTERRUPTED`, Stopwatch `< 5m`, Pomodoro Stopwatch `0` interval), tuyệt đối **không đọc và không ghi `STORAGE_KEYS.QUESTS`**.
+  - Khi có delta hợp lệ: dùng `questNowMs = params.session.completedAt ?? Date.now()`, đọc `STORAGE_KEYS.QUESTS`, tự phục hồi nếu thiếu/hỏng qua `sanitizeQuestState` (bọc fallback `createInitialQuestState`), chạy `rolloverQuestState` rồi `applyCompletedSession`, và đưa vào cùng `items` để ghi đồng loạt `CURRENT_SESSION + ECONOMY + DAILY_STATS + QUESTS` trong **một `setMultiple` duy nhất dưới `StorageMutex`**.
+  - **Cô lập lỗi Quest:** Toàn bộ khâu đọc/sanitize/rollover/apply Quest nằm trong `try/catch`; nếu Quest gặp lỗi bất thường, chỉ log `console.warn` (`Isolated quest progress failure...`) và vẫn commit trọn vẹn phiên, ví `ECONOMY` và `DAILY_STATS`.
+  - **Rollback Compensation:** Trước `setMultiple(items)`, lấy `previousSnapshot` của các khóa `keysToWrite` via `this.adapter.getMultiple(keysToWrite)`. Nếu `setMultiple(items)` ném lỗi (kể cả lỗi ghi dở dang một phần khóa), khôi phục các khóa đã tồn tại bằng `setMultiple(restoreItems)` và xóa các khóa mới tạo bằng `remove(key)`; nếu rollback cũng lỗi thì ném lỗi gộp cảnh báo rõ ràng.
+
+### 2.2. Nối `SessionCoordinator` & bảo toàn hooks LOFI (`src/background/sessionCoordinator.ts`)
+- Bổ sung `private buildQuestOutcomeDeltaSafe(session, completedDateKey)` bọc `toQuestOutcomeDelta` trong `try/catch`.
+- Chèn `questOutcomeDelta` tại đúng 4 điểm `COMPLETED`: `finishStopwatch()` (`POMODORO_STOPWATCH` & `STOPWATCH`), `completeCountdown()`, và `advancePomodoroStage()` (`POMODORO_COUNTDOWN` 100%).
+- **Giữ nguyên 100% bất biến:** Không thay đổi công thức thưởng, `RewardEngine`, `MultiplierRules`, `CoinBonus`, All-or-Nothing, cấu trúc/vị trí gọi `onSessionEndedHook` & `onSessionSyncHook`.
+
+### 2.3. `QuestCoordinator`, `MessageHandler`, `background/index.ts`, `types/messages.ts`, `errorTranslator.ts`
+- **`src/background/questCoordinator.ts`:**
+  - `getQuestState(nowMs)`: đọc dưới `StorageMutex`, sanitize, rollover, chỉ ghi `setQuests` nếu `dailyDateKey` hoặc `weeklyStartKey` thay đổi (hoặc dữ liệu cũ thiếu/hỏng), trả `{ questState, resetCountdown, unclaimedCount }`.
+  - `claimQuestReward(payload, nowMs)`: validate bằng `validateClaimQuestPayload`, khóa `StorageMutex`, rollover & check `claimQuest`, phân tách chính xác `INVALID_QUEST_PAYLOAD`, `UNKNOWN_QUEST`, `QUEST_PERIOD_MISMATCH`, `QUEST_ALREADY_CLAIMED` (kể cả qua `recentClaimedKeys`), `QUEST_EXPIRED` (vừa rollover qua kỳ mới trong khi chưa claim), `QUEST_NOT_COMPLETED`. Cộng phẳng `coins` & `xp` với độ chính xác IEEE-754 đầy đủ vào `PlayerEconomy`, tính `level = calculatePlayerLevel(newTotalXP)`, ghi đồng thời `ECONOMY + QUESTS` qua `commitQuestClaimInternal` (có rollback compensation), **không ghi vào `fq_daily_stats`**.
+- **`src/background/messageHandler.ts` & `src/background/index.ts`:** Khởi tạo `questCoordinator = new QuestCoordinator(storageManager)`, truyền vào `MessageHandler`, xử lý `GET_QUEST_STATE` & `CLAIM_QUEST_REWARD`, trả `errorCode` trong `MessageResponse` khi bắt `QuestCoordinatorError`.
+- **`src/types/messages.ts` & `src/i18n/errorTranslator.ts`:** Có đủ actions, typed payload/response (`GetQuestStateResponseData`, `ClaimQuestRewardResponseData`), `MessageResponse.errorCode`, và dịch song ngữ EN/VI cho cả 3 lỗi validation + 5 mẫu lỗi `QuestCoordinator` không lộ stack trace hay đường dẫn nội bộ.
+
+### 2.4. Đồng bộ Simulator Web Preview (`src/ui/services/extensionClient.ts`)
+- Hỗ trợ đầy đủ `GET_QUEST_STATE` và `CLAIM_QUEST_REWARD` trên `mockQuestState` (tái sử dụng `rolloverQuestState`, `getResetCountdown`, `countUnclaimed`, `claimQuest`, `calculatePlayerLevel`, cùng đầy đủ `errorCode` khớp backend).
+- Cập nhật nhánh auto-complete `COUNTDOWN` trong `GET_SESSION_STATE` (cộng Economy/Stats/Quest + `syncSimulatedMusicWithSession`), song song với `ADVANCE_POMODORO_STAGE` (`POMODORO_COUNTDOWN` 100%) và `FINISH_STOPWATCH` (`STOPWATCH` / `POMODORO_STOPWATCH`), trong khi `GIVE_UP_SESSION` giữ nguyên không cộng Quest.
+
+---
+
+## 3. DANH SÁCH FILE THAY ĐỔI & TEST ĐÃ CẬP NHẬT
 
 ### 3.1. Code sản phẩm (Production)
-- **Tạo mới:**
-  - `src/ui/components/civilization/terrainBitmapRenderer.ts`
-  - `src/ui/components/civilization/TerrainBitmapCanvas.tsx`
-- **Chỉnh sửa:**
-  - `src/ui/components/civilization/MapGridView.tsx`
-  - `src/ui/components/civilization/SpriteGallery.tsx`
+- **Đã kiểm chứng & giữ hoàn thiện từ đầu Giai đoạn 2b:**
+  - `src/background/questCoordinator.ts` *(MỚI ở 2b)*
+  - `src/background/messageHandler.ts`, `src/background/index.ts`, `src/types/messages.ts`, `src/i18n/errorTranslator.ts`
+- **Chỉnh sửa bổ sung để khóa an toàn, rollback & parity:**
+  - `src/storage/storageManager.ts` *(thêm `isValidDateKey` guard cho `questOutcomeDelta`, `try/catch` cô lập lỗi Quest, `previousSnapshot` + rollback compensation đầy đủ quanh `setMultiple` trong `commitSessionOutcomeInternal`)*
+  - `src/background/sessionCoordinator.ts` *(thêm `buildQuestOutcomeDeltaSafe` bọc `try/catch` tại 4 điểm `COMPLETED`)*
+  - `src/ui/services/extensionClient.ts` *(bổ sung cập nhật `mockQuestState` / Economy / DailyStats khi `GET_SESSION_STATE` tự chốt `COUNTDOWN` hết giờ)*
 - **Tài liệu:**
-  - `ARCHITECTURE.md` (`Version: 1.5.2`, cập nhật §6 kiến trúc UX-5 Composite Terrain Canvas)
-  - `PROJECT_STATUS.md` (bổ sung mục UX-5, cập nhật số liệu thực tế & ranh giới kiểm chứng Chrome)
-  - `respond_ux5_prev.md` (sao lưu báo cáo Stage 2a cũ), `respond.md` (báo cáo này)
+  - `PROJECT_STATUS.md`, `ARCHITECTURE.md` (`Version: 1.6.0`), `PRODUCT_SPEC.md` (§13 sync Stage 2b), `README.md`
+  - `respond_2b_prev.md` *(sao lưu báo cáo UX-5)*, `respond.md` *(báo cáo này)*
 
-### 3.2. Bộ kiểm thử mới & Các test DOM-tile cũ buộc phải cập nhật
-- **Thêm mới (`+5` tests) — `__tests__/ui/ux5TerrainBitmap.test.ts`:**
-  1. Kiểm toán từng lệnh `drawImage` / `fillRect` trên `24×24`: tọa độ đích nguyên `(col*16, row*16, 16, 16)`, `0` khe hở/trùng lặp, thứ tự vẽ `nền → cây → scrim #020617` khớp `LOCKED_FOREST_DARKEN_OPACITY = 0.44` và `computeLockedForestOpacities(treeFactor=0.7)`, `imageSmoothingEnabled = false`, deterministic 2 lần liên tiếp.
-  2. Guard chống vẽ thừa (`renderTerrainBitmapIfNeeded` trả `drawn: false` khi `contentKey` giữ nguyên qua pan/zoom, vẽ lại khi mở chunk) & fallback màu phẳng khi `tileSheet = null`.
-  3. SSR & tương tác: `MapGridView` idle/placement/expansion có đúng 1 `<canvas data-testid="map-terrain-bitmap">`, `0` `<img>` địa hình, `image-rendering:pixelated`, giữ đủ `hover:after:bg-emerald-300/35` / công trình / khung chunk / slot mở đất / `map-controls-toolbar`, `getMapStageClassName` tắt `transition-transform` khi kéo, không có `shadow-sm`, và `SpriteGallery` có đủ cả 2 khối `16×11` đối chiếu.
-  4. Chứng minh số học qua ma trận `DPR [1, 1.25, 1.5, 1.75, 2, 2.5, 3]` × `zoom [0.375..2.0 + computeExpansionFitZoom]` × `pan [0, 1, -17, 43]`: các ô DOM cũ lệch fractional physical px (`22*1.25 = 27.5`), trong khi mọi ô trong bitmap nối khít `tile.dx + tile.dw === right.dx` độc lập với DPR/zoom/pan.
-  5. Tích hợp `GridMap`: mở rộng chunk `{ x: 8, y: 0 }` làm đổi `contentKey` sạch sẽ và mở sáng đúng ô góc chunk mới.
-- **Cập nhật 4 test DOM-tile cũ trên `MapGridView` (do `MapGridView` không còn render `TileImage` / `<img>` / `div[data-locked-forest]` cho từng ô; riêng các test của `SpriteGallery` & `TerrainCellLayers` giữ nguyên):**
-  1. `__tests__/ui/ux3MapAndForestUi.test.ts` (Test 1): đổi từ tìm chuỗi HTML `data-tile-index` / `data-locked-forest` trong `MapGridView` sang kiểm tra `<canvas data-testid="map-terrain-bitmap">`, `0` `<img>` trong `MapGridView`, và xác minh thứ tự vẽ canvas `drawImage → drawImage → fillRect(0.44)` qua `renderTerrainBitmap` (giữ nguyên các assertion `TerrainCellLayers` và `SpriteGallery`).
-  2. `__tests__/ui/terrainDecor.test.ts` (dòng `472–502`): đổi kiểm tra `data-locked-forest="true"` / `<TileImage>` trong HTML của `MapGridView` sang kiểm tra `<canvas data-testid="map-terrain-bitmap">` `width="384" height="384" pixelated`, `0` `<img>`, và kiểm tra trực tiếp `buildTerrainBitmapPlan` tại `(-8,-8)` tối + không có tile giải nghệ `27/28` (các kiểm tra `SpriteGallery` ngay sau đó giữ nguyên).
-  3. `__tests__/ui/spriteRegistry.test.ts` (dòng `248–251`, `397–405`): thay assertions URL `tilemap_packed.png` & `data-locked-forest="true"` trên `MapGridView` bằng `data-testid="map-terrain-bitmap"`, `image-rendering:pixelated`, `:0.44:` trong `data-terrain-key`, và `0` `<img>`.
-  4. `__tests__/ui/civilizationView.test.ts` (dòng `311–312`): thay assertion `data-locked-forest="true"` trên `MapGridView` bằng `data-testid="map-terrain-bitmap"` kèm `data-unlocked="false"`.
+### 3.2. Bộ kiểm thử mới & Test cũ buộc phải cập nhật
+- **Thêm mới (`+12` tests) — `__tests__/background/questCoordinator.test.ts`:**
+  1. Kiểm toán Bước 0a: khớp catalog & trần thưởng Daily (`40C/100XP`) / Weekly (`150C/370XP`).
+  2. Bất biến 4 chế độ (`COUNTDOWN`, `STOPWATCH`, `POMODORO_COUNTDOWN`, `POMODORO_STOPWATCH` loại bỏ phút dở dang) + idempotency khi gọi lặp lại.
+  3. Nhánh không đủ điều kiện (`Give Up`, Stopwatch `< 5m`, Stopwatch `INTERRUPTED`, Countdown `BROWSER_CLOSED`, Pomodoro Stopwatch `0` interval, Pomodoro Stopwatch `BROWSER_CLOSED` tuy cộng Economy/Stats nhưng không chạm `fq_quests`, `Reset`) → `0` lần ghi `fq_quests`.
+  4. Resilience: `fq_quests` bị xóa, là chuỗi rác, hoặc field số/chuỗi corrupt → tự phục hồi an toàn mà phiên vẫn quyết toán chuẩn.
+  5. Cô lập lỗi Quest: inject lỗi đọc `fq_quests` → log warning, vẫn commit trọn vẹn phiên, ví và `fq_daily_stats`.
+  6. Atomicity & Rollback: inject lỗi `setMultiple` ghi dở 2 khóa → rollback nguyên vẹn cả 4 khóa (`CURRENT_SESSION`, `ECONOMY`, `DAILY_STATS`, `QUESTS`); lỗi `commitQuestClaimInternal` → rollback nguyên vẹn ví & trạng thái chưa claim.
+  7. Vượt mốc `00:00` (`Sunday 23:50 -> Monday 00:15`) + Daily/Weekly rollover + chặn tua ngược đồng hồ.
+  8. `claimQuestReward`: thưởng phẳng (không nhân `+25% CoinBonus`), độ chính xác IEEE-754 (`12.375 + 10 = 22.375`), `calculatePlayerLevel`, **không ghi `fq_daily_stats`**.
+  9. Từ chối Claim: `QUEST_NOT_COMPLETED`, `QUEST_ALREADY_CLAIMED` (kể cả khi giả lập sửa `claimed = false` nhưng vẫn còn trong `recentClaimedKeys`), `QUEST_EXPIRED` sau rollover.
+  10. Concurrency under `StorageMutex`: 2 lệnh `CLAIM_QUEST_REWARD` song song chỉ 1 thắng (lệnh 2 nhận `QUEST_ALREADY_CLAIMED`), và xen kẽ `completeCountdown` + `claimQuestReward` không mất cập nhật.
+  11. `MessageHandler` + `errorTranslator` (EN/VI): đủ 6 `errorCode`, thông điệp sạch không lộ stack/path.
+  12. `extensionClient.ts` simulator: `GET_QUEST_STATE`, `CLAIM_QUEST_REWARD`, `GIVE_UP_SESSION` giữ nguyên Quest, auto-complete `COUNTDOWN` trên `GET_SESSION_STATE` cộng tiến độ Quest.
+- **Cập nhật đúng 1 file test cũ — `__tests__/storage/v3Migration.test.ts` *(giữ nguyên 100% mọi assertion Economy/Coins/XP/Level/Multiplier)*:**
+  1. Dòng `219–221`: đổi kỳ vọng ngày cứng `'2026-11-18'` sang `formatLocalDateKey(nowMs)` vì test dùng `Date.now()` thực tế (fail khi đồng hồ bước sang ngày `'2026-11-19'`).
+  2. Dòng `228–230` & `279–290`: cập nhật assertion bảo vệ chỉ-2a cũ (`assert.deepStrictEqual(questsAfterSessions, initialQuests)` — vốn yêu cầu `SessionCoordinator` chưa được nối với Quest ở Giai đoạn 2a) sang kiểm chứng kết quả nối Giai đoạn 2b (sau 25m Countdown + Give Up + 30m Stopwatch → `daily_first_spark: 1/1`, `daily_double_tap: 2/2`, `daily_steady_rhythm: 55/60`, `weekly_tenacity_10: 2/10`, `weekly_habit_builder: 1/4`, `streak: 1`). Mọi assertion `focusCoins: 37.5`, `totalXP: 125`, Stopwatch `36C / 108XP` giữ nguyên từng bit.
 
 ---
 
 ## 4. KẾT QUẢ KIỂM ĐỊNH THỰC TẾ (VERIFIED REAL OUTPUTS)
 
 - **`npm run lint` (`tsc --noEmit`):** **PASS** (`Exit code 0`, `0` errors).
-- **`npm run clean && npm run build`:** **PASS** (`Vite v8.3.8`, `1,748 modules transformed`, **`643ms`**, tổng dung lượng tệp `dist/`: **`1,095,217 B`**):
-  - **So sánh bundle `popup` Trước UX-5 (Stage 2a) → Sau UX-5:**
-    - `popup` JS: `765,071 B` (`765.07 kB`, gzip `201.50 kB`) → **`770,675 B` (`770.67 kB`, gzip `203.30 kB`)** (`+5,604 B` / `+5.60 kB`).
-    - `popup` CSS: `88,298 B` (`88.29 kB`, gzip `13.79 kB`) → **`88,317 B` (`88.31 kB`, gzip `13.80 kB`)** (`+19 B` / `+0.02 kB`).
-  - Các artifacts khác giữ nguyên: `dist/background.js` (`93,016 B` / `93.01 kB`), `dist/offscreen.js` (`3,878 B` / `3.87 kB`), `dist/blocked.js` (`1,321 B` / `1.32 kB`), `dist/assets/translator-B5-w4v6G.js` (`52,477 B`), `dist/assets/statsAggregator-C5H9LvvS.js` (`55,154 B`), `dist/assets/storageKeys-C4hhw6ET.js` (`398 B`), `dist/manifest.json` (`984 B`), `dist/index.html` (`716 B`).
-- **`npm test` — chạy 3 lần liên tiếp (sau toàn bộ chỉnh sửa cuối):**
-  - **Lần 1:** `579 / 579 PASS` (`0` fail, `0` skipped, `0` cancelled, `19,922.03 ms`, Exit `0`).
-  - **Lần 2:** `579 / 579 PASS` (`0` fail, `0` skipped, `0` cancelled, `15,918.03 ms`, Exit `0`).
-  - **Lần 3:** `579 / 579 PASS` (`0` fail, `0` skipped, `0` cancelled, `15,885.90 ms`, Exit `0`).
+- **`npm run clean && npm run build`:** **PASS** (`Vite v8.3.8`, `1,749 modules transformed`, **`1.03s`**, tổng dung lượng tệp `dist/`: **`1,111,022 B`**):
+  - **So sánh `dist/background.js` Trước 2b (UX-5) → Sau 2b:**
+    - `dist/background.js`: `93,016 B` (`93.01 kB`, gzip `20.37 kB`) → **`93,530 B` (`93.53 kB`, gzip `20.57 kB`)** (**`+514 B`**).
+  - Các chunks/entry chính khác trong `dist/`:
+    - `dist/assets/popup-5am1wdzk.js`: **`774,872 B`** (`774.87 kB`, gzip `204.59 kB`)
+    - `dist/assets/popup-Cnjs0qfG.css`: **`88,317 B`** (`88.31 kB`, gzip `13.80 kB`)
+    - `dist/assets/questEngine-C5pC2Fnz.js`: **`66,252 B`** (`66.25 kB`, gzip `18.28 kB`)
+    - `dist/assets/translator-B5-w4v6G.js`: **`52,477 B`** (`52.47 kB`, gzip `14.14 kB`)
+    - `dist/assets/storageKeys-C4hhw6ET.js`: **`398 B`** (`0.39 kB`, gzip `0.27 kB`)
+    - `dist/offscreen.js`: **`3,878 B`** (`3.87 kB`, gzip `1.48 kB`), `dist/blocked.js`: **`1,321 B`** (`1.32 kB`, gzip `0.60 kB`), `dist/manifest.json`: **`984 B`**, `dist/index.html`: **`712 B`**.
+- **`npm test` — chạy 3 lần liên tiếp (với `dist/` đã build sẵn để thỏa `musicPackaging.test.ts`):**
+  - **Lần 1:** `595 / 595 PASS` (`0` fail, `0` skipped, `0` cancelled, **`25,514.85 ms`**, Exit `0`).
+  - **Lần 2:** `595 / 595 PASS` (`0` fail, `0` skipped, `0` cancelled, **`24,657.47 ms`**, Exit `0`).
+  - **Lần 3:** `595 / 595 PASS` (`0` fail, `0` skipped, `0` cancelled, **`22,424.03 ms`**, Exit `0`).
 
 ---
 
-## 5. GIỚI HẠN HIỆN TẠI & 6 BƯỚC TỰ KIỂM TRA TRÊN CHROME THẬT
+## 5. RANH GIỚI KIỂM CHỨNG & HƯỚNG DẪN TỰ KIỂM TRA TRÊN CHROME DEVTOOLS
 
-- **Giới hạn kiểm chứng:** Bản UX-5 **CHƯA kiểm chứng trực quan trên Chrome thật** — toàn bộ kiểm tra vừa chạy là kiểm toán logic vẽ qua Node mock Canvas 2D context, kiểm tra HTML qua React SSR (`renderToString`), kiểm chứng số học DPR/zoom/pan, `tsc --noEmit` và build `dist/`.
-- **6 bước đề nghị bạn kiểm tra trực tiếp trên Chrome thật (`dist/` sau khi nạp unpacked hoặc Web Preview):**
-  1. **Kiểm tra ở nhiều tỉ lệ màn hình / zoom trình duyệt (`100%`, `125%`, `150%`, `175%` hoặc Dev Zoom `Ctrl+`/`Ctrl-`):** Quan sát vùng cỏ đã mở lẫn rừng tối xung quanh xem còn bất kỳ khe sáng dọc/ngang hay lưới mờ nào xuất hiện khi đứng yên hoặc lúc kéo bản đồ hay không.
-  2. **Mở Expansion Mode (auto-fit zoom):** Xác nhận bản đồ thu nhỏ vừa khung mà mặt đất + rừng vẫn liền khít 100%, viền xanh/hổ phách của 4×4 chunk mở rộng hiển thị đúng.
-  3. **Kiểm tra đặt công trình:** Chọn 1 công trình → rê chuột xem ô hover xanh (`hover:after:bg-emerald-300/35`), tooltip ghost đặt hợp lệ/lỗi, đặt xuống và bấm kiểm tra công trình đã đặt.
-  4. **Kiểm tra hoạt ảnh rìu chém khi mở đất:** Mở 1 chunk mới → xác nhận vùng rừng giữ nguyên tối liền lạc cho tới mốc rìu chạm đất `680ms` rồi mới lộ cỏ mở + rung nhẹ bản đồ không hở khe.
-  5. **Đối chiếu `#sprites` (Web Preview):** Kéo xuống phần cuối `Section 3` kiểm tra khối `"16×11 Locked Forest Algorithm Preview"` (DOM) và khối `"Map terrain bitmap (16×11 Locked Forest · UX-5 Single Canvas)"` ngay bên dưới khớp nhau về cây M1–M6, nền và độ tối `44%`.
-  6. **Kéo nhanh liên tục bản đồ:** Giữ chuột trái kéo đảo chiều liên tục trên cả vùng cỏ mở và rừng tối để xác nhận pan bám tay tức thì (không bị trễ `transition-transform`), không giật hoặc nháy lưới.
+- **Ranh giới kiểm chứng:** Môi trường hiện tại không chạy trình duyệt Chrome thật; toàn bộ `595` test vừa chạy thực thi trên Node.js (`tsx --test`) dùng `MemoryStorageAdapter` / mock Chrome adapters và React SSR (`renderToString`). Luồng Service Worker thật & DevTools thực tế **chưa chạy trực tiếp trong môi trường này**.
+- **Các bước kiểm tra thủ công Giai đoạn 2b qua Service Worker DevTools sau khi nạp `/dist` (`chrome://extensions` → Inspect views: `service worker`):**
+  1. **Kiểm tra dữ liệu `fq_quests` khởi tạo (Schema v3):** Trong Console của Service Worker, chạy:
+     ```js
+     chrome.storage.local.get(['fq_schema_version', 'fq_quests', 'fq_economy', 'fq_daily_stats'], console.log)
+     ```
+     Xác nhận `fq_schema_version === 3` và `fq_quests` có đủ `3` daily quests (`daily_first_spark`, `daily_steady_rhythm`, `daily_double_tap`), `3` weekly quests (`weekly_habit_builder`, `weekly_deep_diver`, `weekly_tenacity_10`).
+  2. **Kiểm tra `GET_QUEST_STATE` (từ Popup DevTools hoặc bất kỳ extension page nào):**
+     ```js
+     chrome.runtime.sendMessage({ action: 'GET_QUEST_STATE' }, console.log)
+     ```
+     Xác nhận trả về `success: true` kèm `data.questState`, `data.resetCountdown` (`dailyResetInMs`, `weeklyResetInMs`), `data.unclaimedCount`.
+  3. **Kiểm tra quyết toán phiên (`COMPLETED` vs `GIVE_UP`):** Chạy hết 1 phiên `COUNTDOWN` ngắn (hoặc `STOPWATCH >= 5m`) → kiểm tra `fq_quests` tăng `1` phiên & đủ số phút tương ứng; chạy 1 phiên khác rồi bấm **Give Up** → xác nhận `fq_quests` giữ nguyên không tăng.
+  4. **Kiểm tra `CLAIM_QUEST_REWARD` & loại trừ `fq_daily_stats`:**
+     ```js
+     chrome.runtime.sendMessage({ action: 'CLAIM_QUEST_REWARD', payload: { period: 'DAILY', questId: 'daily_first_spark' } }, console.log)
+     ```
+     Xác nhận ví `fq_economy` cộng đúng phẳng `10 Coins` và `25 XP`, không nhân `CoinBonus`, `fq_daily_stats` hôm nay giữ nguyên không cộng phần thưởng Quest, và gửi lại lần 2 trả `success: false`, `errorCode: 'QUEST_ALREADY_CLAIMED'`.
+  5. **Kiểm tra rollover qua ngày mới:** Trong Service Worker DevTools có thể kiểm thử rollover bằng cách đặt tạm `dailyDateKey` về hôm qua trong `fq_quests`, gọi lại `GET_QUEST_STATE` → xác nhận `daily` reset sạch `0`, `unclaimedCount` ngày cũ hết hạn và gọi `CLAIM_QUEST_REWARD` cho quest cũ trả `QUEST_NOT_COMPLETED` (hoặc `QUEST_EXPIRED` nếu vừa rollover đúng ngay khoảnh khắc claim).
 
 ---
 
-**DỪNG tại đây chờ bạn nghiệm thu trực quan và duyệt UX-5.**
+**DỪNG tại đây chờ bạn rà soát và duyệt Giai đoạn 2b trước khi triển khai Giai đoạn 5c (`QuestView` & `StatsView`).**

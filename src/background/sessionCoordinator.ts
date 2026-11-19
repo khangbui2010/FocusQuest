@@ -25,6 +25,7 @@ import { calculateLifetimeFocusMinutes } from '../core/stats/statsAggregator.ts'
 import { formatSessionNotificationContent } from './notificationFormatter.ts';
 import { TranslationKey } from '../i18n/types.ts';
 import { toQuestOutcomeDelta } from '../core/quests/questEngine.ts';
+import { QuestOutcomeDelta } from '../types/quests.ts';
 
 export const ALARM_NAMES = {
   COUNTDOWN_FINISH: 'FQ_ALARM_COUNTDOWN_FINISH',
@@ -257,6 +258,18 @@ export class SessionCoordinator {
 
   private getTodayDateKey(nowMs?: number): string {
     return getLocalDateKey(nowMs);
+  }
+
+  private buildQuestOutcomeDeltaSafe(
+    session: SessionSnapshot,
+    completedDateKey: string
+  ): QuestOutcomeDelta | undefined {
+    try {
+      return toQuestOutcomeDelta(session, completedDateKey) ?? undefined;
+    } catch (err) {
+      console.warn('[SessionCoordinator] Isolated quest outcome delta error:', err);
+      return undefined;
+    }
   }
 
   /**
@@ -957,7 +970,7 @@ export class SessionCoordinator {
         };
 
         const completedDateKey = this.getTodayDateKey(now);
-        const questOutcomeDelta = toQuestOutcomeDelta(updated, completedDateKey) ?? undefined;
+        const questOutcomeDelta = this.buildQuestOutcomeDeltaSafe(updated, completedDateKey);
 
         // Atomically commit session, economy, daily stats, and quests in one storage write
         await this.storage.commitSessionOutcomeInternal({
@@ -1047,7 +1060,7 @@ export class SessionCoordinator {
       };
 
       const completedDateKey = this.getTodayDateKey(now);
-      const questOutcomeDelta = toQuestOutcomeDelta(updated, completedDateKey) ?? undefined;
+      const questOutcomeDelta = this.buildQuestOutcomeDeltaSafe(updated, completedDateKey);
 
       // Atomically commit session, economy, daily stats, and quests in one storage write
       await this.storage.commitSessionOutcomeInternal({
@@ -1153,7 +1166,7 @@ export class SessionCoordinator {
       };
 
       const completedDateKey = this.getTodayDateKey(now);
-      const questOutcomeDelta = toQuestOutcomeDelta(updated, completedDateKey) ?? undefined;
+      const questOutcomeDelta = this.buildQuestOutcomeDeltaSafe(updated, completedDateKey);
 
       // Atomically commit session, economy, daily stats, and quests in one storage write
       await this.storage.commitSessionOutcomeInternal({
@@ -1384,7 +1397,7 @@ export class SessionCoordinator {
             };
 
             const completedDateKey = this.getTodayDateKey(now);
-            const questOutcomeDelta = toQuestOutcomeDelta(updated, completedDateKey) ?? undefined;
+            const questOutcomeDelta = this.buildQuestOutcomeDeltaSafe(updated, completedDateKey);
 
             // Settlement occurs ONCE at 100% mission completion
             await this.storage.commitSessionOutcomeInternal({
