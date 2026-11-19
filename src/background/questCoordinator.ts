@@ -15,6 +15,7 @@ import {
   GetQuestStateResponseData,
 } from '../types/messages.ts';
 import { QuestErrorCode, QuestPeriod, QuestState } from '../types/quests.ts';
+import { ErrorParams } from '../types/errors.ts';
 import { PlayerEconomy } from '../types/economy.ts';
 import {
   ALL_QUEST_DEFINITIONS,
@@ -32,11 +33,13 @@ import { calculatePlayerLevel } from '../core/economy/levelSystem.ts';
 
 export class QuestCoordinatorError extends Error {
   readonly code: QuestErrorCode;
+  readonly params?: ErrorParams;
 
-  constructor(code: QuestErrorCode, message: string) {
+  constructor(code: QuestErrorCode, message: string, params?: ErrorParams) {
     super(message);
     this.name = 'QuestCoordinatorError';
     this.code = code;
+    this.params = params;
   }
 }
 
@@ -79,14 +82,17 @@ export function validateClaimQuestPayload(payload: unknown): ClaimQuestRewardPay
   const questId = raw.questId.trim();
   const existsAnywhere = ALL_QUEST_DEFINITIONS.some((def) => def.id === questId);
   if (!existsAnywhere) {
-    throw new QuestCoordinatorError('UNKNOWN_QUEST', `Unknown quest "${questId}".`);
+    throw new QuestCoordinatorError('UNKNOWN_QUEST', `Unknown quest "${questId}".`, {
+      questId,
+    });
   }
 
   const exactDef = getQuestDefinition(raw.period, questId);
   if (!exactDef) {
     throw new QuestCoordinatorError(
       'QUEST_PERIOD_MISMATCH',
-      `Quest "${questId}" does not belong to period ${raw.period}.`
+      `Quest "${questId}" does not belong to period ${raw.period}.`,
+      { questId, period: raw.period }
     );
   }
 
@@ -179,7 +185,8 @@ export class QuestCoordinator {
         if (currentEntry?.claimed || rolled.recentClaimedKeys.includes(ledgerKey)) {
           throw new QuestCoordinatorError(
             'QUEST_ALREADY_CLAIMED',
-            `Quest "${valid.questId}" reward has already been claimed.`
+            `Quest "${valid.questId}" reward has already been claimed.`,
+            { questId: valid.questId }
           );
         }
 
@@ -191,7 +198,8 @@ export class QuestCoordinator {
         ) {
           throw new QuestCoordinatorError(
             'QUEST_EXPIRED',
-            `Quest "${valid.questId}" reward expired after period reset.`
+            `Quest "${valid.questId}" reward expired after period reset.`,
+            { questId: valid.questId }
           );
         }
 
@@ -199,7 +207,8 @@ export class QuestCoordinator {
         const target = currentEntry?.target ?? def.target;
         throw new QuestCoordinatorError(
           'QUEST_NOT_COMPLETED',
-          `Quest "${valid.questId}" is not completed yet (${progress}/${target}).`
+          `Quest "${valid.questId}" is not completed yet (${progress}/${target}).`,
+          { questId: valid.questId, progress, target }
         );
       }
 

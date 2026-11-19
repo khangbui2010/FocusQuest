@@ -8,6 +8,7 @@ import { CivilizationState } from '../core/civilization/civilizationState.ts';
 import { SupportedLocale } from '../i18n/types.ts';
 import { MusicPlayerState, MusicTrack, RepeatMode } from './music.ts';
 import { QuestPeriod, QuestResetCountdown, QuestState } from './quests.ts';
+import { ErrorParams } from './errors.ts';
 
 export type MessageAction =
   | 'START_SESSION'
@@ -218,6 +219,7 @@ export interface MessageResponse<T = unknown> {
   data?: T;
   error?: string;
   errorCode?: string;
+  errorParams?: ErrorParams;
 }
 
 export interface FullSessionStateResponse {

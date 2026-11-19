@@ -44,7 +44,11 @@ import { CivilizationEra } from '../../core/civilization/buildingTypes.ts';
 import { DurationPresetChips } from './DurationPresetChips.tsx';
 import { FocusSceneArea, resolveFocusSceneState } from './FocusSceneArea.tsx';
 import { getSessionModeLabel } from '../utils/sessionModeLabel.ts';
-import { localizeErrorMessage } from '../../i18n/errorTranslator.ts';
+import {
+  localizeErrorMessage,
+  toUiErrorPayload,
+  UiErrorPayload,
+} from '../../i18n/errorTranslator.ts';
 
 const POMO_CONFIG_STORAGE_KEY = 'fq_pomodoro_config';
 
@@ -272,12 +276,14 @@ export const TimerView: React.FC<TimerViewProps> = ({
   // Modal confirm states
   const [showGiveUpConfirm, setShowGiveUpConfirm] = useState<boolean>(false);
   const [showStopwatchConfirm, setShowStopwatchConfirm] = useState<boolean>(false);
-  const [actionError, setActionError] = useState<string | null>(initialActionError);
+  const [actionError, setActionError] = useState<UiErrorPayload | null>(() =>
+    initialActionError ? { message: initialActionError } : null
+  );
   const [isExiting, setIsExiting] = useState<boolean>(false);
   const exitingRef = useRef<boolean>(false);
 
   useEffect(() => {
-    setActionError(initialActionError);
+    setActionError(initialActionError ? { message: initialActionError } : null);
   }, [initialActionError, session?.id, session?.status]);
 
   // Periodic 1-second tick for timestamp-based live countdowns
@@ -384,7 +390,7 @@ export const TimerView: React.FC<TimerViewProps> = ({
     try {
       await fn();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : String(err));
+      setActionError(toUiErrorPayload(err));
     }
   };
 
@@ -396,7 +402,7 @@ export const TimerView: React.FC<TimerViewProps> = ({
     try {
       await onResetSession();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : String(err));
+      setActionError(toUiErrorPayload(err, 'EXIT_SESSION_FAILED', 'Failed to exit session.'));
     } finally {
       exitingRef.current = false;
       setIsExiting(false);
@@ -488,7 +494,12 @@ export const TimerView: React.FC<TimerViewProps> = ({
                 })
             : isPomoCountdown
             ? t('timer.outcome.pomoCountdownIncompleteDesc')
-            : isPomoStopwatch && completedIntervals > 0
+            : isPomoStopwatch &&
+              isInterrupted &&
+              (session.interruptedReason === 'EXTENSION_DISABLED' ||
+                session.interruptedReason === 'EXTENSION_RELOADED')
+            ? t('timer.outcome.pomoStopwatchInterruptedForfeitedDesc')
+            : isPomoStopwatch && completedIntervals > 0 && (earnedCoins > 0 || earnedXp > 0)
             ? t('timer.outcome.pomoEndedRetainedDesc', { count: completedIntervals })
             : isInterrupted
             ? t('timer.outcome.endedInterruptedDesc')
@@ -544,7 +555,7 @@ export const TimerView: React.FC<TimerViewProps> = ({
             role="alert"
             className="w-full max-w-[280px] mb-3 px-3 py-2 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/60 text-xs text-rose-700 dark:text-rose-300"
           >
-            {localizeErrorMessage(locale, actionError)}
+            {localizeErrorMessage(locale, actionError.message, actionError.code, actionError.params)}
           </div>
         )}
 
@@ -896,7 +907,7 @@ export const TimerView: React.FC<TimerViewProps> = ({
 
         {actionError && (
           <div className="shrink-0 text-[11px] text-rose-600 dark:text-rose-400 text-center">
-            {localizeErrorMessage(locale, actionError)}
+            {localizeErrorMessage(locale, actionError.message, actionError.code, actionError.params)}
           </div>
         )}
 
@@ -1544,7 +1555,7 @@ export const TimerView: React.FC<TimerViewProps> = ({
 
       {actionError && (
         <div className="text-xs text-rose-600 dark:text-rose-400 text-center">
-          {localizeErrorMessage(locale, actionError)}
+          {localizeErrorMessage(locale, actionError.message, actionError.code, actionError.params)}
         </div>
       )}
 

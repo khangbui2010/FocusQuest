@@ -1,7 +1,11 @@
+import { ErrorCode, ErrorParams } from '../../types/errors.ts';
+
 export interface DomainValidationResult {
   isValid: boolean;
   normalizedDomain: string;
   error?: string;
+  errorCode?: ErrorCode;
+  errorParams?: ErrorParams;
 }
 
 // Dangerous top-level or overly broad wildcards that must be prohibited
@@ -71,7 +75,12 @@ export class DomainNormalizer {
     const normalized = this.normalizeHostname(pattern);
 
     if (!normalized) {
-      return { isValid: false, normalizedDomain: '', error: 'Domain pattern cannot be empty.' };
+      return {
+        isValid: false,
+        normalizedDomain: '',
+        error: 'Domain pattern cannot be empty.',
+        errorCode: 'DOMAIN_EMPTY',
+      };
     }
 
     if (FORBIDDEN_WILDCARDS.has(normalized)) {
@@ -79,6 +88,8 @@ export class DomainNormalizer {
         isValid: false,
         normalizedDomain: normalized,
         error: `Pattern '${pattern}' is too broad and would disable website blocking protection.`,
+        errorCode: 'DOMAIN_PATTERN_TOO_BROAD',
+        errorParams: { pattern },
       };
     }
 
@@ -91,6 +102,8 @@ export class DomainNormalizer {
         isValid: false,
         normalizedDomain: normalized,
         error: `Invalid domain format: '${pattern}'. Example valid formats: 'wikipedia.org', '*.github.com'.`,
+        errorCode: 'DOMAIN_INVALID_FORMAT',
+        errorParams: { pattern },
       };
     }
 

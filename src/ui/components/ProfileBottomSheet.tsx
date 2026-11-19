@@ -14,7 +14,11 @@ import {
 import { FocusProfile } from '../../types/profiles.ts';
 import { DomainNormalizer } from '../../core/profiles/domainNormalizer.ts';
 import { useTranslation } from '../../i18n/I18nContext.tsx';
-import { localizeErrorMessage } from '../../i18n/errorTranslator.ts';
+import {
+  localizeErrorMessage,
+  toUiErrorPayload,
+  UiErrorPayload,
+} from '../../i18n/errorTranslator.ts';
 
 export interface ProfileBottomSheetProps {
   isOpen: boolean;
@@ -56,12 +60,14 @@ export const ProfileBottomSheet: React.FC<ProfileBottomSheetProps> = ({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const [newDomainInput, setNewDomainInput] = useState('');
-  const [sheetError, setSheetError] = useState<string | null>(initialError);
-  const [domainError, setDomainError] = useState<string | null>(null);
+  const [sheetError, setSheetError] = useState<UiErrorPayload | null>(() =>
+    initialError ? { message: initialError } : null
+  );
+  const [domainError, setDomainError] = useState<UiErrorPayload | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    setSheetError(initialError);
+    setSheetError(initialError ? { message: initialError } : null);
   }, [initialError]);
 
   // Clear pending edit drafts if a session becomes active while sheet is open
@@ -93,14 +99,17 @@ export const ProfileBottomSheet: React.FC<ProfileBottomSheetProps> = ({
   const isBusy = isLoading || isSubmitting;
   const isMutateDisabled = isSessionActive || isBusy;
 
-  const runMutation = async (fn: () => Promise<void>, setTargetError: (msg: string | null) => void) => {
+  const runMutation = async (
+    fn: () => Promise<void>,
+    setTargetError: (err: UiErrorPayload | null) => void
+  ) => {
     setTargetError(null);
     setIsSubmitting(true);
     try {
       await fn();
       return true;
     } catch (err) {
-      setTargetError(err instanceof Error ? err.message : String(err));
+      setTargetError(toUiErrorPayload(err));
       return false;
     } finally {
       setIsSubmitting(false);
@@ -110,12 +119,15 @@ export const ProfileBottomSheet: React.FC<ProfileBottomSheetProps> = ({
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSessionActive) {
-      setSheetError(t('profiles.sessionLockBanner'));
+      setSheetError({
+        code: 'ACTIVE_SESSION_LOCK_PROFILE_CREATE',
+        message: 'Cannot create profile during a focus session. Finish your session first.',
+      });
       return;
     }
     const trimmed = newProfileName.trim();
     if (!trimmed) {
-      setSheetError(t('profiles.emptyNameClientError'));
+      setSheetError({ message: t('profiles.emptyNameClientError') });
       return;
     }
     const ok = await runMutation(() => onCreateProfile(trimmed), setSheetError);
@@ -128,12 +140,15 @@ export const ProfileBottomSheet: React.FC<ProfileBottomSheetProps> = ({
   const handleRenameSubmit = async (e: React.FormEvent, profileId: string) => {
     e.preventDefault();
     if (isSessionActive) {
-      setSheetError(t('profiles.sessionLockBanner'));
+      setSheetError({
+        code: 'ACTIVE_SESSION_LOCK_PROFILE_RENAME',
+        message: 'Cannot rename profile during a focus session. Finish your session first.',
+      });
       return;
     }
     const trimmed = renameDraft.trim();
     if (!trimmed) {
-      setSheetError(t('profiles.emptyNameClientError'));
+      setSheetError({ message: t('profiles.emptyNameClientError') });
       return;
     }
     const ok = await runMutation(() => onRenameProfile(profileId, trimmed), setSheetError);
@@ -145,11 +160,14 @@ export const ProfileBottomSheet: React.FC<ProfileBottomSheetProps> = ({
 
   const handleConfirmDelete = async (profileId: string) => {
     if (isSessionActive) {
-      setSheetError(t('profiles.sessionLockBanner'));
+      setSheetError({
+        code: 'ACTIVE_SESSION_LOCK_PROFILE_DELETE',
+        message: 'Cannot delete profile during a focus session. Finish your session first.',
+      });
       return;
     }
     if (safeProfiles.length <= 1) {
-      setSheetError(t('profiles.cannotDeleteLast'));
+      setSheetError({ code: 'PROFILE_DELETE_LAST', message: t('profiles.cannotDeleteLast') });
       setConfirmDeleteId(null);
       return;
     }
@@ -164,26 +182,35 @@ export const ProfileBottomSheet: React.FC<ProfileBottomSheetProps> = ({
     setDomainError(null);
 
     if (isSessionActive) {
-      setDomainError(t('profiles.sessionLockBanner'));
+      setDomainError({
+        code: 'ACTIVE_SESSION_LOCK_ALLOWLIST',
+        message: 'Allowlist cannot be modified during a focus session. Finish your session first.',
+      });
       return;
     }
     if (!activeProfile) return;
 
     const trimmed = newDomainInput.trim();
     if (!trimmed) {
-      setDomainError(t('profiles.emptyDomainClientError'));
+      setDomainError({ message: t('profiles.emptyDomainClientError') });
       return;
     }
 
     // Reuse existing DomainNormalizer allowlist validation from ProfileAllowlistView
     const validation = DomainNormalizer.validateAllowlistPattern(trimmed);
     if (!validation.isValid) {
-      setDomainError(validation.error || 'Invalid domain pattern.');
+      setDomainError({
+        message: validation.error || 'Invalid domain pattern.',
+        code: validation.errorCode ?? 'DOMAIN_INVALID_FORMAT',
+        params: validation.errorParams,
+      });
       return;
     }
 
     if (activeProfile.allowedDomains.includes(validation.normalizedDomain)) {
-      setDomainError(t('profiles.duplicateDomainClientError', { domain: validation.normalizedDomain }));
+      setDomainError({
+        message: t('profiles.duplicateDomainClientError', { domain: validation.normalizedDomain }),
+      });
       return;
     }
 
@@ -264,7 +291,7 @@ export const ProfileBottomSheet: React.FC<ProfileBottomSheetProps> = ({
             >
               <div className="flex items-start gap-1.5 min-w-0">
                 <AlertCircle className="w-3.5 h-3.5 shrink-0 text-rose-600 dark:text-rose-400 mt-0.5" />
-                <span>{localizeErrorMessage(locale, sheetError)}</span>
+                <span>{localizeErrorMessage(locale, sheetError.message, sheetError.code, sheetError.params)}</span>
               </div>
               <button
                 type="button"
@@ -468,7 +495,7 @@ export const ProfileBottomSheet: React.FC<ProfileBottomSheetProps> = ({
                                 e.stopPropagation();
                                 if (isMutateDisabled) return;
                                 if (isOnlyProfile) {
-                                  setSheetError(t('profiles.cannotDeleteLast'));
+                                  setSheetError({ message: t('profiles.cannotDeleteLast') });
                                   return;
                                 }
                                 setRenamingId(null);
@@ -566,7 +593,7 @@ export const ProfileBottomSheet: React.FC<ProfileBottomSheetProps> = ({
                   className="flex items-start gap-1 text-[11px] text-rose-600 dark:text-rose-400"
                 >
                   <AlertCircle className="w-3 h-3 shrink-0 mt-0.5" />
-                  <span>{localizeErrorMessage(locale, domainError)}</span>
+                  <span>{localizeErrorMessage(locale, domainError.message, domainError.code, domainError.params)}</span>
                 </div>
               )}
             </form>

@@ -26,6 +26,7 @@ import { formatSessionNotificationContent } from './notificationFormatter.ts';
 import { TranslationKey } from '../i18n/types.ts';
 import { toQuestOutcomeDelta } from '../core/quests/questEngine.ts';
 import { QuestOutcomeDelta } from '../types/quests.ts';
+import { AppError } from '../types/errors.ts';
 
 export const ALARM_NAMES = {
   COUNTDOWN_FINISH: 'FQ_ALARM_COUNTDOWN_FINISH',
@@ -395,13 +396,21 @@ export class SessionCoordinator {
     const newSession = await this.storage.runExclusive(async () => {
       const current = await this.storage.getCurrentSession();
       if (current && TimerStateMachine.isActive(current.status)) {
-        throw new Error(`Cannot start session: a session is already in status '${current.status}'.`);
+        throw new AppError(
+          'SESSION_ALREADY_ACTIVE',
+          `Cannot start session: a session is already in status '${current.status}'.`,
+          { status: current.status }
+        );
       }
 
       const profiles = await this.storage.getProfiles();
       const profile = profiles.find((p) => p.id === profileId);
       if (!profile) {
-        throw new Error(`Cannot start session: profile with ID '${profileId}' not found.`);
+        throw new AppError(
+          'SESSION_PROFILE_NOT_FOUND',
+          `Cannot start session: profile with ID '${profileId}' not found.`,
+          { profileId }
+        );
       }
 
       await this.storage.setActiveProfileId(profileId);
@@ -519,7 +528,7 @@ export class SessionCoordinator {
     const updated = await this.storage.runExclusive(async () => {
       const session = await this.storage.getCurrentSession();
       if (!session) {
-        throw new Error('No active session to pause.');
+        throw new AppError('NO_ACTIVE_SESSION_PAUSE', 'No active session to pause.');
       }
 
       const transition = TimerStateMachine.transition(session.status, 'PAUSE', {
@@ -527,7 +536,7 @@ export class SessionCoordinator {
       });
 
       if (!transition.success) {
-        throw new Error(transition.error);
+        throw new AppError('INVALID_TIMER_TRANSITION', transition.error ?? 'Invalid timer transition');
       }
 
       const now = Date.now();
@@ -604,7 +613,7 @@ export class SessionCoordinator {
     const result = await this.storage.runExclusive(async () => {
       const session = await this.storage.getCurrentSession();
       if (!session) {
-        throw new Error('No session to resume.');
+        throw new AppError('NO_SESSION_RESUME', 'No session to resume.');
       }
 
       // Stale alarm protection: if triggered by alarm, verify alarm matches this session's active pause
@@ -626,7 +635,7 @@ export class SessionCoordinator {
       const transition = TimerStateMachine.transition(session.status, event);
 
       if (!transition.success) {
-        throw new Error(transition.error);
+        throw new AppError('INVALID_TIMER_TRANSITION', transition.error ?? 'Invalid timer transition');
       }
 
       const now = Date.now();
@@ -746,7 +755,7 @@ export class SessionCoordinator {
     const updated = await this.storage.runExclusive(async () => {
       const session = await this.storage.getCurrentSession();
       if (!session) {
-        throw new Error('No session to give up.');
+        throw new AppError('NO_SESSION_GIVE_UP', 'No session to give up.');
       }
 
       if (
@@ -754,12 +763,15 @@ export class SessionCoordinator {
         session.mode !== 'POMODORO_COUNTDOWN' &&
         session.mode !== 'POMODORO_STOPWATCH'
       ) {
-        throw new Error("Give up is not applicable to standard Stopwatch sessions. Use 'FINISH'.");
+        throw new AppError(
+          'STOPWATCH_GIVE_UP_DISALLOWED',
+          "Give up is not applicable to standard Stopwatch sessions. Use 'FINISH'."
+        );
       }
 
       const transition = TimerStateMachine.transition(session.status, 'GIVE_UP');
       if (!transition.success) {
-        throw new Error(transition.error);
+        throw new AppError('INVALID_TIMER_TRANSITION', transition.error ?? 'Invalid timer transition');
       }
 
       const now = Date.now();
@@ -846,11 +858,14 @@ export class SessionCoordinator {
     const result = await this.storage.runExclusive(async () => {
       const session = await this.storage.getCurrentSession();
       if (!session) {
-        throw new Error('No active stopwatch session to finish.');
+        throw new AppError('NO_ACTIVE_STOPWATCH_FINISH', 'No active stopwatch session to finish.');
       }
 
       if (session.mode !== 'STOPWATCH' && session.mode !== 'POMODORO_STOPWATCH') {
-        throw new Error("Cannot finish countdown with 'finishStopwatch'. Countdown finishes when target is met.");
+        throw new AppError(
+          'COUNTDOWN_FINISH_STOPWATCH_DISALLOWED',
+          "Cannot finish countdown with 'finishStopwatch'. Countdown finishes when target is met."
+        );
       }
 
       // Idempotency guard: if already completed or processed, return gracefully without duplicate rewards
@@ -865,7 +880,7 @@ export class SessionCoordinator {
 
       const transition = TimerStateMachine.transition(session.status, 'FINISH');
       if (!transition.success) {
-        throw new Error(transition.error);
+        throw new AppError('INVALID_TIMER_TRANSITION', transition.error ?? 'Invalid timer transition');
       }
 
       const now = Date.now();
@@ -1281,7 +1296,11 @@ export class SessionCoordinator {
               `expected='${expectedAlarmName}', session=${session.id}`
           );
           if (session.mode === 'POMODORO_STOPWATCH' && pState.currentPhase === 'FOCUS') {
-            throw new Error(`Invalid or forged alarm name for Pomodoro Stopwatch: '${fromAlarmName}'.`);
+            throw new AppError(
+              'INVALID_POMODORO_ALARM',
+              `Invalid or forged alarm name for Pomodoro Stopwatch: '${fromAlarmName}'.`,
+              { alarmName: fromAlarmName }
+            );
           }
           return { session, hookType: 'none' as const };
         }
@@ -1301,7 +1320,11 @@ export class SessionCoordinator {
               `expected='${expectedAlarmName}', session=${session.id}`
           );
           if (session.mode === 'POMODORO_STOPWATCH' && pState.currentPhase === 'FOCUS') {
-            throw new Error(`Invalid or forged alarm name for Pomodoro Stopwatch: '${fromAlarmName}'.`);
+            throw new AppError(
+              'INVALID_POMODORO_ALARM',
+              `Invalid or forged alarm name for Pomodoro Stopwatch: '${fromAlarmName}'.`,
+              { alarmName: fromAlarmName }
+            );
           }
           return { session, hookType: 'none' as const };
         }
@@ -1340,16 +1363,27 @@ export class SessionCoordinator {
         if (session.mode === 'POMODORO_STOPWATCH') {
           if (!fromAlarmName && !isTimeElapsed) {
             console.warn(`[POMODORO] Alarm validation rejected: manual early interval completion attempted in Stopwatch mode`);
-            throw new Error('Manual early interval completion is prohibited in Pomodoro Stopwatch.');
+            throw new AppError(
+              'POMODORO_EARLY_COMPLETE_STOPWATCH',
+              'Manual early interval completion is prohibited in Pomodoro Stopwatch.'
+            );
           }
           if (fromAlarmName && fromAlarmName !== expectedAlarmName) {
             console.warn(`[POMODORO] Alarm validation rejected: alarm name mismatch '${fromAlarmName}' !== '${expectedAlarmName}'`);
-            throw new Error(`Invalid or forged alarm name for Pomodoro Stopwatch: '${fromAlarmName}'.`);
+            throw new AppError(
+              'INVALID_POMODORO_ALARM',
+              `Invalid or forged alarm name for Pomodoro Stopwatch: '${fromAlarmName}'.`,
+              { alarmName: fromAlarmName }
+            );
           }
         } else if (session.mode === 'POMODORO_COUNTDOWN') {
           if (fromAlarmName && fromAlarmName !== expectedAlarmName) {
             console.warn(`[POMODORO] Alarm validation rejected: alarm name mismatch '${fromAlarmName}' !== '${expectedAlarmName}'`);
-            throw new Error(`Invalid or forged alarm name for Pomodoro: '${fromAlarmName}'.`);
+            throw new AppError(
+              'INVALID_POMODORO_ALARM',
+              `Invalid or forged alarm name for Pomodoro: '${fromAlarmName}'.`,
+              { alarmName: fromAlarmName }
+            );
           }
         }
 
@@ -2667,7 +2701,11 @@ export class SessionCoordinator {
     await this.storage.runExclusive(async () => {
       const session = await this.storage.getCurrentSession();
       if (session && TimerStateMachine.isActive(session.status)) {
-        throw new Error(`Cannot reset active session with status '${session.status}'. Finish or give up first.`);
+        throw new AppError(
+          'SESSION_CANNOT_RESET_ACTIVE',
+          `Cannot reset active session with status '${session.status}'. Finish or give up first.`,
+          { status: session.status }
+        );
       }
       await this.storage.setCurrentSession(null);
       await this.alarms.clearAll();

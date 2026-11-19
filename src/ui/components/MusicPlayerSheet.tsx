@@ -429,10 +429,8 @@ export const MusicPlayerSheet: React.FC<MusicPlayerSheetProps> = ({
                 <span className="line-clamp-2">
                   {localizeErrorMessage(
                     locale,
-                    musicState.lastError ||
-                      (musicState.lastErrorCode
-                        ? `Audio playback failed (${musicState.lastErrorCode}).`
-                        : '')
+                    musicState.lastError,
+                    musicState.lastErrorCode
                   )}
                 </span>
               </div>

@@ -17,6 +17,7 @@ import { QuestCoordinator } from './questCoordinator.ts';
 
 import { LifecycleReason } from '../types/lifecycle.ts';
 import { OffscreenMusicEvent } from '../types/music.ts';
+import { extractCodedError } from '../types/errors.ts';
 
 // 1. Initialize Adapters & Core Services
 const storageAdapter = new ChromeStorageAdapter('local');
@@ -209,12 +210,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return musicCoordinator.handleOffscreenEvent(evt);
     })()
       .then((state) => sendResponse({ success: true, data: state }))
-      .catch((err) =>
+      .catch((err) => {
+        const coded = extractCodedError(err);
         sendResponse({
           success: false,
-          error: err instanceof Error ? err.message : String(err),
-        })
-      );
+          error: coded.message ?? (err instanceof Error ? err.message : String(err)),
+          errorCode: coded.code ?? 'ACTION_FAILED',
+          errorParams: coded.params,
+        });
+      });
     return true;
   }
 
@@ -227,9 +231,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse(response);
     })
     .catch((err) => {
+      const coded = extractCodedError(err);
       sendResponse({
         success: false,
-        error: err instanceof Error ? err.message : String(err),
+        error: coded.message ?? (err instanceof Error ? err.message : String(err)),
+        errorCode: coded.code ?? 'ACTION_FAILED',
+        errorParams: coded.params,
       });
     });
 

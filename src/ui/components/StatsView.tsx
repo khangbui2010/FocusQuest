@@ -123,7 +123,8 @@ export const StatsView: React.FC<StatsViewProps> = ({
         setLoadError(null);
       } else {
         setLoadError(
-          localizeErrorMessage(locale, statsRes.error) || t('stats.loadError')
+          localizeErrorMessage(locale, statsRes.error, statsRes.errorCode, statsRes.errorParams) ||
+            t('stats.loadError')
         );
       }
 

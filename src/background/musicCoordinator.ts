@@ -20,6 +20,7 @@ import {
   RepeatMode,
 } from '../types/music.ts';
 import { SessionSnapshot } from '../types/session.ts';
+import { AppError } from '../types/errors.ts';
 
 export interface MusicCoordinatorOptions {
   readonly initialCatalog?: readonly MusicTrack[];
@@ -679,7 +680,11 @@ export class MusicCoordinator {
         : getTrackById(this.state.currentTrackId, this.catalog) ?? this.catalog[0];
 
       if (!targetTrack) {
-        throw new Error(`Track '${trackId}' was not found in the Lofi music catalog.`);
+        throw new AppError(
+          'MUSIC_TRACK_NOT_FOUND',
+          `Track '${trackId}' was not found in the Lofi music catalog.`,
+          trackId ? { trackId } : undefined
+        );
       }
 
       const resumeSameTrack =

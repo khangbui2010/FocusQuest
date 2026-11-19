@@ -40,6 +40,7 @@ import { MusicPlayerState, MusicTrack, RepeatMode } from './types/music.ts';
 import { I18nProvider, useTranslation } from './i18n/I18nContext.tsx';
 import { SupportedLocale } from './i18n/types.ts';
 import { resolveLocale, translate } from './i18n/translator.ts';
+import { AppError, ErrorCode } from './types/errors.ts';
 
 const DEFAULT_ECONOMY: PlayerEconomy = {
   focusCoins: 120,
@@ -590,7 +591,11 @@ export const App: React.FC<AppProps> = ({
       });
       await refreshState();
       if (!res.success) {
-        throw new Error(res.error || 'Failed to switch profile.');
+        throw new AppError(
+          (res.errorCode as ErrorCode) ?? 'SWITCH_PROFILE_FAILED',
+          res.error || 'Failed to switch profile.',
+          res.errorParams
+        );
       }
     } finally {
       setIsLoading(false);
@@ -606,7 +611,11 @@ export const App: React.FC<AppProps> = ({
       });
       await refreshState();
       if (!res.success) {
-        throw new Error(res.error || 'Failed to create profile.');
+        throw new AppError(
+          (res.errorCode as ErrorCode) ?? 'CREATE_PROFILE_FAILED',
+          res.error || 'Failed to create profile.',
+          res.errorParams
+        );
       }
     } finally {
       setIsLoading(false);
@@ -622,7 +631,11 @@ export const App: React.FC<AppProps> = ({
       });
       await refreshState();
       if (!res.success) {
-        throw new Error(res.error || 'Failed to rename profile.');
+        throw new AppError(
+          (res.errorCode as ErrorCode) ?? 'RENAME_PROFILE_FAILED',
+          res.error || 'Failed to rename profile.',
+          res.errorParams
+        );
       }
     } finally {
       setIsLoading(false);
@@ -638,7 +651,11 @@ export const App: React.FC<AppProps> = ({
       });
       await refreshState();
       if (!res.success) {
-        throw new Error(res.error || 'Failed to delete profile.');
+        throw new AppError(
+          (res.errorCode as ErrorCode) ?? 'DELETE_PROFILE_FAILED',
+          res.error || 'Failed to delete profile.',
+          res.errorParams
+        );
       }
     } finally {
       setIsLoading(false);
@@ -654,7 +671,11 @@ export const App: React.FC<AppProps> = ({
       });
       await refreshState();
       if (!res.success) {
-        throw new Error(res.error || 'Failed to add domain.');
+        throw new AppError(
+          (res.errorCode as ErrorCode) ?? 'ADD_DOMAIN_FAILED',
+          res.error || 'Failed to add domain.',
+          res.errorParams
+        );
       }
     } finally {
       setIsLoading(false);
@@ -670,7 +691,11 @@ export const App: React.FC<AppProps> = ({
       });
       await refreshState();
       if (!res.success) {
-        throw new Error(res.error || 'Failed to remove domain.');
+        throw new AppError(
+          (res.errorCode as ErrorCode) ?? 'REMOVE_DOMAIN_FAILED',
+          res.error || 'Failed to remove domain.',
+          res.errorParams
+        );
       }
     } finally {
       setIsLoading(false);

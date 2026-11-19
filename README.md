@@ -23,7 +23,7 @@ Focus Quest transforms daily study and focused work into a civilization-building
 - **Focus Music Player (MV3 Offscreen Streaming):** Streams curated tracks from the online `FocusQuest-LOFI-archive` catalog through a Chrome Offscreen Document (`Chrome >= 116`), persisting playback position past Chrome's 30s audio idle cutoff with a session-scoped mini-player and expandable bottom sheet.
 - **Map-First 5-Tab Popup & Analytics Engine (`Stage 5c`):** Compact `Quests | Focus | Map | Awards | Stats` bottom navigation (hidden inside active/post-focus sessions until Exit), upgraded `StatsView` (`Day | Month | Year` navigation, custom SVG `StatsBarChart`, and `Focus Streak` gated by `Elder's Hut` `FOCUS_STAT_UNLOCK`), and half-up 2-decimal UI display (`formatRewardAmount`) preserving full IEEE-754 precision in storage.
 - **Daily & Weekly Quests (`Stage 2b` + `Stage 5c`):** Interactive `QuestView` (4 card states, manual claim via `CLAIM_QUEST_REWARD`, unclaimed badge on `Navbar`, live reset countdowns, Quest Streak with zero passive Coins), `QuestCoordinator`, Schema v3 migration, and atomic Session-Quest settlement under `StorageMutex` with rollback compensation.
-- **Full EN/VI Localization & MV3 CSP Compliance:** 100% EN/VI translations across UI, Chrome notifications, backend error mapper, Chrome `_locales`, and CSP-safe `blocked.html` + `blocked.js`.
+- **Full EN/VI Localization & MV3 CSP Compliance (`Stage 6+7`):** `533`-key EN/VI dictionary parity across UI, dynamic `RewardHelpModal`, all 7 Chrome notification paths, `98` structured `ErrorCode`s with technical error sanitization (`errorTranslator.ts`), Chrome `_locales`, and CSP-safe `blocked.html` + `blocked.js`.
 - **Concurrency & Transaction Safety:** All mutations execute inside atomic critical sections guarded by `StorageMutex` with rollback compensation.
 
 ---
@@ -68,7 +68,7 @@ npm install
 # Start local interactive dev preview (Port 3000)
 npm run dev
 
-# Run comprehensive test suite (604/604 tests)
+# Run comprehensive test suite (605/605 tests)
 npm test
 
 # Typecheck and lint codebase
@@ -78,13 +78,13 @@ npm run lint
 npm run build
 ```
 
-> **Verification scope:** Automated tests execute on Node.js (`tsx --test`) using React SSR (`renderToString`) for UI components and mock Chrome adapters for background services. Core runtime flows—the `400×600` popup (5-tab navigation, grid map, dark forest overlay, axe chop reveal animation), `blocked.html` with DNR rules, `chrome.i18n` & `manifest.json`, Offscreen Audio streaming (including Pause > 30s recovery), and remote music catalog fetching—have additionally been manually verified end-to-end in unpacked Chrome (`>= 116`).
+> **Verification scope:** Automated tests execute on Node.js (`tsx --test`) using React SSR (`renderToString`), mock 2D canvas context, and mock Chrome adapters for background services. Core runtime flows—the `400×600` popup (5-tab navigation, grid map, dark forest overlay, axe chop reveal animation), `blocked.html` with DNR rules, `chrome.i18n` & `manifest.json`, Offscreen Audio streaming (including Pause > 30s recovery), and remote music catalog fetching—have additionally been manually verified end-to-end in unpacked Chrome (`>= 116`). **Stages 5c (`QuestView`/`StatsView`), UX-5 `<TerrainBitmapCanvas>`, Stage 2b real Service Worker quests, and Stage 6+7 polish still require final visual/runtime verification in unpacked Chrome.**
 
 ---
 
 ## 🗺️ Roadmap
 
-- **Stage 6–7 & Awards System:** Complete notification/help/error polish and implement achievement tracking and milestones to replace the `Awards` tab `"Coming soon"` placeholder (`Quests` and `Stats` are now live in Stage 5c).
+- **Awards System:** Implement achievement tracking and milestones to replace the remaining `Awards` tab `"Coming soon"` placeholder (`Quests`, `Stats`, and Milestone `5B.5` localization/polish are complete).
 - **Milestone 5C — Era Progression & Upgrades:** Enable `UPGRADE_BUILDING` (unlocking the currently locked `"Milestone 5C"` upgrade action) and advance civilization progression into the **Bronze Age** and subsequent historical eras.
 
 ---

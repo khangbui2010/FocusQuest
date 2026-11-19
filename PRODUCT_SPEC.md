@@ -1,9 +1,9 @@
 # Focus Quest — Product Specification
 
-**Document Version:** 1.4.2-synced  
+**Document Version:** 1.5.0-synced  
 **Target Release:** MVP v1.0  
 **Role:** Senior Product Architect & Product Manager  
-**Status:** Formal Product Specification (Synced through Milestone UX-5 & Milestone 5B.5 Stage 5c)  
+**Status:** Formal Product Specification (Synced through Milestone UX-5 & Milestone 5B.5 Complete — Stage 6+7)  
 
 ---
 
@@ -155,7 +155,7 @@ Sản phẩm áp dụng triết lý **Positive Reinforcement (Khen thưởng tí
 - **Phương án A:** Ghi nhận thời gian tập trung hợp lệ thực tế trước khi tắt dựa trên mốc `startedAt`, thời gian pause và `lastHeartbeatAt` (`lastCheckpointAt`), sau đó đóng phiên bị gián đoạn (`INTERRUPTED`).
 - **Countdown & Pomodoro Countdown gián đoạn:** Không tính là hoàn thành, **nhận 0 Coins và 0 XP** (kể cả khi Pomodoro Countdown đã hoàn thành một phần số pha trước khi gián đoạn). Số phút tập trung hợp lệ thực tế đã học vẫn được lưu vào thống kê ngày.
 - **Stopwatch gián đoạn:** Khi bị gián đoạn bởi tắt trình duyệt hoặc tắt/tải lại extension, nhận **0 Coins và 0 XP**; số phút tập trung hợp lệ thực tế được ghi nhận vào thống kê ngày (`isAbandoned = true`).
-- **Pomodoro Stopwatch gián đoạn:** Khi đóng/mở lại trình duyệt (`BROWSER_CLOSED`), bảo toàn và trao thưởng cho các focus intervals đã hoàn thành trọn vẹn (`completedFocusCount >= 1`), không thưởng cho interval đang dở dang và ghi toàn bộ số phút hợp lệ vào thống kê ngày; nếu bị tắt/tải lại extension (`EXTENSION_DISABLED` / `EXTENSION_RELOADED`), nhận 0 Coins và 0 XP nhưng vẫn ghi nhận số phút tập trung hợp lệ.
+- **Pomodoro Stopwatch gián đoạn:** Khi đóng/mở lại trình duyệt (`BROWSER_CLOSED`), bảo toàn và trao thưởng cho các focus intervals đã hoàn thành trọn vẹn (`completedFocusCount >= 1`), không thưởng cho interval đang dở dang và ghi toàn bộ số phút hợp lệ vào thống kê ngày; nếu bị tắt/tải lại extension (`EXTENSION_DISABLED` / `EXTENSION_RELOADED`), nhận 0 Coins và 0 XP (khớp đồng bộ với màn hình kết thúc trên `TimerView` via `getSessionRewardPreview` hiển thị `+0` và thông báo hủy thưởng) nhưng vẫn ghi nhận số phút tập trung hợp lệ.
 - **Chống thưởng trùng:** Đánh dấu `rewardProcessed = true` ngay khi khôi phục để bảo đảm tính idempotency tuyệt đối.
 
 ---
@@ -182,7 +182,7 @@ Sản phẩm áp dụng triết lý **Positive Reinforcement (Khen thưởng tí
 ---
 
 ## 11. Thông báo Khi Hoàn thành & Hiệu ứng Âm thanh (Notification & Sound Rules)
-- **Kênh thông báo hệ thống (Bilingual EN/VI):** Sử dụng **Chrome Notification** hệ thống cho mốc hoàn thành Countdown/Pomodoro Countdown, chuyển sang giờ nghỉ (Short/Long Break), và hết giờ nghỉ quay lại Focus; tự động chọn ngôn ngữ theo `settings.language` hoặc locale trình duyệt.
+- **Kênh thông báo hệ thống (Bilingual EN/VI — 7 nhánh):** Sử dụng **Chrome Notification** hệ thống cho mốc hoàn thành `COUNTDOWN`, `STOPWATCH` (`>= 5` phút), `POMODORO_COUNTDOWN` 100%, chuyển sang `SHORT_BREAK` / `LONG_BREAK`, hết giờ nghỉ quay lại Focus (`BREAK_ENDED`), và nghỉ/kết thúc `POMODORO_STOPWATCH`; định dạng số Coin/XP qua `formatSessionNotificationContent` (half-up tối đa 2 chữ số thập phân), tự động chọn ngôn ngữ theo `settings.language` hoặc locale trình duyệt và tôn trọng `settings.notificationsEnabled`.
 - **Hiệu ứng âm thanh (Web Audio API):**
   - Sử dụng Web Audio API (bộ dao động tổng hợp âm thanh không phụ thuộc file ngoài) để phát tiếng chuông báo khi bắt đầu phiên Focus hoặc khi chuyển sang Break (bật/tắt qua `chimeEnabled`, mặc định bật).
   - Âm thanh chỉ phát khi cửa sổ popup của extension đang mở.
@@ -193,13 +193,13 @@ Sản phẩm áp dụng triết lý **Positive Reinforcement (Khen thưởng tí
 
 ## 12. Phong cách & Kiến trúc Giao diện (UI Architecture)
 - **Công nghệ UI:** **React 19 + Tailwind CSS 4** cho Popup (`index.html`), Blocked Page (`blocked.html` + module `blocked.js` tuân thủ CSP MV3) và Chrome `_locales` (`en`, `vi`).
-- **Điều hướng & Song ngữ:** Thanh điều hướng đáy 5 tab cố định (`Quests | Focus | Map | Awards | Stats`), mặc định mở màn hình bản đồ `Map` ở giữa; song ngữ 100% EN/VI (UI, lỗi từ backend qua `errorTranslator`, thông báo Chrome, trang chặn `blocked.html`). Tab `Quests` (Manual Claim, huy hiệu chưa nhận) và `Stats` (Day/Month/Year + `Focus Streak` mở qua `Elder's Hut`) đã hoàn thiện ở Giai đoạn 5c; hiện chỉ còn `Awards` ở trạng thái giữ chỗ `"Coming soon"`.
+- **Điều hướng & Song ngữ:** Thanh điều hướng đáy 5 tab cố định (`Quests | Focus | Map | Awards | Stats`), mặc định mở màn hình bản đồ `Map` ở giữa; song ngữ 100% EN/VI trên UI (`533` khóa parity), `98` mã lỗi có cấu trúc (`AppError` / `errorTranslator.ts`), `RewardHelpModal` đọc động công thức/`CoinBonus`/settlement/precision, thông báo Chrome, và trang chặn `blocked.html`. Tab `Quests` (Manual Claim, huy hiệu chưa nhận) và `Stats` (Day/Month/Year + `Focus Streak` mở qua `Elder's Hut`) đã hoàn thiện ở Stage 5c; hiện chỉ còn `Awards` ở trạng thái giữ chỗ `"Coming soon"`.
 - **Ranh giới:** UI là view/controller mỏng; **tuyệt đối không trực tiếp quyết định thời gian tập trung chính thức hoặc tự trao Coins/XP**.
 
 ---
 
-## 13. Hệ thống Nhiệm vụ Hàng ngày & Hàng tuần (Quest Engine, Coordinator & UI — Stages 2b & 5c)
-> **Trạng thái tích hợp:** Phần domain thuần (`src/core/quests/`), types (`src/types/quests.ts`), Schema v3 (`fq_quests`, `v3_questsSchema.ts`), **quyết toán nguyên tử cùng phiên Focus trong `SessionCoordinator` / `StorageManager`**, `QuestCoordinator` (`GET_QUEST_STATE`, `CLAIM_QUEST_REWARD`), `errorTranslator`, simulator `extensionClient.ts` (Giai đoạn 2b) **và giao diện `QuestView`, badge `Navbar` cùng `StatsView` Day/Month/Year + `FOCUS_STAT_UNLOCK` (Giai đoạn 5c)** đã hoàn tất. Phần thưởng khi Claim chỉ cộng phẳng Coins/XP vào `ECONOMY` (dùng đúng `calculatePlayerLevel`, **không ghi vào `fq_daily_stats`**). Các bước tiếp theo là Giai đoạn 6–7 & `Awards` thật.
+## 13. Hệ thống Nhiệm vụ Hàng ngày & Hàng tuần (Quest Engine, Coordinator & UI — Stages 2b, 5c & 6–7)
+> **Trạng thái tích hợp:** Toàn bộ **Milestone 5B.5 (1a → 7)** đã hoàn tất: domain thuần (`src/core/quests/`), Schema v3 (`fq_quests`), quyết toán nguyên tử cùng phiên Focus (`SessionCoordinator` / `StorageManager`), `QuestCoordinator`, `QuestView`, badge `Navbar`, `StatsView` (`Day | Month | Year` + `FOCUS_STAT_UNLOCK`), và Giai đoạn 6–7 (notification EN/VI 7 nhánh, `RewardHelpModal` động, 98 `ErrorCode` chuẩn hóa & nghiệm thu tài liệu). Phần thưởng khi Claim chỉ cộng phẳng Coins/XP vào `ECONOMY` (dùng đúng `calculatePlayerLevel`, **không ghi vào `fq_daily_stats`**). Bước tiếp theo là hệ thống `Awards` thật & Milestone `5C`.
 
 - **Nhiệm vụ Hàng ngày (Daily Quests — Cap: `40 Coins · 100 XP / ngày`):**
   1. `daily_first_spark` (*First Spark*): Hoàn thành `1` phiên Focus hợp lệ → `10 Coins · 25 XP`.

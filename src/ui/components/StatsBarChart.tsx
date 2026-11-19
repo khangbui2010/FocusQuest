@@ -195,7 +195,7 @@ export const StatsBarChart: React.FC<StatsBarChartProps> = ({
             <g key={bar.key}>
               <g
                 tabIndex={0}
-                role="button"
+                role="img"
                 aria-label={barAria}
                 data-bar-key={bar.key}
                 data-highlighted={isHighlighted ? 'true' : 'false'}

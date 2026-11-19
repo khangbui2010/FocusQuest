@@ -339,3 +339,163 @@ test('Stage E notifications: SessionCoordinator dispatches EN and VI notificatio
   assert.ok(viNotifs[1].title.includes('Giờ Nghỉ Ngắn!'));
   assert.ok(viNotifs[2].title.includes('Hết Giờ Nghỉ!'));
 });
+
+test('Stage 6 errorTranslator: table-driven EN/VI check across ALL_KNOWN_ERROR_CODES, music codes & technical error sanitization', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const { ALL_KNOWN_ERROR_CODES } = await import('../../src/i18n/errorTranslator.ts');
+  const { EN_MESSAGES } = await import('../../src/i18n/locales/en.ts');
+  const { VI_MESSAGES } = await import('../../src/i18n/locales/vi.ts');
+
+  // Verify ALL_KNOWN_ERROR_CODES covers every member of ErrorCode union in src/types/errors.ts
+  const errorsSrc = fs.readFileSync(
+    path.resolve(import.meta.dirname, '../../src/types/errors.ts'),
+    'utf8'
+  );
+  const unionSectionMatch = errorsSrc.match(/export type ErrorCode =([\s\S]*?);/);
+  assert.ok(unionSectionMatch, 'Expected ErrorCode union in src/types/errors.ts');
+  const declaredCodes = Array.from(unionSectionMatch[1].matchAll(/'([A-Z0-9_]+)'/g)).map((m) => m[1]);
+  assert.deepStrictEqual(
+    [...ALL_KNOWN_ERROR_CODES].sort(),
+    [...new Set(declaredCodes)].sort(),
+    'ALL_KNOWN_ERROR_CODES must match ErrorCode union 100%'
+  );
+
+  const sampleParamsByCode: Record<string, Record<string, string | number>> = {
+    UNKNOWN_ACTION: { action: 'BOGUS_ACTION' },
+    INVALID_SESSION_MODE: { mode: 'TURBO' },
+    SESSION_ALREADY_ACTIVE: { status: 'RUNNING' },
+    SESSION_PROFILE_NOT_FOUND: { profileId: 'p-missing' },
+    SESSION_CANNOT_RESET_ACTIVE: { status: 'RUNNING' },
+    PROFILE_DUPLICATE_NAME: { name: 'Study' },
+    PROFILE_NOT_FOUND: { profileId: 'p-404' },
+    PROFILE_SET_ACTIVE_NOT_FOUND: { profileId: 'p-404' },
+    PROFILE_REPLACEMENT_NOT_FOUND: { profileId: 'p-404' },
+    DOMAIN_PATTERN_TOO_BROAD: { pattern: '*' },
+    DOMAIN_INVALID_FORMAT: { pattern: 'not a domain!' },
+    PROFILE_CREATE_INVALID_DOMAIN: { reasonCode: 'DOMAIN_INVALID_FORMAT', pattern: 'bad domain' },
+    PROFILE_ADD_INVALID_DOMAIN: { reasonCode: 'DOMAIN_PATTERN_TOO_BROAD', pattern: '*' },
+    PROFILE_UPDATE_INVALID_ALLOWLIST: { reasonCode: 'DOMAIN_EMPTY' },
+    CIV_UNKNOWN_BUILDING_DEF: { buildingDefinitionId: 'unknown_hut' },
+    CIV_REQUIRES_LEVEL: { buildingName: 'Ancient Totem', requiredLevel: 2, currentLevel: 1 },
+    CIV_REQUIRES_FOCUS_MINUTES: { buildingName: 'Meditation Cave', requiredMinutes: 60, currentMinutes: 10 },
+    CIV_REQUIRES_ERA: { buildingName: 'Campfire', requiredEra: 'BRONZE_AGE', currentEra: 'STONE_AGE' },
+    CIV_INSUFFICIENT_BUILDING_COINS: { buildingName: 'Meditation Cave', cost: 120, balance: 30 },
+    CIV_CANNOT_PLACE_BUILDING: { reason: 'CELL_OCCUPIED' },
+    CIV_GRID_PLACEMENT_FAILED: { reason: 'OUT_OF_BOUNDS' },
+    CIV_BUILDING_NOT_FOUND: { buildingInstanceId: 'bld-404' },
+    CIV_BUILDING_REMOVAL_FAILED: { reason: 'NOT_FOUND' },
+    CIV_INVALID_EXPAND_ORIGIN_GRID: { chunkWidth: 4, chunkHeight: 4 },
+    CIV_EXPAND_REQUIRES_LEVEL: { purchaseIndex: 1, requiredLevel: 3, currentLevel: 1 },
+    CIV_INSUFFICIENT_EXPAND_COINS: { purchaseIndex: 1, cost: 60, balance: 15 },
+    CIV_LAND_EXPANSION_FAILED: { reason: 'NOT_ADJACENT' },
+    MUSIC_TRACK_NOT_FOUND: { trackId: 'track-404' },
+    UNKNOWN_QUEST: { questId: 'daily_first_spark' },
+    QUEST_PERIOD_MISMATCH: { questId: 'daily_first_spark', period: 'WEEKLY' },
+    QUEST_ALREADY_CLAIMED: { questId: 'daily_first_spark' },
+    QUEST_EXPIRED: { questId: 'daily_first_spark' },
+    QUEST_NOT_COMPLETED: { questId: 'daily_first_spark', progress: 0, target: 1 },
+  };
+
+  for (const code of [...ALL_KNOWN_ERROR_CODES, 'autoplay_blocked', 'network', 'decode', 'unknown']) {
+    const params = sampleParamsByCode[code];
+    const enMsg = localizeErrorMessage('en', undefined, code, params);
+    const viMsg = localizeErrorMessage('vi', undefined, code, params);
+    assert.ok(enMsg.trim().length > 0, `Empty EN message for ${code}`);
+    assert.ok(viMsg.trim().length > 0, `Empty VI message for ${code}`);
+    assert.notEqual(viMsg, enMsg, `VI translation missing or identical to EN for ${code}`);
+    assert.equal(enMsg.includes('undefined') || enMsg.includes('NaN'), false, `Leak in EN for ${code}: ${enMsg}`);
+    assert.equal(viMsg.includes('undefined') || viMsg.includes('NaN'), false, `Leak in VI for ${code}: ${viMsg}`);
+  }
+
+  // Technical errors & stack traces must be sanitized cleanly
+  const technicalSamples = [
+    "TypeError: Cannot read properties of undefined (reading 'id')\n    at foo (/app/src/background/sessionCoordinator.ts:123:45)",
+    'ReferenceError: xyz is not defined',
+    'Error at handleMessage (src/background/messageHandler.ts:99:12)',
+  ];
+  for (const tech of technicalSamples) {
+    const enSafe = localizeErrorMessage('en', tech);
+    const viSafe = localizeErrorMessage('vi', tech);
+    assert.equal(enSafe, 'Something went wrong. Please try again.');
+    assert.equal(viSafe, 'Đã xảy ra lỗi. Vui lòng thử lại.');
+    const enCoded = localizeErrorMessage('en', tech, 'ACTION_FAILED');
+    const viCoded = localizeErrorMessage('vi', tech, 'ACTION_FAILED');
+    assert.equal(enCoded, 'Something went wrong. Please try again.');
+    assert.equal(viCoded, 'Đã xảy ra lỗi. Vui lòng thử lại.');
+  }
+
+  // Verify 100% EN/VI dictionary key parity & non-empty strings
+  const enKeys = Object.keys(EN_MESSAGES).sort();
+  const viKeys = Object.keys(VI_MESSAGES).sort();
+  assert.deepStrictEqual(viKeys, enKeys, 'EN_MESSAGES and VI_MESSAGES keys must match 100%');
+  for (const key of enKeys) {
+    const k = key as keyof typeof EN_MESSAGES;
+    assert.ok(EN_MESSAGES[k].trim().length > 0, `Empty EN value for key ${key}`);
+    assert.ok(VI_MESSAGES[k].trim().length > 0, `Empty VI value for key ${key}`);
+  }
+});
+
+test('Stage 6 i18n static audit: src/ui/ (excluding SpriteGallery.tsx) has zero hardcoded visible copy or accessibility attributes', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+
+  const uiDir = path.resolve(import.meta.dirname, '../../src/ui');
+  const tsxFiles: string[] = [];
+  function walk(dir: string) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(fullPath);
+      } else if (entry.name.endsWith('.tsx') && entry.name !== 'SpriteGallery.tsx') {
+        tsxFiles.push(fullPath);
+      }
+    }
+  }
+  walk(uiDir);
+  assert.ok(tsxFiles.length >= 10, `Expected at least 10 UI TSX files, found ${tsxFiles.length}`);
+
+  const attrFindings: string[] = [];
+  const textFindings: string[] = [];
+  const allowedTextTokens = new Set(['FQ', 'zZ']);
+  const punctOnlyRe = /^[\s\d.,:%+\-×x\/|·•⚡⚠️()[\]{}?!✓✕‹›'"`~@#&*→←↑↓▶⏸⏹mhd]+$/;
+
+  for (const filePath of tsxFiles) {
+    const rel = path.relative(path.resolve(import.meta.dirname, '../..'), filePath).replace(/\\/g, '/');
+    const code = fs.readFileSync(filePath, 'utf8');
+    const lines = code.split('\n');
+
+    lines.forEach((line, idx) => {
+      const attrLiteralRe = /\b(aria-label|title|placeholder|alt)="([^"]+)"/g;
+      let am: RegExpExecArray | null;
+      while ((am = attrLiteralRe.exec(line)) !== null) {
+        attrFindings.push(`${rel}:${idx + 1} ${am[1]}="${am[2]}"`);
+      }
+
+      if (
+        /\b(aria-label|title|placeholder|alt)=\{[^{}]*['"`][A-Za-zÀ-ỹ]{2,}/.test(line) &&
+        !line.includes('t(') &&
+        !line.includes('localize') &&
+        !line.includes('getLocalized')
+      ) {
+        attrFindings.push(`${rel}:${idx + 1} expr-attr: ${line.trim()}`);
+      }
+    });
+
+    const noComments = code.replace(/\/\*[\s\S]*?\*\//g, '');
+    const jsxTextRe = />([^<>{}]+)</g;
+    let tm: RegExpExecArray | null;
+    while ((tm = jsxTextRe.exec(noComments)) !== null) {
+      const text = tm[1].replace(/\s+/g, ' ').trim();
+      if (!text) continue;
+      if (/[=&|;]/.test(text)) continue; // JS/TS expressions like `) : (`, `a > 0 && b < 1`
+      if (/^\)\s*:\s*/.test(text)) continue; // TSX ternary continuation like `) : isCountdown ? (`
+      if (text === 'Promise') continue; // `Promise<void>`
+      if (punctOnlyRe.test(text) || allowedTextTokens.has(text)) continue;
+      textFindings.push(`${rel}: ${JSON.stringify(text)}`);
+    }
+  }
+
+  assert.deepStrictEqual(attrFindings, [], `Hardcoded UI attributes found:\n${attrFindings.join('\n')}`);
+  assert.deepStrictEqual(textFindings, [], `Hardcoded JSX text literals found:\n${textFindings.join('\n')}`);
+});

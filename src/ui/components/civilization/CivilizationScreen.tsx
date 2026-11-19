@@ -32,7 +32,11 @@ import {
   prefersReducedMotion,
 } from './expansionReveal.ts';
 import { useTranslation } from '../../../i18n/I18nContext.tsx';
-import { localizeErrorMessage } from '../../../i18n/errorTranslator.ts';
+import {
+  localizeErrorMessage,
+  toUiErrorPayload,
+  UiErrorPayload,
+} from '../../../i18n/errorTranslator.ts';
 
 export interface CivilizationScreenProps {
   lifetimeFocusMinutes?: number;
@@ -55,7 +59,7 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
   const [fetchedLifetimeMinutes, setFetchedLifetimeMinutes] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<UiErrorPayload | null>(null);
 
   const [isCatalogOpen, setIsCatalogOpen] = useState<boolean>(false);
   const [isExpansionMode, setIsExpansionMode] = useState<boolean>(false);
@@ -151,8 +155,12 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
 
       if (civRes.success && civRes.data) {
         setCivState(civRes.data);
-      } else if (!civRes.success && civRes.error) {
-        setErrorMsg(civRes.error);
+      } else if (!civRes.success && (civRes.error || civRes.errorCode)) {
+        setErrorMsg({
+          message: civRes.error,
+          code: civRes.errorCode ?? 'CIV_LOAD_FAILED',
+          params: civRes.errorParams,
+        });
       }
 
       if (sessionRes.success && sessionRes.data) {
@@ -166,7 +174,7 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
         setFetchedLifetimeMinutes(lifetime);
       }
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Failed to load civilization state.');
+      setErrorMsg(toUiErrorPayload(err, 'CIV_LOAD_FAILED', 'Failed to load civilization state.'));
     } finally {
       setIsLoading(false);
     }
@@ -271,10 +279,14 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
         setPlacementDef(null);
         await onStateMutated?.();
       } else {
-        setErrorMsg(res.error || 'Could not place building at that location.');
+        setErrorMsg({
+          message: res.error || 'Could not place building at that location.',
+          code: res.errorCode ?? 'CIV_PLACE_REQUEST_FAILED',
+          params: res.errorParams,
+        });
       }
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Placement request failed.');
+      setErrorMsg(toUiErrorPayload(err, 'CIV_PLACE_REQUEST_FAILED', 'Placement request failed.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -291,10 +303,14 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
         setInspectedBuilding(null);
         await onStateMutated?.();
       } else {
-        setErrorMsg(res.error || 'Could not remove building.');
+        setErrorMsg({
+          message: res.error || 'Could not remove building.',
+          code: res.errorCode ?? 'CIV_REMOVE_REQUEST_FAILED',
+          params: res.errorParams,
+        });
       }
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Removal request failed.');
+      setErrorMsg(toUiErrorPayload(err, 'CIV_REMOVE_REQUEST_FAILED', 'Removal request failed.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -313,10 +329,14 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
         setIsExpansionMode(false);
         await onStateMutated?.();
       } else {
-        setErrorMsg(res.error || 'Could not expand territory.');
+        setErrorMsg({
+          message: res.error || 'Could not expand territory.',
+          code: res.errorCode ?? 'CIV_EXPAND_REQUEST_FAILED',
+          params: res.errorParams,
+        });
       }
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Expansion request failed.');
+      setErrorMsg(toUiErrorPayload(err, 'CIV_EXPAND_REQUEST_FAILED', 'Expansion request failed.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -345,7 +365,9 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
         >
           <span className="inline-flex items-center gap-1.5 min-w-0">
             <AlertCircle className="w-3.5 h-3.5 shrink-0 text-rose-600 dark:text-rose-400" />
-            <span className="truncate">{localizeErrorMessage(locale, errorMsg)}</span>
+            <span className="truncate">
+              {localizeErrorMessage(locale, errorMsg.message, errorMsg.code, errorMsg.params)}
+            </span>
           </span>
           <button
             type="button"
@@ -378,7 +400,7 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
             setErrorMsg(null);
             setSelectedExpansionOrigin(origin);
           }}
-          onInvalidExpansionClick={() => setErrorMsg(t('civ.expand.onlyAdjacentHint'))}
+          onInvalidExpansionClick={() => setErrorMsg({ message: t('civ.expand.onlyAdjacentHint') })}
           activeExpansionReveal={activeExpansionReveal}
           unrevealedChunkOrigin={unrevealedChunkOrigin}
         />

@@ -238,7 +238,8 @@ export const QuestView: React.FC<QuestViewProps> = ({
         onUnclaimedCountChange?.(res.data.unclaimedCount);
       } else {
         setLoadError(
-          localizeErrorMessage(locale, res.error) || t('quests.loadError')
+          localizeErrorMessage(locale, res.error, res.errorCode, res.errorParams) ||
+            t('quests.loadError')
         );
       }
     } catch {
@@ -321,7 +322,9 @@ export const QuestView: React.FC<QuestViewProps> = ({
         onUnclaimedCountChange?.(nextUnclaimed);
         await onQuestClaimed?.(claimedResult);
       } else {
-        const localized = localizeErrorMessage(locale, res.error) || t('quests.claimError');
+        const localized =
+          localizeErrorMessage(locale, res.error, res.errorCode, res.errorParams) ||
+          t('quests.claimError');
         setClaimError(localized);
         if (
           res.errorCode === 'QUEST_ALREADY_CLAIMED' ||

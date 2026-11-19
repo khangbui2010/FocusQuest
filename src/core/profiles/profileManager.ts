@@ -1,4 +1,5 @@
 import { FocusProfile } from '../../types/profiles.ts';
+import { AppError, ErrorCode } from '../../types/errors.ts';
 import { StorageManager } from '../../storage/storageManager.ts';
 import { DomainNormalizer } from './domainNormalizer.ts';
 import { TimerStateMachine } from '../timer/timerStateMachine.ts';
@@ -10,10 +11,14 @@ export class ProfileManager {
    * Asserts that no focus session is currently active (RUNNING or PAUSED).
    * Throws an error to prevent allowlist or profile modifications during an active session.
    */
-  private async assertNoActiveSession(errorMessage?: string): Promise<void> {
+  private async assertNoActiveSession(
+    errorMessage?: string,
+    code: ErrorCode = 'ACTIVE_SESSION_LOCK_ALLOWLIST'
+  ): Promise<void> {
     const session = await this.storage.getCurrentSession();
     if (session && TimerStateMachine.isActive(session.status)) {
-      throw new Error(
+      throw new AppError(
+        code,
         errorMessage || 'Allowlist cannot be modified during a focus session. Finish your session first.'
       );
     }
@@ -32,10 +37,10 @@ export class ProfileManager {
   private validateName(name: string): string {
     const trimmed = (name || '').trim();
     if (!trimmed) {
-      throw new Error('Profile name cannot be empty or whitespace.');
+      throw new AppError('PROFILE_NAME_EMPTY', 'Profile name cannot be empty or whitespace.');
     }
     if (trimmed.length > 50) {
-      throw new Error('Profile name cannot exceed 50 characters.');
+      throw new AppError('PROFILE_NAME_TOO_LONG', 'Profile name cannot exceed 50 characters.');
     }
     return trimmed;
   }
@@ -54,7 +59,11 @@ export class ProfileManager {
       (p) => p.id !== excludeProfileId && p.name.trim().toLowerCase() === lower
     );
     if (duplicate) {
-      throw new Error(`A profile with the name '${name}' already exists.`);
+      throw new AppError(
+        'PROFILE_DUPLICATE_NAME',
+        `A profile with the name '${name}' already exists.`,
+        { name }
+      );
     }
   }
 
@@ -78,7 +87,10 @@ export class ProfileManager {
    */
   async createProfile(name: string, initialDomains: string[] = []): Promise<FocusProfile> {
     return this.storage.runExclusive(async () => {
-      await this.assertNoActiveSession('Cannot create profile during a focus session. Finish your session first.');
+      await this.assertNoActiveSession(
+        'Cannot create profile during a focus session. Finish your session first.',
+        'ACTIVE_SESSION_LOCK_PROFILE_CREATE'
+      );
       const validName = this.validateName(name);
       const profiles = await this.storage.getProfiles();
       this.ensureUniqueName(validName, profiles);
@@ -88,7 +100,11 @@ export class ProfileManager {
       for (const d of initialDomains) {
         const val = DomainNormalizer.validateAllowlistPattern(d);
         if (!val.isValid) {
-          throw new Error(`Cannot create profile: ${val.error}`);
+          throw new AppError(
+            val.errorCode ?? 'DOMAIN_INVALID_FORMAT',
+            `Cannot create profile: ${val.error}`,
+            val.errorParams
+          );
         }
         if (!normalizedDomains.includes(val.normalizedDomain)) {
           normalizedDomains.push(val.normalizedDomain);
@@ -123,13 +139,20 @@ export class ProfileManager {
    */
   async renameProfile(profileId: string, newName: string): Promise<FocusProfile> {
     return this.storage.runExclusive(async () => {
-      await this.assertNoActiveSession('Cannot rename profile during a focus session. Finish your session first.');
+      await this.assertNoActiveSession(
+        'Cannot rename profile during a focus session. Finish your session first.',
+        'ACTIVE_SESSION_LOCK_PROFILE_RENAME'
+      );
       const validName = this.validateName(newName);
       const profiles = await this.storage.getProfiles();
       const targetIndex = profiles.findIndex((p) => p.id === profileId);
 
       if (targetIndex === -1) {
-        throw new Error(`Profile with ID '${profileId}' not found.`);
+        throw new AppError(
+          'PROFILE_NOT_FOUND',
+          `Profile with ID '${profileId}' not found.`,
+          { profileId }
+        );
       }
 
       this.ensureUniqueName(validName, profiles, profileId);
@@ -153,17 +176,28 @@ export class ProfileManager {
    */
   async addDomainToProfile(profileId: string, domainPattern: string): Promise<FocusProfile> {
     return this.storage.runExclusive(async () => {
-      await this.assertNoActiveSession('Allowlist cannot be modified during a focus session. Finish your session first.');
+      await this.assertNoActiveSession(
+        'Allowlist cannot be modified during a focus session. Finish your session first.',
+        'ACTIVE_SESSION_LOCK_ALLOWLIST'
+      );
       const validation = DomainNormalizer.validateAllowlistPattern(domainPattern);
       if (!validation.isValid) {
-        throw new Error(`Cannot add domain: ${validation.error}`);
+        throw new AppError(
+          validation.errorCode ?? 'DOMAIN_INVALID_FORMAT',
+          `Cannot add domain: ${validation.error}`,
+          validation.errorParams
+        );
       }
 
       const profiles = await this.storage.getProfiles();
       const targetIndex = profiles.findIndex((p) => p.id === profileId);
 
       if (targetIndex === -1) {
-        throw new Error(`Profile with ID '${profileId}' not found.`);
+        throw new AppError(
+          'PROFILE_NOT_FOUND',
+          `Profile with ID '${profileId}' not found.`,
+          { profileId }
+        );
       }
 
       const target = profiles[targetIndex];
@@ -192,13 +226,20 @@ export class ProfileManager {
    */
   async removeDomainFromProfile(profileId: string, domainPattern: string): Promise<FocusProfile> {
     return this.storage.runExclusive(async () => {
-      await this.assertNoActiveSession('Allowlist cannot be modified during a focus session. Finish your session first.');
+      await this.assertNoActiveSession(
+        'Allowlist cannot be modified during a focus session. Finish your session first.',
+        'ACTIVE_SESSION_LOCK_ALLOWLIST'
+      );
       const normalizedTarget = DomainNormalizer.normalizeHostname(domainPattern);
       const profiles = await this.storage.getProfiles();
       const targetIndex = profiles.findIndex((p) => p.id === profileId);
 
       if (targetIndex === -1) {
-        throw new Error(`Profile with ID '${profileId}' not found.`);
+        throw new AppError(
+          'PROFILE_NOT_FOUND',
+          `Profile with ID '${profileId}' not found.`,
+          { profileId }
+        );
       }
 
       const target = profiles[targetIndex];
@@ -226,19 +267,30 @@ export class ProfileManager {
     domainPatterns: string[]
   ): Promise<FocusProfile> {
     return this.storage.runExclusive(async () => {
-      await this.assertNoActiveSession('Allowlist cannot be modified during a focus session. Finish your session first.');
+      await this.assertNoActiveSession(
+        'Allowlist cannot be modified during a focus session. Finish your session first.',
+        'ACTIVE_SESSION_LOCK_ALLOWLIST'
+      );
       const profiles = await this.storage.getProfiles();
       const targetIndex = profiles.findIndex((p) => p.id === profileId);
 
       if (targetIndex === -1) {
-        throw new Error(`Profile with ID '${profileId}' not found.`);
+        throw new AppError(
+          'PROFILE_NOT_FOUND',
+          `Profile with ID '${profileId}' not found.`,
+          { profileId }
+        );
       }
 
       const normalizedList: string[] = [];
       for (const pattern of domainPatterns) {
         const val = DomainNormalizer.validateAllowlistPattern(pattern);
         if (!val.isValid) {
-          throw new Error(`Cannot update allowlist: ${val.error}`);
+          throw new AppError(
+            val.errorCode ?? 'DOMAIN_INVALID_FORMAT',
+            `Cannot update allowlist: ${val.error}`,
+            val.errorParams
+          );
         }
         if (!normalizedList.includes(val.normalizedDomain)) {
           normalizedList.push(val.normalizedDomain);
@@ -270,16 +322,26 @@ export class ProfileManager {
     replacementActiveProfileId?: string
   ): Promise<{ deletedProfile: FocusProfile; newActiveProfileId: string }> {
     return this.storage.runExclusive(async () => {
-      await this.assertNoActiveSession('Cannot delete profile during a focus session. Finish your session first.');
+      await this.assertNoActiveSession(
+        'Cannot delete profile during a focus session. Finish your session first.',
+        'ACTIVE_SESSION_LOCK_PROFILE_DELETE'
+      );
       const profiles = await this.storage.getProfiles();
       const targetIndex = profiles.findIndex((p) => p.id === profileId);
 
       if (targetIndex === -1) {
-        throw new Error(`Profile with ID '${profileId}' not found.`);
+        throw new AppError(
+          'PROFILE_NOT_FOUND',
+          `Profile with ID '${profileId}' not found.`,
+          { profileId }
+        );
       }
 
       if (profiles.length <= 1) {
-        throw new Error('Cannot delete the only remaining profile in the system.');
+        throw new AppError(
+          'PROFILE_DELETE_LAST',
+          'Cannot delete the only remaining profile in the system.'
+        );
       }
 
       const targetProfile = profiles[targetIndex];
@@ -295,8 +357,10 @@ export class ProfileManager {
             (p) => p.id === replacementActiveProfileId
           );
           if (!replacementExists) {
-            throw new Error(
-              `Replacement active profile with ID '${replacementActiveProfileId}' does not exist.`
+            throw new AppError(
+              'PROFILE_REPLACEMENT_NOT_FOUND',
+              `Replacement active profile with ID '${replacementActiveProfileId}' does not exist.`,
+              { replacementId: replacementActiveProfileId }
             );
           }
           nextActiveId = replacementActiveProfileId;
@@ -321,11 +385,18 @@ export class ProfileManager {
    */
   async setActiveProfile(profileId: string): Promise<void> {
     return this.storage.runExclusive(async () => {
-      await this.assertNoActiveSession('Cannot switch active profile during a focus session. Finish your session first.');
+      await this.assertNoActiveSession(
+        'Cannot switch active profile during a focus session. Finish your session first.',
+        'ACTIVE_SESSION_LOCK_PROFILE_SWITCH'
+      );
       const profiles = await this.storage.getProfiles();
       const exists = profiles.some((p) => p.id === profileId);
       if (!exists) {
-        throw new Error(`Cannot set active profile: ID '${profileId}' not found.`);
+        throw new AppError(
+          'PROFILE_SET_ACTIVE_NOT_FOUND',
+          `Cannot set active profile: ID '${profileId}' not found.`,
+          { profileId }
+        );
       }
       await this.storage.setActiveProfileId(profileId);
     });
@@ -338,7 +409,7 @@ export class ProfileManager {
   async getActiveProfile(): Promise<FocusProfile> {
     const profiles = await this.storage.getProfiles();
     if (profiles.length === 0) {
-      throw new Error('No profiles found in storage.');
+      throw new AppError('NO_PROFILES_IN_STORAGE', 'No profiles found in storage.');
     }
 
     const activeId = await this.storage.getActiveProfileId();

@@ -13,6 +13,7 @@ import {
   QuestCoordinatorError,
   validateClaimQuestPayload,
 } from './questCoordinator.ts';
+import { AppError, ErrorCode, extractCodedError } from '../types/errors.ts';
 
 export class MessageHandler {
   private civilizationCoordinator: CivilizationCoordinator;
@@ -32,7 +33,10 @@ export class MessageHandler {
 
   private getMusicCoordinator(): MusicCoordinator {
     if (!this.musicCoordinator) {
-      throw new Error('Music coordinator is not initialized.');
+      throw new AppError(
+        'MUSIC_COORDINATOR_NOT_INITIALIZED',
+        'Music coordinator is not initialized.'
+      );
     }
     return this.musicCoordinator;
   }
@@ -41,10 +45,14 @@ export class MessageHandler {
    * Asserts that no focus session is active (RUNNING or PAUSED).
    * Rejects allowlist and profile mutations if a session is currently in progress.
    */
-  private async assertNoActiveSession(errorMessage?: string): Promise<void> {
+  private async assertNoActiveSession(
+    code: ErrorCode = 'ACTIVE_SESSION_LOCK_ALLOWLIST',
+    errorMessage?: string
+  ): Promise<void> {
     const session = await this.storage.getCurrentSession();
     if (session && TimerStateMachine.isActive(session.status)) {
-      throw new Error(
+      throw new AppError(
+        code,
         errorMessage || 'Allowlist cannot be modified during a focus session. Finish your session first.'
       );
     }
@@ -58,6 +66,7 @@ export class MessageHandler {
       return {
         success: false,
         error: 'Invalid message format: missing action field.',
+        errorCode: 'INVALID_MESSAGE_FORMAT',
       };
     }
 
@@ -73,11 +82,20 @@ export class MessageHandler {
 
         case 'START_SESSION': {
           if (!msg.payload || !msg.payload.mode || !msg.payload.profileId) {
-            return { success: false, error: 'START_SESSION requires mode and profileId.' };
+            return {
+              success: false,
+              error: 'START_SESSION requires mode and profileId.',
+              errorCode: 'MISSING_START_SESSION_FIELDS',
+            };
           }
           const validModes = ['COUNTDOWN', 'STOPWATCH', 'POMODORO_COUNTDOWN', 'POMODORO_STOPWATCH'];
           if (!validModes.includes(msg.payload.mode)) {
-            return { success: false, error: `Invalid session mode: ${msg.payload.mode}` };
+            return {
+              success: false,
+              error: `Invalid session mode: ${msg.payload.mode}`,
+              errorCode: 'INVALID_SESSION_MODE',
+              errorParams: { mode: String(msg.payload.mode) },
+            };
           }
           if (msg.payload.mode === 'COUNTDOWN') {
             if (
@@ -86,7 +104,11 @@ export class MessageHandler {
               msg.payload.targetMinutes <= 0 ||
               msg.payload.targetMinutes > 1440
             ) {
-              return { success: false, error: 'COUNTDOWN requires targetMinutes between 1 and 1440.' };
+              return {
+                success: false,
+                error: 'COUNTDOWN requires targetMinutes between 1 and 1440.',
+                errorCode: 'INVALID_TARGET_MINUTES',
+              };
             }
           }
           const { mode, targetMinutes, profileId, pomodoroConfig } = msg.payload;
@@ -144,13 +166,16 @@ export class MessageHandler {
             const targetFinishTime = pState.phaseStartedAt + intervalMins * 60 * 1000 + pauseMs;
             const now = Date.now();
             if (now < targetFinishTime) {
-              const errMsg =
-                currentSession.mode === 'POMODORO_STOPWATCH'
-                  ? 'Manual early interval completion is prohibited in Pomodoro Stopwatch.'
-                  : 'Manual early interval completion is prohibited during Focus phase.';
+              const isPomoStopwatch = currentSession.mode === 'POMODORO_STOPWATCH';
+              const errMsg = isPomoStopwatch
+                ? 'Manual early interval completion is prohibited in Pomodoro Stopwatch.'
+                : 'Manual early interval completion is prohibited during Focus phase.';
               return {
                 success: false,
                 error: errMsg,
+                errorCode: isPomoStopwatch
+                  ? 'POMODORO_EARLY_COMPLETE_STOPWATCH'
+                  : 'POMODORO_EARLY_COMPLETE_FOCUS',
               };
             }
           }
@@ -170,6 +195,7 @@ export class MessageHandler {
             return {
               success: false,
               error: 'Cannot skip break while in Focus phase.',
+              errorCode: 'CANNOT_SKIP_BREAK_IN_FOCUS',
             };
           }
           // Passing the observed break phase makes the skip idempotent: if the
@@ -203,9 +229,16 @@ export class MessageHandler {
         }
 
         case 'SWITCH_PROFILE': {
-          await this.assertNoActiveSession('Cannot switch active profile during a focus session. Finish your session first.');
+          await this.assertNoActiveSession(
+            'ACTIVE_SESSION_LOCK_PROFILE_SWITCH',
+            'Cannot switch active profile during a focus session. Finish your session first.'
+          );
           if (!msg.payload?.profileId) {
-            return { success: false, error: 'SWITCH_PROFILE requires profileId.' };
+            return {
+              success: false,
+              error: 'SWITCH_PROFILE requires profileId.',
+              errorCode: 'MISSING_PROFILE_ID',
+            };
           }
           await this.profileManager.setActiveProfile(msg.payload.profileId);
           const active = await this.profileManager.getActiveProfile();
@@ -213,9 +246,16 @@ export class MessageHandler {
         }
 
         case 'CREATE_PROFILE': {
-          await this.assertNoActiveSession('Cannot create profile during a focus session. Finish your session first.');
+          await this.assertNoActiveSession(
+            'ACTIVE_SESSION_LOCK_PROFILE_CREATE',
+            'Cannot create profile during a focus session. Finish your session first.'
+          );
           if (!msg.payload?.name) {
-            return { success: false, error: 'CREATE_PROFILE requires name.' };
+            return {
+              success: false,
+              error: 'CREATE_PROFILE requires name.',
+              errorCode: 'MISSING_CREATE_PROFILE_NAME',
+            };
           }
           const created = await this.profileManager.createProfile(
             msg.payload.name,
@@ -225,9 +265,16 @@ export class MessageHandler {
         }
 
         case 'RENAME_PROFILE': {
-          await this.assertNoActiveSession('Cannot rename profile during a focus session. Finish your session first.');
+          await this.assertNoActiveSession(
+            'ACTIVE_SESSION_LOCK_PROFILE_RENAME',
+            'Cannot rename profile during a focus session. Finish your session first.'
+          );
           if (!msg.payload?.profileId || !msg.payload?.newName) {
-            return { success: false, error: 'RENAME_PROFILE requires profileId and newName.' };
+            return {
+              success: false,
+              error: 'RENAME_PROFILE requires profileId and newName.',
+              errorCode: 'MISSING_RENAME_PROFILE_FIELDS',
+            };
           }
           const updated = await this.profileManager.renameProfile(
             msg.payload.profileId,
@@ -237,9 +284,16 @@ export class MessageHandler {
         }
 
         case 'DELETE_PROFILE': {
-          await this.assertNoActiveSession('Cannot delete profile during a focus session. Finish your session first.');
+          await this.assertNoActiveSession(
+            'ACTIVE_SESSION_LOCK_PROFILE_DELETE',
+            'Cannot delete profile during a focus session. Finish your session first.'
+          );
           if (!msg.payload?.profileId) {
-            return { success: false, error: 'DELETE_PROFILE requires profileId.' };
+            return {
+              success: false,
+              error: 'DELETE_PROFILE requires profileId.',
+              errorCode: 'MISSING_PROFILE_ID',
+            };
           }
           const result = await this.profileManager.deleteProfile(
             msg.payload.profileId,
@@ -249,9 +303,16 @@ export class MessageHandler {
         }
 
         case 'ADD_DOMAIN': {
-          await this.assertNoActiveSession('Allowlist cannot be modified during a focus session. Finish your session first.');
+          await this.assertNoActiveSession(
+            'ACTIVE_SESSION_LOCK_ALLOWLIST',
+            'Allowlist cannot be modified during a focus session. Finish your session first.'
+          );
           if (!msg.payload?.profileId || !msg.payload?.domainPattern) {
-            return { success: false, error: 'ADD_DOMAIN requires profileId and domainPattern.' };
+            return {
+              success: false,
+              error: 'ADD_DOMAIN requires profileId and domainPattern.',
+              errorCode: 'MISSING_DOMAIN_FIELDS',
+            };
           }
           const updated = await this.profileManager.addDomainToProfile(
             msg.payload.profileId,
@@ -261,9 +322,16 @@ export class MessageHandler {
         }
 
         case 'REMOVE_DOMAIN': {
-          await this.assertNoActiveSession('Allowlist cannot be modified during a focus session. Finish your session first.');
+          await this.assertNoActiveSession(
+            'ACTIVE_SESSION_LOCK_ALLOWLIST',
+            'Allowlist cannot be modified during a focus session. Finish your session first.'
+          );
           if (!msg.payload?.profileId || !msg.payload?.domainPattern) {
-            return { success: false, error: 'REMOVE_DOMAIN requires profileId and domainPattern.' };
+            return {
+              success: false,
+              error: 'REMOVE_DOMAIN requires profileId and domainPattern.',
+              errorCode: 'MISSING_DOMAIN_FIELDS',
+            };
           }
           const updated = await this.profileManager.removeDomainFromProfile(
             msg.payload.profileId,
@@ -294,18 +362,21 @@ export class MessageHandler {
             return {
               success: false,
               error: 'PLACE_BUILDING requires payload object.',
+              errorCode: 'CIV_INVALID_PLACE_PAYLOAD',
             };
           }
           if (typeof msg.payload.buildingDefinitionId !== 'string' || !msg.payload.buildingDefinitionId.trim()) {
             return {
               success: false,
               error: 'PLACE_BUILDING requires valid buildingDefinitionId.',
+              errorCode: 'CIV_INVALID_BUILDING_DEF_ID',
             };
           }
           if (!isValidCoordinate(msg.payload.position)) {
             return {
               success: false,
               error: 'PLACE_BUILDING requires valid position coordinates.',
+              errorCode: 'CIV_INVALID_POSITION',
             };
           }
           const result = await this.civilizationCoordinator.placeBuilding(msg.payload);
@@ -317,6 +388,7 @@ export class MessageHandler {
             return {
               success: false,
               error: 'REMOVE_BUILDING requires valid buildingInstanceId.',
+              errorCode: 'CIV_INVALID_BUILDING_INSTANCE_ID',
             };
           }
           const result = await this.civilizationCoordinator.removeBuilding(msg.payload);
@@ -328,6 +400,7 @@ export class MessageHandler {
             return {
               success: false,
               error: 'EXPAND_LAND requires payload object.',
+              errorCode: 'CIV_INVALID_EXPAND_PAYLOAD',
             };
           }
           const rawPayload = msg.payload as unknown as Record<string, unknown>;
@@ -335,12 +408,14 @@ export class MessageHandler {
             return {
               success: false,
               error: 'EXPAND_LAND requires origin coordinates only; direction and slotIndex are not supported.',
+              errorCode: 'CIV_EXPAND_UNSUPPORTED_FIELDS',
             };
           }
           if (!isValidCoordinate(msg.payload.origin)) {
             return {
               success: false,
               error: 'EXPAND_LAND requires valid origin coordinates.',
+              errorCode: 'CIV_INVALID_EXPAND_ORIGIN_TYPE',
             };
           }
           if (
@@ -350,6 +425,8 @@ export class MessageHandler {
             return {
               success: false,
               error: `Land expansion failed: INVALID_ORIGIN (origin must align to ${CHUNK_WIDTH}x${CHUNK_HEIGHT} chunk grid).`,
+              errorCode: 'CIV_INVALID_EXPAND_ORIGIN_GRID',
+              errorParams: { chunkWidth: CHUNK_WIDTH, chunkHeight: CHUNK_HEIGHT },
             };
           }
           const result = await this.civilizationCoordinator.expandLand(msg.payload);
@@ -374,6 +451,7 @@ export class MessageHandler {
             return {
               success: false,
               error: "SET_LANGUAGE requires valid language ('en' | 'vi').",
+              errorCode: 'INVALID_LANGUAGE',
             };
           }
           const updated = await this.storage.updateSettings({ language: msg.payload.language });
@@ -385,6 +463,7 @@ export class MessageHandler {
             return {
               success: false,
               error: 'SET_CHIME_ENABLED requires boolean enabled flag.',
+              errorCode: 'INVALID_CHIME_FLAG',
             };
           }
           const updated = await this.storage.updateSettings({ chimeEnabled: msg.payload.enabled });
@@ -396,6 +475,7 @@ export class MessageHandler {
             return {
               success: false,
               error: 'SET_MUSIC_PLAYER_EXPANDED requires boolean expanded flag.',
+              errorCode: 'INVALID_MUSIC_PLAYER_EXPANDED_FLAG',
             };
           }
           const updated = await this.storage.updateSettings({ musicPlayerExpanded: msg.payload.expanded });
@@ -452,7 +532,11 @@ export class MessageHandler {
             typeof msg.payload.positionSec !== 'number' ||
             !Number.isFinite(msg.payload.positionSec)
           ) {
-            return { success: false, error: 'MUSIC_SEEK requires finite numeric positionSec.' };
+            return {
+              success: false,
+              error: 'MUSIC_SEEK requires finite numeric positionSec.',
+              errorCode: 'MUSIC_INVALID_SEEK_POSITION',
+            };
           }
           const mc = this.getMusicCoordinator();
           const state = await mc.seek(msg.payload.positionSec);
@@ -465,7 +549,11 @@ export class MessageHandler {
             typeof msg.payload.volume !== 'number' ||
             !Number.isFinite(msg.payload.volume)
           ) {
-            return { success: false, error: 'MUSIC_SET_VOLUME requires finite numeric volume.' };
+            return {
+              success: false,
+              error: 'MUSIC_SET_VOLUME requires finite numeric volume.',
+              errorCode: 'MUSIC_INVALID_VOLUME',
+            };
           }
           const mc = this.getMusicCoordinator();
           const state = await mc.setVolume(msg.payload.volume, msg.payload.muted);
@@ -474,7 +562,11 @@ export class MessageHandler {
 
         case 'MUSIC_SET_SHUFFLE': {
           if (!msg.payload || typeof msg.payload.enabled !== 'boolean') {
-            return { success: false, error: 'MUSIC_SET_SHUFFLE requires boolean enabled flag.' };
+            return {
+              success: false,
+              error: 'MUSIC_SET_SHUFFLE requires boolean enabled flag.',
+              errorCode: 'MUSIC_INVALID_SHUFFLE_FLAG',
+            };
           }
           const mc = this.getMusicCoordinator();
           const state = await mc.setShuffle(msg.payload.enabled);
@@ -488,7 +580,11 @@ export class MessageHandler {
               msg.payload.mode !== 'all' &&
               msg.payload.mode !== 'one')
           ) {
-            return { success: false, error: "MUSIC_SET_REPEAT requires mode ('off' | 'all' | 'one')." };
+            return {
+              success: false,
+              error: "MUSIC_SET_REPEAT requires mode ('off' | 'all' | 'one').",
+              errorCode: 'MUSIC_INVALID_REPEAT_MODE',
+            };
           }
           const mc = this.getMusicCoordinator();
           const state = await mc.setRepeatMode(msg.payload.mode);
@@ -501,11 +597,15 @@ export class MessageHandler {
           return { success: true, data: { state, catalog: mc.getCatalog() } };
         }
 
-        default:
+        default: {
+          const unknownAction = (msg as { action: string }).action;
           return {
             success: false,
-            error: `Unknown action: ${(msg as { action: string }).action}`,
+            error: `Unknown action: ${unknownAction}`,
+            errorCode: 'UNKNOWN_ACTION',
+            errorParams: { action: unknownAction },
           };
+        }
       }
     } catch (error) {
       if (error instanceof QuestCoordinatorError) {
@@ -513,11 +613,23 @@ export class MessageHandler {
           success: false,
           error: error.message,
           errorCode: error.code,
+          errorParams: error.params,
         };
       }
+      if (error instanceof AppError) {
+        return {
+          success: false,
+          error: error.message,
+          errorCode: error.code,
+          errorParams: error.params,
+        };
+      }
+      const coded = extractCodedError(error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: coded.message ?? (error instanceof Error ? error.message : String(error)),
+        errorCode: coded.code ?? 'ACTION_FAILED',
+        errorParams: coded.params,
       };
     }
   }

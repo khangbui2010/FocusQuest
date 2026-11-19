@@ -1,16 +1,44 @@
 import React from 'react';
-import { X, HelpCircle, Flame, Award, Coins, Clock, Sparkles } from 'lucide-react';
+import {
+  X,
+  HelpCircle,
+  Flame,
+  Coins,
+  Clock,
+  Sparkles,
+  Building2,
+  ShieldAlert,
+  ScrollText,
+} from 'lucide-react';
 import { useTranslation } from '../../i18n/I18nContext.tsx';
+import { DEFAULT_REWARD_CONFIG } from '../../core/reward/rewardEngine.ts';
+import { MultiplierRules } from '../../core/reward/multiplierRules.ts';
 
 interface RewardHelpModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
+const MULTIPLIER_TIER_ROWS = [
+  { key: 'help.tier1', sampleMinutes: 5, highlight: false },
+  { key: 'help.tier2', sampleMinutes: 30, highlight: false },
+  { key: 'help.tier3', sampleMinutes: 60, highlight: false },
+  { key: 'help.tier4', sampleMinutes: 90, highlight: false },
+  { key: 'help.tier5', sampleMinutes: 120, highlight: false },
+  { key: 'help.tier6', sampleMinutes: 150, highlight: false },
+  { key: 'help.tier7', sampleMinutes: 180, highlight: true },
+] as const;
+
 export const RewardHelpModal: React.FC<RewardHelpModalProps> = ({ isOpen, onClose }) => {
   const { t } = useTranslation();
 
   if (!isOpen) return null;
+
+  const cdCoinsRate = DEFAULT_REWARD_CONFIG.countdownBaseCoinPerMinute.toFixed(1);
+  const cdXpRate = DEFAULT_REWARD_CONFIG.countdownBaseXpPerMinute.toFixed(1);
+  const swCoinsRate = DEFAULT_REWARD_CONFIG.stopwatchBaseCoinPerMinute.toFixed(1);
+  const swXpRate = DEFAULT_REWARD_CONFIG.stopwatchBaseXpPerMinute.toFixed(1);
+  const minSwMinutes = DEFAULT_REWARD_CONFIG.stopwatchMinMinutesThreshold;
 
   return (
     <div
@@ -56,7 +84,7 @@ export const RewardHelpModal: React.FC<RewardHelpModalProps> = ({ isOpen, onClos
             </p>
           </section>
 
-          {/* Section 2: Base Rate Table */}
+          {/* Section 2: Base Rate Table (bound to DEFAULT_REWARD_CONFIG) */}
           <section className="space-y-1.5">
             <h3 className="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
               <Coins className="w-3.5 h-3.5 text-amber-500 shrink-0" />
@@ -74,30 +102,33 @@ export const RewardHelpModal: React.FC<RewardHelpModalProps> = ({ isOpen, onClos
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
                   <tr>
                     <td className="py-1.5 px-2.5 text-slate-800 dark:text-slate-200">{t('help.modeCountdown')}</td>
-                    <td className="py-1.5 px-2 text-right text-amber-600 dark:text-amber-400 font-mono">1.5</td>
-                    <td className="py-1.5 px-2.5 text-right text-indigo-600 dark:text-indigo-400 font-mono">5.0</td>
+                    <td className="py-1.5 px-2 text-right text-amber-600 dark:text-amber-400 font-mono">{cdCoinsRate}</td>
+                    <td className="py-1.5 px-2.5 text-right text-indigo-600 dark:text-indigo-400 font-mono">{cdXpRate}</td>
                   </tr>
                   <tr>
                     <td className="py-1.5 px-2.5 text-slate-800 dark:text-slate-200">{t('help.modeStopwatch')}</td>
-                    <td className="py-1.5 px-2 text-right text-amber-600 dark:text-amber-400 font-mono">1.0</td>
-                    <td className="py-1.5 px-2.5 text-right text-indigo-600 dark:text-indigo-400 font-mono">3.0</td>
+                    <td className="py-1.5 px-2 text-right text-amber-600 dark:text-amber-400 font-mono">{swCoinsRate}</td>
+                    <td className="py-1.5 px-2.5 text-right text-indigo-600 dark:text-indigo-400 font-mono">{swXpRate}</td>
                   </tr>
                   <tr>
                     <td className="py-1.5 px-2.5 text-slate-800 dark:text-slate-200">{t('help.modePomoCountdown')}</td>
-                    <td className="py-1.5 px-2 text-right text-amber-600 dark:text-amber-400 font-mono">1.5</td>
-                    <td className="py-1.5 px-2.5 text-right text-indigo-600 dark:text-indigo-400 font-mono">5.0</td>
+                    <td className="py-1.5 px-2 text-right text-amber-600 dark:text-amber-400 font-mono">{cdCoinsRate}</td>
+                    <td className="py-1.5 px-2.5 text-right text-indigo-600 dark:text-indigo-400 font-mono">{cdXpRate}</td>
                   </tr>
                   <tr>
                     <td className="py-1.5 px-2.5 text-slate-800 dark:text-slate-200">{t('help.modePomoStopwatch')}</td>
-                    <td className="py-1.5 px-2 text-right text-amber-600 dark:text-amber-400 font-mono">1.0</td>
-                    <td className="py-1.5 px-2.5 text-right text-indigo-600 dark:text-indigo-400 font-mono">3.0</td>
+                    <td className="py-1.5 px-2 text-right text-amber-600 dark:text-amber-400 font-mono">{swCoinsRate}</td>
+                    <td className="py-1.5 px-2.5 text-right text-indigo-600 dark:text-indigo-400 font-mono">{swXpRate}</td>
                   </tr>
                 </tbody>
               </table>
             </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+              {t('help.swThresholdNote', { min: minSwMinutes })}
+            </p>
           </section>
 
-          {/* Section 3: Unified Multiplier Bonus Table */}
+          {/* Section 3: Unified Multiplier Bonus Table (bound to MultiplierRules) */}
           <section className="space-y-1.5">
             <h3 className="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
               <Flame className="w-3.5 h-3.5 text-rose-500 shrink-0" />
@@ -112,34 +143,36 @@ export const RewardHelpModal: React.FC<RewardHelpModalProps> = ({ isOpen, onClos
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-mono text-[11px]">
-                  <tr>
-                    <td className="py-1.5 px-2.5 text-slate-700 dark:text-slate-300">{t('help.tier1')}</td>
-                    <td className="py-1.5 px-2.5 text-right font-bold text-slate-800 dark:text-slate-200">×1.0</td>
-                  </tr>
-                  <tr>
-                    <td className="py-1.5 px-2.5 text-slate-700 dark:text-slate-300">{t('help.tier2')}</td>
-                    <td className="py-1.5 px-2.5 text-right font-bold text-indigo-600 dark:text-indigo-400">×1.2</td>
-                  </tr>
-                  <tr>
-                    <td className="py-1.5 px-2.5 text-slate-700 dark:text-slate-300">{t('help.tier3')}</td>
-                    <td className="py-1.5 px-2.5 text-right font-bold text-indigo-600 dark:text-indigo-400">×1.4</td>
-                  </tr>
-                  <tr>
-                    <td className="py-1.5 px-2.5 text-slate-700 dark:text-slate-300">{t('help.tier4')}</td>
-                    <td className="py-1.5 px-2.5 text-right font-bold text-indigo-600 dark:text-indigo-400">×1.6</td>
-                  </tr>
-                  <tr>
-                    <td className="py-1.5 px-2.5 text-slate-700 dark:text-slate-300">{t('help.tier5')}</td>
-                    <td className="py-1.5 px-2.5 text-right font-bold text-indigo-600 dark:text-indigo-400">×1.8</td>
-                  </tr>
-                  <tr>
-                    <td className="py-1.5 px-2.5 text-slate-700 dark:text-slate-300">{t('help.tier6')}</td>
-                    <td className="py-1.5 px-2.5 text-right font-bold text-indigo-600 dark:text-indigo-400">×2.0</td>
-                  </tr>
-                  <tr className="bg-amber-50/50 dark:bg-amber-950/20">
-                    <td className="py-1.5 px-2.5 font-bold text-amber-700 dark:text-amber-300">{t('help.tier7')}</td>
-                    <td className="py-1.5 px-2.5 text-right font-bold text-amber-700 dark:text-amber-300">×2.5</td>
-                  </tr>
+                  {MULTIPLIER_TIER_ROWS.map((row) => {
+                    const value = MultiplierRules.getSessionMultiplier(row.sampleMinutes).toFixed(1);
+                    return (
+                      <tr
+                        key={row.key}
+                        className={row.highlight ? 'bg-amber-50/50 dark:bg-amber-950/20' : undefined}
+                      >
+                        <td
+                          className={
+                            row.highlight
+                              ? 'py-1.5 px-2.5 font-bold text-amber-700 dark:text-amber-300'
+                              : 'py-1.5 px-2.5 text-slate-700 dark:text-slate-300'
+                          }
+                        >
+                          {t(row.key)}
+                        </td>
+                        <td
+                          className={
+                            row.highlight
+                              ? 'py-1.5 px-2.5 text-right font-bold text-amber-700 dark:text-amber-300'
+                              : value === '1.0'
+                              ? 'py-1.5 px-2.5 text-right font-bold text-slate-800 dark:text-slate-200'
+                              : 'py-1.5 px-2.5 text-right font-bold text-indigo-600 dark:text-indigo-400'
+                          }
+                        >
+                          {`×${value}`}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -148,7 +181,31 @@ export const RewardHelpModal: React.FC<RewardHelpModalProps> = ({ isOpen, onClos
             </p>
           </section>
 
-          {/* Section 4: Pomodoro Rules */}
+          {/* Section 4: Civilization CoinBonus & Zero Passive Income */}
+          <section className="space-y-1.5">
+            <h3 className="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+              <Building2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <span>{t('help.coinBonusHeading')}</span>
+            </h3>
+            <p className="p-2.5 bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-200/70 dark:border-emerald-900/50 rounded-xl text-[11px] leading-relaxed text-slate-700 dark:text-slate-300">
+              {t('help.coinBonusBody')}
+            </p>
+          </section>
+
+          {/* Section 5: All-or-Nothing & Interruption Settlement */}
+          <section className="space-y-1.5">
+            <h3 className="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+              <ShieldAlert className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+              <span>{t('help.settlementHeading')}</span>
+            </h3>
+            <div className="p-2.5 bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 rounded-xl space-y-1.5 text-[11px] leading-relaxed">
+              <p>• {t('help.settlementCountdownRule')}</p>
+              <p>• {t('help.settlementStopwatchRule', { min: minSwMinutes })}</p>
+              <p>• {t('help.settlementPomoSwRule')}</p>
+            </div>
+          </section>
+
+          {/* Section 6: Pomodoro Rules */}
           <section className="space-y-1.5">
             <h3 className="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
               <Clock className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400 shrink-0" />
@@ -167,6 +224,18 @@ export const RewardHelpModal: React.FC<RewardHelpModalProps> = ({ isOpen, onClos
               <p className="leading-relaxed text-slate-500 dark:text-slate-400 border-t border-slate-200/60 dark:border-slate-700/60 pt-1">
                 ⚠️ {t('help.pomoWarningBefore')} <strong>{t('help.pomoWarningStrong')}</strong> {t('help.pomoWarningAfter')}
               </p>
+            </div>
+          </section>
+
+          {/* Section 7: Daily/Weekly Quests & Numeric Precision */}
+          <section className="space-y-1.5">
+            <h3 className="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+              <ScrollText className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+              <span>{t('help.questsPrecisionHeading')}</span>
+            </h3>
+            <div className="p-2.5 bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 rounded-xl space-y-1.5 text-[11px] leading-relaxed">
+              <p>• {t('help.questsFlatRule')}</p>
+              <p>• {t('help.precisionRule')}</p>
             </div>
           </section>
         </div>

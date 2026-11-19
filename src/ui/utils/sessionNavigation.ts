@@ -1,9 +1,12 @@
 import { SessionSnapshot } from '../../types/session.ts';
+import { AppError, ErrorCode, ErrorParams } from '../../types/errors.ts';
 import type { ActiveTab } from '../components/Navbar.tsx';
 
 export interface ResetSessionResponse {
   success: boolean;
   error?: string;
+  errorCode?: string;
+  errorParams?: ErrorParams;
 }
 
 export interface ExitSessionActionDeps {
@@ -37,7 +40,7 @@ export function resolveEffectiveTab(
  * Execute the terminal Exit transition:
  * 1. Call the existing terminal-to-idle reset mechanism (RESET_SESSION).
  * 2. Refresh UI state and navigate to the Map tab ONLY on success.
- * 3. On failure, throw cleanly without navigating away so Exit can be retried.
+ * 3. On failure, throw cleanly with structured ErrorCode without navigating away so Exit can be retried.
  */
 export async function executeExitSessionAction({
   sendReset,
@@ -47,7 +50,11 @@ export async function executeExitSessionAction({
 }: ExitSessionActionDeps): Promise<void> {
   const res = await sendReset();
   if (!res.success) {
-    throw new Error(res.error || fallbackError);
+    throw new AppError(
+      (res.errorCode as ErrorCode) ?? 'EXIT_SESSION_FAILED',
+      res.error || fallbackError,
+      res.errorParams
+    );
   }
   await refreshState();
   onNavigateToMap();

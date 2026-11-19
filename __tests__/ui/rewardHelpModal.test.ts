@@ -116,3 +116,76 @@ test('RewardHelpModal: opening and closing modal does not mutate active session 
   assert.strictEqual(stateAfter.currentSession?.totalPauseMs, 0);
   assert.strictEqual(stateAfter.currentSession?.pauseCount, 0);
 });
+
+test('RewardHelpModal (Stage 6): dynamically binds reward config/multipliers and covers CoinBonus, Zero Passive Income, Settlement, Quests & IEEE-754 precision in EN & VI', async () => {
+  const { I18nProvider } = await import('../../src/i18n/I18nContext.tsx');
+  const { DEFAULT_REWARD_CONFIG } = await import('../../src/core/reward/rewardEngine.ts');
+  const { MultiplierRules } = await import('../../src/core/reward/multiplierRules.ts');
+  const { EN_MESSAGES } = await import('../../src/i18n/locales/en.ts');
+  const { VI_MESSAGES } = await import('../../src/i18n/locales/vi.ts');
+
+  const enHtml = renderToString(
+    React.createElement(
+      I18nProvider,
+      { locale: 'en' },
+      React.createElement(RewardHelpModal, { isOpen: true, onClose: () => {} })
+    )
+  );
+  const viHtml = renderToString(
+    React.createElement(
+      I18nProvider,
+      { locale: 'vi' },
+      React.createElement(RewardHelpModal, { isOpen: true, onClose: () => {} })
+    )
+  );
+
+  // Dynamic DEFAULT_REWARD_CONFIG and MultiplierRules values present in both locales
+  const dynamicValues = [
+    DEFAULT_REWARD_CONFIG.countdownBaseCoinPerMinute.toFixed(1),
+    DEFAULT_REWARD_CONFIG.countdownBaseXpPerMinute.toFixed(1),
+    DEFAULT_REWARD_CONFIG.stopwatchBaseCoinPerMinute.toFixed(1),
+    DEFAULT_REWARD_CONFIG.stopwatchBaseXpPerMinute.toFixed(1),
+    `×${MultiplierRules.getSessionMultiplier(5).toFixed(1)}`,
+    `×${MultiplierRules.getSessionMultiplier(30).toFixed(1)}`,
+    `×${MultiplierRules.getSessionMultiplier(60).toFixed(1)}`,
+    `×${MultiplierRules.getSessionMultiplier(90).toFixed(1)}`,
+    `×${MultiplierRules.getSessionMultiplier(120).toFixed(1)}`,
+    `×${MultiplierRules.getSessionMultiplier(150).toFixed(1)}`,
+    `×${MultiplierRules.getSessionMultiplier(180).toFixed(1)}`,
+  ];
+  for (const val of dynamicValues) {
+    assert.ok(enHtml.includes(val), `EN modal missing dynamic value ${val}`);
+    assert.ok(viHtml.includes(val), `VI modal missing dynamic value ${val}`);
+  }
+
+  const decodeHtml = (raw: string) =>
+    raw
+      .replace(/&amp;/g, '&')
+      .replace(/&#x27;/g, "'")
+      .replace(/&quot;/g, '"')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>');
+  const enText = decodeHtml(enHtml);
+  const viText = decodeHtml(viHtml);
+
+  const minSw = String(DEFAULT_REWARD_CONFIG.stopwatchMinMinutesThreshold);
+  assert.ok(enText.includes(EN_MESSAGES['help.coinBonusHeading']));
+  assert.ok(enText.includes(EN_MESSAGES['help.coinBonusBody']));
+  assert.ok(enText.includes(EN_MESSAGES['help.settlementHeading']));
+  assert.ok(enText.includes(EN_MESSAGES['help.settlementCountdownRule']));
+  assert.ok(enText.includes(EN_MESSAGES['help.settlementStopwatchRule'].replace('{min}', minSw)));
+  assert.ok(enText.includes(EN_MESSAGES['help.settlementPomoSwRule']));
+  assert.ok(enText.includes(EN_MESSAGES['help.questsPrecisionHeading']));
+  assert.ok(enText.includes(EN_MESSAGES['help.questsFlatRule']));
+  assert.ok(enText.includes(EN_MESSAGES['help.precisionRule']));
+
+  assert.ok(viText.includes(VI_MESSAGES['help.coinBonusHeading']));
+  assert.ok(viText.includes(VI_MESSAGES['help.coinBonusBody']));
+  assert.ok(viText.includes(VI_MESSAGES['help.settlementHeading']));
+  assert.ok(viText.includes(VI_MESSAGES['help.settlementCountdownRule']));
+  assert.ok(viText.includes(VI_MESSAGES['help.settlementStopwatchRule'].replace('{min}', minSw)));
+  assert.ok(viText.includes(VI_MESSAGES['help.settlementPomoSwRule']));
+  assert.ok(viText.includes(VI_MESSAGES['help.questsPrecisionHeading']));
+  assert.ok(viText.includes(VI_MESSAGES['help.questsFlatRule']));
+  assert.ok(viText.includes(VI_MESSAGES['help.precisionRule']));
+});

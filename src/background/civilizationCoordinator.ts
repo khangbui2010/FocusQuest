@@ -10,6 +10,7 @@
  */
 
 import { StorageManager } from '../storage/storageManager.ts';
+import { AppError } from '../types/errors.ts';
 import {
   CivilizationState,
   createInitialCivilizationState,
@@ -112,20 +113,24 @@ export class CivilizationCoordinator {
    */
   async placeBuilding(payload: PlaceBuildingPayload): Promise<PlaceBuildingResponseData> {
     if (!payload || typeof payload !== 'object') {
-      throw new Error('Invalid payload: expected object for PLACE_BUILDING');
+      throw new AppError('CIV_INVALID_PLACE_PAYLOAD', 'Invalid payload: expected object for PLACE_BUILDING');
     }
 
     if (typeof payload.buildingDefinitionId !== 'string' || !payload.buildingDefinitionId) {
-      throw new Error('PLACE_BUILDING requires a valid buildingDefinitionId');
+      throw new AppError('CIV_INVALID_BUILDING_DEF_ID', 'PLACE_BUILDING requires a valid buildingDefinitionId');
     }
 
     if (!isValidCoordinate(payload.position)) {
-      throw new Error('PLACE_BUILDING requires valid position coordinates');
+      throw new AppError('CIV_INVALID_POSITION', 'PLACE_BUILDING requires valid position coordinates');
     }
 
     const definition = getBuildingDefinition(payload.buildingDefinitionId);
     if (!definition) {
-      throw new Error(`Unknown building definition: "${payload.buildingDefinitionId}"`);
+      throw new AppError(
+        'CIV_UNKNOWN_BUILDING_DEF',
+        `Unknown building definition: "${payload.buildingDefinitionId}"`,
+        { buildingId: payload.buildingDefinitionId }
+      );
     }
 
     const tx = await this.storage.executeCivilizationTransaction<BuildingInstance>(
@@ -136,38 +141,67 @@ export class CivilizationCoordinator {
           calculatePlayerLevel(economy.totalXP)
         );
         if (playerLevel < definition.unlockRequirements.minPlayerLevel) {
-          throw new Error(
-            `Building "${definition.name}" requires Player Level ${definition.unlockRequirements.minPlayerLevel} (current: ${playerLevel})`
+          throw new AppError(
+            'CIV_REQUIRES_LEVEL',
+            `Building "${definition.name}" requires Player Level ${definition.unlockRequirements.minPlayerLevel} (current: ${playerLevel})`,
+            {
+              buildingName: definition.name,
+              requiredLevel: definition.unlockRequirements.minPlayerLevel,
+              currentLevel: playerLevel,
+            }
           );
         }
 
         // 2. Check lifetime focus minutes requirement
         const lifetimeMinutes = calculateLifetimeFocusMinutes(dailyStats);
         if (lifetimeMinutes < definition.unlockRequirements.minTotalFocusMinutes) {
-          throw new Error(
-            `Building "${definition.name}" requires ${definition.unlockRequirements.minTotalFocusMinutes} lifetime focus minutes (current: ${lifetimeMinutes})`
+          throw new AppError(
+            'CIV_REQUIRES_FOCUS_MINUTES',
+            `Building "${definition.name}" requires ${definition.unlockRequirements.minTotalFocusMinutes} lifetime focus minutes (current: ${lifetimeMinutes})`,
+            {
+              buildingName: definition.name,
+              requiredMinutes: definition.unlockRequirements.minTotalFocusMinutes,
+              currentMinutes: lifetimeMinutes,
+            }
           );
         }
 
         // 3. Check civilization era requirement
         if (!isEraUnlocked(civilization.era, definition.unlockRequirements.minEra)) {
-          throw new Error(
-            `Building "${definition.name}" requires Era ${definition.unlockRequirements.minEra} (current: ${civilization.era})`
+          throw new AppError(
+            'CIV_REQUIRES_ERA',
+            `Building "${definition.name}" requires Era ${definition.unlockRequirements.minEra} (current: ${civilization.era})`,
+            {
+              buildingName: definition.name,
+              ...(definition.unlockRequirements.minEra !== undefined
+                ? { requiredEra: definition.unlockRequirements.minEra }
+                : {}),
+              currentEra: civilization.era,
+            }
           );
         }
 
         // 4. Check currency sufficiency against fresh locked economy
         if (economy.focusCoins < definition.baseCost) {
-          throw new Error(
-            `Insufficient coins: building "${definition.name}" costs ${definition.baseCost} Coins (current balance: ${economy.focusCoins})`
+          throw new AppError(
+            'CIV_INSUFFICIENT_BUILDING_COINS',
+            `Insufficient coins: building "${definition.name}" costs ${definition.baseCost} Coins (current balance: ${economy.focusCoins})`,
+            {
+              buildingName: definition.name,
+              cost: definition.baseCost,
+              balance: economy.focusCoins,
+            }
           );
         }
 
         // 5. Check placement & collision against fresh locked gridMap
         const placementValidation = gridMap.canPlaceBuilding(payload.position, definition.footprint);
         if (!placementValidation.isValid) {
-          throw new Error(
-            `Cannot place building: ${placementValidation.reason || 'placement rejected'}`
+          const reason = placementValidation.reason || 'placement rejected';
+          throw new AppError(
+            'CIV_CANNOT_PLACE_BUILDING',
+            `Cannot place building: ${reason}`,
+            { reason }
           );
         }
 
@@ -175,7 +209,12 @@ export class CivilizationCoordinator {
         const instanceId = `bld_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         const placeResult = gridMap.placeBuilding(instanceId, payload.position, definition.footprint);
         if (!placeResult.success) {
-          throw new Error(`Grid placement failed: ${placeResult.reason || 'unknown error'}`);
+          const reason = placeResult.reason || 'unknown error';
+          throw new AppError(
+            'CIV_GRID_PLACEMENT_FAILED',
+            `Grid placement failed: ${reason}`,
+            { reason }
+          );
         }
 
         const newInstance: BuildingInstance = {
@@ -224,19 +263,31 @@ export class CivilizationCoordinator {
    */
   async removeBuilding(payload: RemoveBuildingPayload): Promise<RemoveBuildingResponseData> {
     if (!payload || !isValidBuildingId(payload.buildingInstanceId)) {
-      throw new Error('REMOVE_BUILDING requires a valid buildingInstanceId');
+      throw new AppError(
+        'CIV_INVALID_BUILDING_INSTANCE_ID',
+        'REMOVE_BUILDING requires a valid buildingInstanceId'
+      );
     }
 
     const tx = await this.storage.executeCivilizationTransaction<string>(
       ({ civilization, gridMap }) => {
         const instance = civilization.buildings.find((b) => b.id === payload.buildingInstanceId);
         if (!instance) {
-          throw new Error(`Building instance "${payload.buildingInstanceId}" not found`);
+          throw new AppError(
+            'CIV_BUILDING_NOT_FOUND',
+            `Building instance "${payload.buildingInstanceId}" not found`,
+            { instanceId: payload.buildingInstanceId }
+          );
         }
 
         const removalResult = gridMap.removeBuilding(payload.buildingInstanceId);
         if (!removalResult.success) {
-          throw new Error(`Building removal failed: ${removalResult.reason || 'unknown'}`);
+          const reason = removalResult.reason || 'unknown';
+          throw new AppError(
+            'CIV_BUILDING_REMOVAL_FAILED',
+            `Building removal failed: ${reason}`,
+            { reason }
+          );
         }
 
         const nextBuildings = civilization.buildings.filter((b) => b.id !== payload.buildingInstanceId);
@@ -274,25 +325,27 @@ export class CivilizationCoordinator {
    */
   async expandLand(payload: ExpandLandPayload): Promise<ExpandLandResponseData> {
     if (!payload || typeof payload !== 'object') {
-      throw new Error('EXPAND_LAND requires payload object');
+      throw new AppError('CIV_INVALID_EXPAND_PAYLOAD', 'EXPAND_LAND requires payload object');
     }
 
     const rawPayload = payload as unknown as Record<string, unknown>;
     if ('direction' in rawPayload || 'slotIndex' in rawPayload) {
-      throw new Error(
+      throw new AppError(
+        'CIV_EXPAND_UNSUPPORTED_FIELDS',
         'EXPAND_LAND requires origin coordinates only; directional expansion is no longer supported'
       );
     }
 
     if (!isValidCoordinate(payload.origin)) {
-      throw new Error('EXPAND_LAND requires valid origin coordinates');
+      throw new AppError('CIV_INVALID_EXPAND_ORIGIN_TYPE', 'EXPAND_LAND requires valid origin coordinates');
     }
 
     if (
       payload.origin.x % CHUNK_WIDTH !== 0 ||
       payload.origin.y % CHUNK_HEIGHT !== 0
     ) {
-      throw new Error(
+      throw new AppError(
+        'CIV_INVALID_EXPAND_ORIGIN_GRID',
         `Land expansion failed: INVALID_ORIGIN (origin must align to ${CHUNK_WIDTH}x${CHUNK_HEIGHT} chunk grid)`
       );
     }
@@ -314,19 +367,36 @@ export class CivilizationCoordinator {
 
       if (!evalResult.canExpand) {
         if (evalResult.reason === 'LEVEL_TOO_LOW') {
-          throw new Error(
-            `Land expansion #${evalResult.purchaseIndex} requires Player Level ${evalResult.requiredLevel} (current: ${playerLevel})`
+          throw new AppError(
+            'CIV_EXPAND_REQUIRES_LEVEL',
+            `Land expansion #${evalResult.purchaseIndex} requires Player Level ${evalResult.requiredLevel} (current: ${playerLevel})`,
+            {
+              step: evalResult.purchaseIndex,
+              requiredLevel: evalResult.requiredLevel,
+              currentLevel: playerLevel,
+            }
           );
         }
-        throw new Error(
-          `Insufficient coins: chunk expansion #${evalResult.purchaseIndex} costs ${evalResult.cost} Coins (current balance: ${economy.focusCoins})`
+        throw new AppError(
+          'CIV_INSUFFICIENT_EXPAND_COINS',
+          `Insufficient coins: chunk expansion #${evalResult.purchaseIndex} costs ${evalResult.cost} Coins (current balance: ${economy.focusCoins})`,
+          {
+            step: evalResult.purchaseIndex,
+            cost: evalResult.cost,
+            balance: economy.focusCoins,
+          }
         );
       }
 
       // 2. Validate geometry & adjacency on GridMap BEFORE deducting Coins
       const expResult = gridMap.expandChunk(payload.origin);
       if (!expResult.success || !expResult.chunk) {
-        throw new Error(`Land expansion failed: ${expResult.reason || 'cannot expand chunk'}`);
+        const reason = expResult.reason || 'cannot expand chunk';
+        throw new AppError(
+          'CIV_LAND_EXPANSION_FAILED',
+          `Land expansion failed: ${reason}`,
+          { reason }
+        );
       }
 
       const nextCivilization: CivilizationState = {

@@ -19,6 +19,7 @@ export interface SessionRewardPreviewInput {
   coinBonusRate?: number;
   pomodoroConfig?: Partial<PomodoroConfig> | null;
   pomodoroState?: Partial<PomodoroState> | null;
+  interruptedReason?: SessionSnapshot['interruptedReason'];
 }
 
 export interface SessionRewardPreviewResult {
@@ -302,6 +303,22 @@ export function getSessionRewardPreview(
   }
 
   if (input.mode === 'POMODORO_STOPWATCH') {
+    const isExtensionForfeited =
+      status === 'INTERRUPTED' &&
+      (input.interruptedReason === 'EXTENSION_DISABLED' ||
+        input.interruptedReason === 'EXTENSION_RELOADED');
+    if (isExtensionForfeited) {
+      return {
+        coins: 0,
+        xp: 0,
+        multiplier: input.lockedMultiplier && input.lockedMultiplier > 0 ? input.lockedMultiplier : 1.0,
+        bonusRate,
+        eligibleMinutes: 0,
+        isEligible: false,
+        isProjected: false,
+        isAllOrNothing: false,
+      };
+    }
     const settledCoins = input.pomodoroState?.accumulatedCoins ?? 0;
     const settledXp = input.pomodoroState?.accumulatedXp ?? 0;
     const completedMins = Math.max(0, input.pomodoroState?.totalCompletedFocusMinutes ?? 0);
@@ -399,5 +416,6 @@ export function getSessionRewardPreviewFromSnapshot(
     coinBonusRate: options?.coinBonusRate,
     pomodoroConfig: session.pomodoroConfig,
     pomodoroState: session.pomodoroState,
+    interruptedReason: session.interruptedReason,
   });
 }

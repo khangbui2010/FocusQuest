@@ -102,9 +102,9 @@ test('StatsBarChart Stage 3: focusable accessible bars with bilingual EN/VI aria
   assert.ok(htmlVi.includes('role="img"'));
   assert.ok(htmlVi.includes('aria-label="Biểu đồ cột số phút tập trung"'));
   assert.ok(htmlVi.includes('tabindex="0"'));
-  assert.ok(htmlVi.includes('role="button"'));
-  assert.ok(htmlVi.includes('aria-label="2026-11-16: 60 phút · 2 phiên"'));
-  assert.ok(htmlVi.includes('aria-label="2026-11-17: 90 phút · 3 phiên"'));
+  assert.equal(htmlVi.includes('role="button"'), false, 'Non-clickable bars must not claim role="button"');
+  assert.ok(htmlVi.includes('tabindex="0" role="img" aria-label="2026-11-16: 60 phút · 2 phiên"'));
+  assert.ok(htmlVi.includes('tabindex="0" role="img" aria-label="2026-11-17: 90 phút · 3 phiên"'));
 
   const emptyEn = renderToString(
     React.createElement(StatsBarChart, {

@@ -1,167 +1,98 @@
-# BÁO CÁO NGHIỆM THU — MILESTONE 5B.5 / GIAI ĐOẠN 5c
+# BÁO CÁO NGHIỆM THU CUỐI — MILESTONE 5B.5 / GIAI ĐOẠN 6 + 7
 
-**Giai đoạn:** Milestone 5B.5 — Giai đoạn 5c *(`QuestView` & Nâng cấp `StatsView` — KHÔNG chạm lõi kinh tế/backend/schema, giữ nguyên `Awards` placeholder và nút Upgrade `"Milestone 5C"`)*  
-**Ngày hoàn thành:** 2026-11-18  
-**File sao lưu báo cáo cũ:** `/respond_5c_prev.md` *(sao lưu nguyên vẹn báo cáo Giai đoạn 2b trước khi chỉnh sửa)*  
-**Trạng thái:** `604 / 604` tests PASS 3/3 lần | `npm run lint` PASS | `npm run build` PASS — **CHƯA KIỂM CHỨNG TRỰC QUAN TRÊN CHROME POPUP THẬT** — **DỪNG chờ duyệt Giai đoạn 5c**
-
----
-
-## 1. BƯỚC 0 — KIỂM TRA TRƯỚC KHI SỬA
-
-### 1.1. Rà soát hợp đồng dữ liệu & hàm sẵn có (không bịa API, không sửa lõi)
-- **`src/core/quests/questCatalog.ts`:** Giữ nguyên 100%. UI đọc trực tiếp từ `DAILY_QUEST_CAP` (`40C / 100XP`), `WEEKLY_QUEST_CAP` (`150C / 370XP`), và `getQuestDefinitionsByPeriod('DAILY' | 'WEEKLY')` — tuyệt đối không hardcode danh sách, mục tiêu hay mức thưởng Quest trong JSX.
-- **`src/core/quests/questEngine.ts` & `src/background/questCoordinator.ts`:** Tái sử dụng `countUnclaimed`, `GET_QUEST_STATE` (`GetQuestStateResponseData`), `CLAIM_QUEST_REWARD` (`ClaimQuestRewardResponseData`, kèm `MessageResponse.errorCode` cho `QUEST_ALREADY_CLAIMED`, `QUEST_EXPIRED`, v.v.) qua `getQuestStateClient()` và `claimQuestRewardClient()` trong `src/ui/services/extensionClient.ts`.
-- **`src/core/stats/statsAggregator.ts` & `src/ui/components/StatsBarChart.tsx`:** Tái sử dụng nguyên vẹn `aggregateDayStats`, `aggregateMonthStats`, `aggregateYearStats`, `calculateFocusStreak`, `addDaysToDateKey`, `isValidDateKey` và `<StatsBarChart />` (SVG thuần).
-- **`src/core/civilization/buildingCatalog.ts`:** Kiểm tra công trình có effect `FOCUS_STAT_UNLOCK`: duy nhất `stone_age_elder_hut` (*Elder's Hut / Lều Trưởng lão*) mang `statId = 'focus_metric_streak_analysis'`.
-- **Hiển thị số & bản địa hóa:** Tái sử dụng `formatRewardAmount` (`src/ui/utils/formatters.ts` — half-up tối đa 2 chữ số thập phân), `localizeErrorMessage` (`src/i18n/errorTranslator.ts`), `getLocalizedBuildingName` (`src/ui/utils/buildingI18n.ts`), và `getLocalDateKey` (`src/core/utils/dateUtils.ts` — loại bỏ `.toISOString().slice(0, 10)`).
-
-### 1.2. Đánh giá tác động lên bộ test hiện hữu
-- `__tests__/ui/fullBilingual.test.ts` kiểm tra chuỗi `'stats.todaySummaryTitle'` (`Today's Focus Summary` / `Tổng kết Tập trung Hôm nay`) → giữ nguyên key này trên mặc định hôm nay của tab `Day` trong `StatsView.tsx`.
-- `__tests__/ui/navigationRedesign.test.ts:194` kiểm tra `!html.includes('quest-unclaimed-badge')` khi gọi `<Navbar />` không truyền `unclaimedQuestCount` → đặt mặc định `unclaimedQuestCount = 0` và ẩn hẳn badge khi `<= 0`.
-- `__tests__/ui/ux1SessionNavigationAndProfile.test.ts` & `ux4RewardDisplayAndFormatting.test.ts` dựng trực tiếp `<PopupShell />` với bộ props cũ → mọi prop Stage 5c mới thêm vào `PopupShellProps` đều là optional.
-- **Kết quả:** **0** test cũ cần chỉnh sửa để chiều theo giao diện mới; tab `Awards` giữ nguyên `data-testid="awards-placeholder-view"` và `"Coming soon"`.
+**Giai đoạn:** Milestone 5B.5 — Giai đoạn 6 + 7 *(Hoàn thiện i18n / Error Codes / `RewardHelpModal`, sửa Backlog 4a/4b, đồng bộ tài liệu & nghiệm thu đóng Milestone 5B.5)*  
+**Ngày hoàn thành:** 2026-11-19  
+**File sao lưu báo cáo cũ:** `/respond_phase67_prev.md` *(sao lưu nguyên vẹn báo cáo Giai đoạn 5c trước khi ghi đè; giữ nguyên toàn bộ các bản `respond_*_prev.md` trước đó)*  
+**Trạng thái:** **`605 / 605` tests PASS 3/3 lần** | **`npm run lint` (`tsc --noEmit`) PASS (`0` errors)** | **`npm run clean && npm run build` PASS (`1,205,283 B` / `26` tệp)** — **DỪNG chờ duyệt đóng Milestone 5B.5**
 
 ---
 
-## 2. CHI TIẾT TRIỂN KHAI GIAI ĐOẠN 5c
+## 1. PHẦN A — KẾT QUẢ HOÀN THIỆN MÃ NGUỒN, BACKLOG & KIỂM THỬ
 
-### 2.1. Tab `Quests` & Huy hiệu chưa nhận (`QuestView.tsx`, `questFormatting.ts`, `Navbar.tsx`)
-- **`src/ui/utils/questFormatting.ts` (thuần):**
-  - `formatDailyResetCountdown(ms)` (`HH:MM:SS`, clamp `<= 0` hoặc `NaN` về `00:00:00`) & `formatWeeklyResetCountdown(ms, t)` (`{days}d {hours}h` / `{days} ngày {hours} giờ` khi `>= 24h`, chuyển `HH:MM:SS` dưới `24h`).
-  - `resolveQuestVisualStatus(entry, { isExpired })` phân tách rõ 4 trạng thái: `IN_PROGRESS`, `READY`, `CLAIMED`, `EXPIRED`.
-  - `computePeriodClaimedSummary(period, questState)` tính tổng `claimedCoins / maxCoins`, `claimedXp / maxXp` động từ `questCatalog.ts`.
-  - `formatQuestProgressLabel(def, progress, t)` bản địa hóa đơn vị `sessions` / `mins` / `days` qua `t()`.
-- **`src/ui/components/quests/QuestView.tsx`:**
-  - Giao diện hoàn chỉnh (`data-testid="quest-view"`) gồm header `Daily & Weekly Quests` + tóm tắt chờ nhận, banner thành công khi Claim (`quest-claim-feedback`), hộp lỗi `role="alert"` bản địa hóa qua `localizeErrorMessage` (tự refetch khi `errorCode` là `QUEST_ALREADY_CLAIMED` hoặc `QUEST_EXPIRED`), thẻ **Quest Streak** (`quest-streak-card`) kèm ghi chú không sinh Coin thụ động, 2 khu vực **Daily Quests** & **Weekly Quests** với đồng hồ đếm ngược 1s/giây + auto-refetch một lần khi chạm `0`, nút **Claim** có khóa chống bấm đúp theo `period:questId` (`inFlightKeysRef` + `claimingKeys`), thanh tiến độ `role="progressbar"` chuẩn A11y, và trạng thái `Loading` / `Error + Retry` / `Empty`.
-- **`src/ui/components/Navbar.tsx`:**
-  - Thêm `unclaimedQuestCount = 0`; ẩn hoàn toàn khi `<= 0`, hiển thị `1..9` hoặc `9+` khi `>= 10` (`data-testid="quest-unclaimed-badge"`) kèm `aria-label` song ngữ (`nav.questsBadgeAria`).
+### 1.1. Error Codes có cấu trúc (`src/types/errors.ts`, `src/types/messages.ts`, `src/i18n/errorTranslator.ts`)
+- **Hợp đồng tin nhắn (`MessageResponse`):** Giữ nguyên `error?: string` tiếng Anh để tương thích ngược toàn bộ test/caller cũ, đồng thời chuẩn hóa `errorCode?: string` và `errorParams?: ErrorParams`.
+- **Phân loại & Bản địa hóa (`98` `ErrorCode` + `4` mã playback legacy):**
+  - Toàn bộ `98` mã trong `ALL_KNOWN_ERROR_CODES` (Transport, Session/Transition, Profile/Allowlist, Civilization, Settings, Music Player, Quests) cộng `4` mã Offscreen (`autoplay_blocked`, `network`, `decode`, `unknown`) đều có bản dịch EN/VI tự nhiên, không rò `undefined`/`NaN`, và đồng bộ kiểu TypeScript chặt across `civilizationCoordinator.ts`, `sessionCoordinator.ts`, `ProfileBottomSheet.tsx`, `CivilizationScreen.tsx`.
+  - Vá xử lý tại `errorTranslator.ts:761-775` để `'network'` / `'unknown'` vẫn tôn trọng thông báo lỗi tải catalog cụ thể khi khớp `EXACT_VI_ERROR_MAP[rawFallback]` (`musicPlayerSheet.test.ts`).
+  - Lỗi kỹ thuật / stack trace (`TypeError`, `ReferenceError`, dòng `at ...`) được làm sạch bằng `isTechnicalErrorString` về thông điệp an toàn cho người dùng (`"Something went wrong. Please try again."` / `"Đã xảy ra lỗi. Vui lòng thử lại."`).
 
-### 2.2. Nâng cấp `StatsView.tsx` (`statsPeriod.ts`, `focusStatUnlock.ts`)
-- **`src/ui/utils/statsPeriod.ts` (thuần):** Quản lý khóa kỳ `'day' | 'month' | 'year'`, bước kỳ `stepStatsPeriod` & `canStepPeriod` qua ranh giới tháng/năm và năm nhuận (`2024-02` = 29 ngày vs `2025-02` = 28 ngày), khóa cứng không vượt quá `todayDateKey`; chuyển đổi dữ liệu thành thanh cho `<StatsBarChart />` (`dayTrendToBars` 7 ngày, `monthDaysToBars` 28–31 ngày, `yearMonthsToBars` 12 tháng).
-- **`src/ui/utils/focusStatUnlock.ts` (thuần):** Đọc catalog thực `getBuildingDefinition` / `getAllBuildingDefinitions` để kiểm tra effect `FOCUS_STAT_UNLOCK` với `statId = 'focus_metric_streak_analysis'` (tự động nhận diện `stone_age_elder_hut`).
-- **`src/ui/components/StatsView.tsx`:**
-  - Bộ chuyển `Day | Month | Year` (`role="tablist"`), nút `‹` / `›` + nhảy nhanh `Today / This Month / This Year`, neo ngày theo giờ địa phương (`getLocalDateKey()`, bỏ `.toISOString().slice(0, 10)`).
-  - Tải lịch sử đầy đủ via `getDailyStatsClient()` và đồng bộ với `todayStats` mới nhất; hiển thị KPI từng khung thời gian (khi `completionRate === null` hoặc chưa có Peak Day / Best Month hiển thị `'—'`, `0` lỗi `NaN`), biểu đồ cột `<StatsBarChart />`, và ghi chú tách riêng thưởng Focus với thưởng Quest (`stats.focusRewardsNote`).
-  - Thẻ **Focus Streak** (`stats-focus-streak-card`): khóa cùng gợi ý tên công trình bản địa hóa (`Elder's Hut` / `Lều Trưởng lão`) khi chưa xây; mở khóa `current` & `longest` ngay khi sở hữu công trình.
+### 1.2. `RewardHelpModal.tsx`, Notification Formatting & Parity Từ điển (`533` khóa)
+- **`src/ui/components/RewardHelpModal.tsx`:** Ràng buộc động vào `DEFAULT_REWARD_CONFIG` (`1.5 / 5.0` Countdown, `1.0 / 3.0` Stopwatch, ngưỡng `5m`) và `MultiplierRules.getSessionMultiplier(...)` (`×1.0`..`×2.5`), sửa render `{`×${value}`}` để React SSR không chèn comment node `<!-- -->`. Đầy đủ mục `CoinBonus` + Zero Passive Income, Settlement/All-or-Nothing, Quests thưởng phẳng & độ chính xác số thực IEEE-754 trên cả EN & VI.
+- **Thông báo Chrome 7 nhánh (`src/background/notificationFormatter.ts` + `__tests__/background/sessionNotifications.test.ts`):** Đã kiểm chứng trọn vẹn **7 nhánh** (`COUNTDOWN`, `STOPWATCH >= 5m`, `POMODORO_COUNTDOWN` 100%, `SHORT_BREAK`, `LONG_BREAK`, `BREAK_ENDED`, `POMODORO_STOPWATCH` break/finish) trong cả EN & VI, làm tròn hiển thị Coin/XP half-up tối đa 2 chữ số thập phân (`7.875 → 7.88` không hiện `7.875`) và tôn trọng `notificationsEnabled = false`.
+- **Kiểm tra tĩnh & Parity (`__tests__/ui/fullBilingual.test.ts`):**
+  - `EN_MESSAGES` và `VI_MESSAGES` đạt parity **`533 / 533` khóa** (`0` khóa thiếu, `0` chuỗi rỗng).
+  - Quét tĩnh toàn bộ tệp `.tsx` trong `src/ui/` (loại trừ `SpriteGallery.tsx` vốn chỉ dùng ở `#sprites`): **`0` thuộc tính (`aria-label`, `title`, `placeholder`, `alt`) hardcode** và **`0` chuỗi văn bản JSX hardcode** (chỉ giữ 2 token ký hiệu có chủ ý `FQ` và `zZ`).
 
-### 2.3. Kết nối `App.tsx` & Bản địa hóa EN/VI (`en.ts`, `vi.ts`)
-- **`src/App.tsx`:** Thay `quests-placeholder-view` bằng `<QuestView />` (giữ nguyên `awards-placeholder-view`); thêm state `civBuildings`, `unclaimedQuestCount`, `questStateVersion` đồng bộ qua `getCivilizationStateClient()` và `getQuestStateClient()` trong `refreshState()`, truyền xuống `<QuestView />`, `<StatsView />` và `<Navbar />`; thêm `handleQuestClaimed` cập nhật ví ngay và làm mới đồng bộ Popup.
-- **`src/i18n/locales/en.ts` & `vi.ts`:** Gỡ `quest.placeholder.*`; bổ sung trọn bộ khóa `quests.*`, `stats.*`, `nav.questsBadgeAria`, `quests.daily.*`, `quests.weekly.*` bảo đảm parity 100% EN/VI.
+### 1.3. Sửa lỗi Thực tế Phát hiện Trong Quá trình Hoàn thiện (Backlog 4a & 4b)
+1. **Backlog 4a — Lỗi hiển thị phần thưởng ở `POMODORO_STOPWATCH` bị tắt/tải lại extension (`src/core/reward/rewardPreview.ts`):**
+   - *Nguyên nhân:* Khi `POMODORO_STOPWATCH` kết thúc với `status === 'INTERRUPTED'` và `interruptedReason` là `'EXTENSION_DISABLED'` hoặc `'EXTENSION_RELOADED'`, `SessionCoordinator` hủy toàn bộ thưởng (`0 Coins & 0 XP`) nhưng `getSessionRewardPreview` trước đó chỉ đọc `pomodoroState.accumulatedCoins/Xp` mà chưa kiểm tra `interruptedReason`.
+   - *Khắc phục:* Thêm `interruptedReason?: SessionSnapshot['interruptedReason']` vào `SessionRewardPreviewInput` và truyền từ `getSessionRewardPreviewFromSnapshot`. Khi là `POMODORO_STOPWATCH` + `INTERRUPTED` + (`EXTENSION_DISABLED` | `EXTENSION_RELOADED`), trả về `{ coins: 0, xp: 0, eligibleMinutes: 0, isEligible: false }` (giữ nguyên hành vi bảo toàn reward khi `BROWSER_CLOSED` và `COMPLETED`). Xác nhận qua test mới tại `__tests__/ui/ux2PomodoroOutcomeDisplay.test.ts`.
+2. **Backlog 4b — A11y cột biểu đồ `StatsBarChart.tsx` (`__tests__/ui/statsBarChart.test.ts:105`):**
+   - Đã chuẩn hóa thẻ `<g role="img" tabIndex={0}>` trong `StatsBarChart.tsx` thay cho `role="button"` trước đây nhằm tránh ngữ nghĩa interactive lồng sai; **cập nhật 1 assertion test cũ tại `__tests__/ui/statsBarChart.test.ts:105`** sang `assert.equal(htmlVi.includes('role="button"'), false)` kèm `role="img"`. Đây là **test cũ duy nhất** được chỉnh assertion ngoài việc bổ sung các test Stage 6 / Backlog 4a mới.
 
 ---
 
-## 3. WIREFRAME GIAO DIỆN POPUP 400PX (ASCII)
+## 2. PHẦN B — KIỂM TOÁN 8 BẤT BIẾN, ĐÓNG GÓI `dist/` & ĐỒNG BỘ TÀI LIỆU
 
-```text
-+----------------------------------------------------+  400px
-| Header: Focus Quest | Stone Age | Coins | Lv | ? |
-+----------------------------------------------------+
-| [TAB: Quests]                                      |
-| Daily & Weekly Quests            1 ready to claim  |
-| [ok] +10 Coins · +25 XP claimed!              [x]  |  <- banner sau Claim
-| +------------------------------------------------+ |
-| | [Flame] Quest Streak      Cur: 1d  |  Max: 3d  | |
-| | Zero passive Coins — progresses on focus only. | |
-| +------------------------------------------------+ |
-| DAILY QUESTS                     Resets 06:12:44   |
-| Claimed 10/40 Coins · 25/100 XP                    |
-| +------------------------------------------------+ |
-| | First Spark                          [Claimed] | |
-| | [===========] 1/1 sessions      +10 C  +25 XP  | |
-| +------------------------------------------------+ |
-| | Steady Rhythm                        [ Claim ] | |  <- nút Claim thủ công
-| | [===========] 60/60 mins        +15 C  +35 XP  | |
-| +------------------------------------------------+ |
-| WEEKLY QUESTS                    Resets 3d 06h     |
-| Claimed 0/150 Coins · 0/370 XP                     |
-| [Habit Builder / Deep Diver / Weekly Tenacity]     |
-+----------------------------------------------------+
-| [Quests (1)] [Focus] [   Map   ] [Awards] [Stats]  |  <- Navbar 5 tab (h=64px)
-+----------------------------------------------------+
+### 2.1. Bảng Kiểm toán 8 Bất biến Hệ thống (Milestone 5B.5)
 
-+----------------------------------------------------+  400px
-| [TAB: Stats]                                       |
-| [  Day  |  Month  |  Year  ]                       |  <- role="tablist"
-| < 2026-11-18 >                           [ Today ] |  <- Next khóa ở hôm nay
-| Daily Focus Summary                     2026-11-18 |
-| +----------------------+ +-----------------------+ |
-| | Focus Time: 50 mins  | | Sessions: 2           | |
-| +----------------------+ +-----------------------+ |
-| | Focus Coins: +100    | | Focus XP: +250        | |
-| +----------------------+ +-----------------------+ |
-| Last 7 Days / Monthly / Yearly (<StatsBarChart />) |
-| +------------------------------------------------+ |
-| | (o) Focus Streak                       [Locked]| |  <- Mở khi xây
-| | Build Elder's Hut to unlock Focus Streak...    | |     Lều Trưởng lão
-| +------------------------------------------------+ |
-| Coins & XP above reflect Focus sessions only.      |
-+----------------------------------------------------+
-```
+| # | Bất biến / Ràng buộc | Trạng thái | Bằng chứng xác minh trực tiếp trong mã nguồn & kiểm thử |
+|---|---|---|---|
+| 1 | **Zero Passive Income** | **PASS** | Không có timer/alarm tự sinh Coin/XP; Coins/XP chỉ cộng khi kết thúc Focus Session (`SessionCoordinator`) hoặc Claim Quest thủ công (`QuestCoordinator.claimQuestReward` qua `CLAIM_QUEST_REWARD`). Streak & Leaderboard/Civilization không sinh Coin thụ động (`statsViewUpgrade.test.ts`, `questEngine.test.ts`). |
+| 2 | **All-or-Nothing (`Countdown` / `POMODORO_COUNTDOWN`)** | **PASS** | `Give Up` / `INTERRUPTED` luôn ghi `0` Coin, `0` XP, `0` tiến độ Quest (`toQuestOutcomeDelta` chỉ nhận `COMPLETED`) nhưng vẫn lưu `validMinutes` vào `fq_daily_stats`. `TimerView` & `getSessionRewardPreview` khớp 100% (`ux2PomodoroOutcomeDisplay.test.ts`, `questCoordinator.test.ts`). |
+| 3 | **Allowlist Lock (`declarativeNetRequest`)** | **PASS** | Chặn duy nhất `resourceTypes: ['main_frame']` theo `activeProfile.allowedDomains`; `blocked.html` không có nút mở khóa tạm thời; `ProfileBottomSheet` & `ProfileManager` khóa chỉnh sửa profile/domain trong lúc `RUNNING`/`PAUSED`. |
+| 4 | **Công thức thưởng, `CoinBonus` & IEEE-754 Precision** | **PASS** | `DEFAULT_REWARD_CONFIG` giữ nguyên (`1.5/5.0`, `1.0/3.0`, ngưỡng `5m`), `MultiplierRules` giữ `×1.0`..`×2.5`; `CoinBonus` chỉ nhân vào Coins (XP độc lập); storage giữ nguyên số thực IEEE-754 (`7.875 → 63.375`, `8 × 7.875 = 63` exact), UI/Notification mới làm tròn half-up tối đa 2 chữ số (`formatRewardAmount`, `ux4RewardDisplayAndFormatting.test.ts`). |
+| 5 | **Schema v3 (`fq_quests`) & Rollback Safety** | **PASS** | `CURRENT_SCHEMA_VERSION = 3` (`migrationRunner.ts`, `v3_questsSchema.ts`); `commitSessionOutcomeInternal` & `commitQuestClaimInternal` thực thi trong `StorageMutex` + rollback compensation; Claim thưởng Quest chỉ vào `ECONOMY` (dùng `calculatePlayerLevel`), không ghi vào `fq_daily_stats`. |
+| 6 | **Nút Upgrade `"Milestone 5C"` & Tab `Awards` `"Coming soon"`** | **PASS** | `Awards` giữ nguyên `awards-placeholder-view` (`Coming soon` / `Sắp ra mắt`); nút nâng cấp trong `BuildingDetailsModal` vẫn khóa ở nhãn `'Milestone 5C'`. Không có trang ẩn hay tính năng `5C` rò rỉ. |
+| 7 | **`0` File Audio Cục bộ & `CREDITS.md` Chính xác** | **PASS** | Quét toàn bộ `public/` và `dist/`: **`0`** tệp audio (`.mp3/.ogg/.wav/.m4a/.flac/.aac/.opus`). `CREDITS.md` (nhạc GitHub Archive) & `public/assets/sprites/CREDITS.md` (Kenney CC0 + Stone Age sprites) khớp 100% tài sản thực tế (`musicPackaging.test.ts`). |
+| 8 | **UX-5 Canvas Một Tấm & Thuật toán Rừng `M1–M6`** | **PASS** | `terrainDecor.ts` (`getCellDecor`, `TERRAIN_DECOR_SEED = 5202402`, 6 mẫu `M1–M6`) và `terrainBitmapRenderer.ts` / `TerrainBitmapCanvas.tsx` giữ nguyên 100%; `INITIAL_GRID_WIDTH/HEIGHT = 8`, `CHUNK_WIDTH/HEIGHT = 4` (`ux5TerrainBitmap.test.ts`, `terrainDecor.test.ts`). |
+
+### 2.2. Kiểm tra Đóng gói Clean Build (`dist/`)
+- **`npm run clean && npm run build`:** **PASS** — Vite `v8.3.8`, `1,754 modules transformed`, **`789ms`**.
+- **Tổng số tệp & dung lượng `dist/`:** **`26` tệp**, tổng cộng **`1,205,283 B`** (**`0` file audio**):
+  - `dist/background.js`: **`98,215 B`** (`98.21 kB`, gzip: `21.72 kB`)
+  - `dist/assets/popup-Bl0ohACp.js`: **`846,554 B`** (`846.55 kB`, gzip: `217.75 kB`) *(chủ ý hoãn tách chunk ngoài phạm vi 5B.5)*
+  - `dist/assets/popup-DcexGFhy.css`: **`91,821 B`** (`91.82 kB`, gzip: `14.18 kB`)
+  - `dist/assets/questEngine-C4eZ1Cf9.js`: **`67,378 B`** (`67.37 kB`, gzip: `18.68 kB`)
+  - `dist/assets/translator-CXd5AzTc.js`: **`65,741 B`** (`65.74 kB`, gzip: `18.39 kB`)
+  - `dist/assets/storageKeys-C4hhw6ET.js`: **`398 B`** (`0.39 kB`, gzip: `0.27 kB`)
+  - `dist/offscreen.js`: **`3,878 B`** (`3.87 kB`, gzip: `1.48 kB`) + `dist/offscreen.html`: **`264 B`**
+  - `dist/blocked.js`: **`1,321 B`** (`1.32 kB`, gzip: `0.60 kB`) + `dist/blocked.html`: **`1,810 B`**
+  - `dist/index.html`: **`712 B`** (`0.71 kB`, gzip: `0.39 kB`), `dist/manifest.json`: **`984 B`**
+  - `dist/_locales/en/messages.json`: **`382 B`**, `dist/_locales/vi/messages.json`: **`440 B`**
+  - `dist/icons/`: `icon16.png` (`749 B`), `icon32.png` (`1,283 B`), `icon48.png` (`1,751 B`), `icon128.png` (`4,517 B`), `icon.svg` (`874 B`)
+  - `dist/assets/sprites/`: `CREDITS.md` (`4,262 B`), `kenney-tiny-town/*`, `kenney-tiny-dungeon/*`
+
+### 2.3. Tài liệu đã Đồng bộ
+- `/PRODUCT_SPEC.md` (`Version 1.5.0-synced`): cập nhật Giai đoạn 6+7, Backlog 4a ở §9, 7 nhánh Chrome Notification ở §11, parity 533 khóa & `98` ErrorCodes ở §12–§13.
+- `/ARCHITECTURE.md` (`Version 1.8.0`): cập nhật `MessageResponse` (`errorCode`, `errorParams`), kiến trúc `AppError`/`errorTranslator`, `notificationFormatter`, `RewardHelpModal` động & `StatsBarChart` `<g role="img">`.
+- `/PROJECT_STATUS.md`: đánh dấu Stage 5c **ĐÃ DUYỆT**, bổ sung chi tiết Stage 6+7, cập nhật số liệu build `1,205,283 B` / `605/605` tests 3x và phân định chính xác phạm vi đã/chưa nghiệm thu trên Chrome thật.
+- `/README.md`: cập nhật `605/605 tests`, tóm tắt Stage 6+7, phạm vi kiểm chứng Chrome thật, và Roadmap tiếp theo (`Awards` & `Milestone 5C`).
 
 ---
 
-## 4. DANH SÁCH FILE THAY ĐỔI & TEST ĐÃ THÊM
+## 3. KẾT QUẢ CHẠY LỆNH XÁC MINH CUỐI (SAU MỌI CHỈNH SỬA CODE & TÀI LIỆU)
 
-### 4.1. Code sản phẩm (Production)
-- **Mới:**
-  - `src/ui/utils/questFormatting.ts`
-  - `src/ui/utils/focusStatUnlock.ts`
-  - `src/ui/utils/statsPeriod.ts`
-  - `src/ui/components/quests/QuestView.tsx`
-- **Cập nhật (thuần lớp UI & i18n):**
-  - `src/ui/components/Navbar.tsx` *(thêm badge `unclaimedQuestCount` tùy chọn, ẩn ở `0`, cap `9+`)*
-  - `src/ui/components/StatsView.tsx` *(tab `Day | Month | Year`, stepper, `<StatsBarChart />`, `Focus Streak` + `Elder's Hut`)*
-  - `src/App.tsx` *(nối `QuestView`, `civBuildings`, `unclaimedQuestCount`, `handleQuestClaimed`)*
-  - `src/i18n/locales/en.ts`, `src/i18n/locales/vi.ts` *(gỡ `quest.placeholder.*`, thêm toàn bộ khóa 5c parity 100%)*
-- **Tài liệu:**
-  - `PROJECT_STATUS.md`, `README.md`, `ARCHITECTURE.md` (`Version: 1.7.0`), `PRODUCT_SPEC.md`
-  - `respond_5c_prev.md` *(sao lưu báo cáo Stage 2b)*, `respond.md` *(báo cáo này)*
-
-### 4.2. Bộ kiểm thử mới (`+9` tests: `595 → 604`, không sửa assertion lõi)
-- **`__tests__/ui/questView.test.ts` (`+5` tests):**
-  1. `questFormatting`: đếm ngược Daily (`00:00:00` khi `<=0`/`NaN`), Weekly (`2d 6h` vs `05:02:00`), 4 visual statuses, summary cap từ `DAILY_QUEST_CAP`, nhãn đơn vị EN/VI.
-  2. `QuestView` SSR EN/VI: kiểm đủ 4 thẻ `CLAIMED` / `READY` / `IN_PROGRESS` / `EXPIRED`, `role="progressbar"`, `Quest Streak`, cap Daily/Weekly, tên & thưởng đọc từ catalog.
-  3. `Navbar` unclaimed badge: ẩn ở `0`, hiện `3`, giới hạn `9+` ở `12` kèm `aria-label` EN/VI.
-  4. `App` & `PopupShell` wiring: tab `Quests` render `QuestView` (không còn `Coming soon`), tab `Awards` giữ nguyên `awards-placeholder-view`, EN/VI parity 100%.
-  5. Simulator `CLAIM_QUEST_REWARD`: cộng phẳng `+10C / +25XP`, **không thay đổi `todayStats`**, claim lại trả `errorCode: 'QUEST_ALREADY_CLAIMED'` dịch chuẩn VI.
-- **`__tests__/ui/statsViewUpgrade.test.ts` (`+4` tests):**
-  1. `statsPeriod`: bước kỳ qua năm mới (`2026-01-01` → `2025-12-31`, `2026-01` ↔ `2025-12`), chặn tiến quá hôm nay, năm nhuận `2024-02` (`29` cột) vs `2025-02` (`28` cột), `dayTrendToBars` (`7` cột) & `yearMonthsToBars` (`12` cột).
-  2. `focusStatUnlock`: xác minh `getUnlockingBuildingDefinition('focus_metric_streak_analysis')` trả về `stone_age_elder_hut`, khóa khi chỉ có `Campfire` và mở khi có `Elder's Hut`.
-  3. `StatsView` SSR EN/VI: đủ 3 tab `Day`, `Month`, `Year`, `Focus Streak` khóa/mở (gợi ý `Elder's Hut` / `Lều Trưởng lão`, số liệu khớp `calculateFocusStreak`), tháng rỗng hiển thị `'—'` không `NaN`.
-  4. `PopupShell` & Simulator `GET_DAILY_STATS`: truyền `civBuildings` mở khóa streak và trả lịch sử `>= 250` ngày.
-- **Sửa 1 lỗi nhỏ trong chính test mới vừa viết (`statsViewUpgrade.test.ts:153-168`):** Lúc chạy kiểm thử lần đầu, chuỗi mock `buildSimulatedDailyStats` đạt chuỗi dài nhất thực tế `20` ngày (thay vì giả định `16`), đã đổi test so khớp trực tiếp với `calculateFocusStreak(records, today)` (vẫn kiểm `>= 16`).
+- **`npm run lint` (`tsc --noEmit`):** **PASS** (Exit code `0`, `0` errors).
+- **`npm run clean && npm run build`:** **PASS** (Exit code `0`, Vite `v8.3.8`, `1,754 modules transformed`, **`789ms`**).
+- **`npm test` (`tsx --test`) — 3 lần chạy liên tiếp:**
+  - **Lần 1:** **`605 / 605` PASS** (`0` fail, `0` skipped, `0` cancelled, **`17,973.72 ms`**)
+  - **Lần 2:** **`605 / 605` PASS** (`0` fail, `0` skipped, `0` cancelled, **`17,590.95 ms`**)
+  - **Lần 3:** **`605 / 605` PASS** (`0` fail, `0` skipped, `0` cancelled, **`17,680.29 ms`**)
 
 ---
 
-## 5. KẾT QUẢ KIỂM ĐỊNH THỰC TẾ (VERIFIED REAL OUTPUTS)
+## 4. RANH GIỚI KIỂM CHỨNG & CHECKLIST CHROME THẬT TRƯỚC KHI ĐÓNG 5B.5
 
-- **`npm run lint` (`tsc --noEmit`):** **PASS** (`Exit code 0`, `0` errors).
-- **`npm run clean && npm run build`:** **PASS** (`Vite v8.3.8`, `1,753 modules transformed`, **`1.46s`**, tổng dung lượng tệp `dist/`: **`1,167,221 B`**):
-  - **So sánh `dist/` Trước 5c (Stage 2b) → Sau 5c:**
-    - `dist/background.js`: `93,530 B` (`93.53 kB`, gzip `20.57 kB`) → **`93,534 B` (`93.53 kB`, gzip `20.60 kB`)** *(gần như giữ nguyên tuyệt đối, không đụng Service Worker)*
-    - `dist/assets/popup-*.js`: `774,872 B` (`774.87 kB`, gzip `204.59 kB`) → **`818,451 B` (`818.45 kB`, gzip `212.11 kB`)** *(+`43.58 kB` raw / +`7.52 kB` gzip cho `QuestView`, `StatsView` & từ điển 5c)*
-    - `dist/assets/popup-*.css`: `88,317 B` (`88.31 kB`, gzip `13.80 kB`) → **`90,982 B` (`90.98 kB`, gzip `14.11 kB`)**
-    - `dist/assets/questEngine-*.js`: **`66,805 B`** (`66.80 kB`, gzip `18.48 kB`)
-    - `dist/assets/translator-*.js`: **`61,875 B`** (`61.87 kB`, gzip `16.40 kB`)
-    - `dist/assets/storageKeys-C4hhw6ET.js`: **`398 B`** (`0.39 kB`, gzip `0.27 kB`)
-    - `dist/offscreen.js`: **`3,878 B`**, `dist/blocked.js`: **`1,321 B`**, `dist/manifest.json`: **`984 B`**, `dist/index.html`: **`712 B`**.
-- **`npm test` — chạy 3 lần liên tiếp (với `dist/` đã build sẵn):**
-  - **Lần 1:** `604 / 604 PASS` (`0` fail, `0` skipped, `0` cancelled, **`39,008.59 ms`**, Exit `0`).
-  - **Lần 2:** `604 / 604 PASS` (`0` fail, `0` skipped, `0` cancelled, **`31,786.63 ms`**, Exit `0`).
-  - **Lần 3:** `604 / 604 PASS` (`0` fail, `0` skipped, `0` cancelled, **`31,948.09 ms`**, Exit `0`).
+- **Phạm vi kiểm chứng hiện tại:** Môi trường tự động chạy trên Node.js (`tsx --test`) với React SSR (`renderToString`), mock 2D canvas context và mock Chrome adapters. Theo xác nhận của người dùng, các luồng trước UX-5 (**popup `400×600` thanh 5 tab, bản đồ DOM/rừng/lớp tối, rìu chém, `blocked.html` DNR, `chrome.i18n`, `manifest.json`, Offscreen Audio kể cả Pause > 30s, fetch catalog nhạc**) đã được nghiệm thu thủ công trên Chrome thật. **Giai đoạn 5c (`QuestView`/`StatsView`), canvas `<TerrainBitmapCanvas>` của UX-5, Service Worker thực tế của Stage 2b, và thông báo/hộp thoại Stage 6+7 chưa được kiểm chứng trực quan trên Chrome thật.**
+- **Checklist nghiệm thu cuối trên Chrome thật (`chrome://extensions` → Load unpacked `/dist`):**
+  1. **UX-5 Canvas & Rừng tối:** Pan/zoom bản đồ ở các mức DPR (`125%`, `150%`) và mở rộng đất để xác nhận không còn khe sáng sub-pixel giữa các ô và animation rìu chém lật ô sạch sẽ.
+  2. **Stage 2b + 5c (`Quests` & `Stats`):** Hoàn thành 1 phiên Focus → xác nhận Service Worker cộng `fq_quests`, huy hiệu `Navbar` nhảy số, bấm `Claim` cộng đúng Coins/XP vào Header mà không cộng vào `Focus Coins` của `StatsView`, kiểm tra `Day | Month | Year` & mở khóa `Focus Streak` khi đặt `Elder's Hut`.
+  3. **Stage 6+7 (`Notifications`, `RewardHelpModal`, `ErrorTranslator`, `Backlog 4a`):**
+     - Đổi ngôn ngữ `EN ↔ VI` rồi mở modal `?` (`RewardHelpModal`): đối chiếu bảng Base Rate, Multiplier `×1.0`..`×2.5`, mục `CoinBonus`, Settlement, Quests & IEEE-754.
+     - Cho `COUNTDOWN` / `POMODORO_COUNTDOWN` / `POMODORO_STOPWATCH` hoàn thành hoặc chuyển pha Break khi bật/tắt thông báo: xác nhận Chrome Notification hiển thị đúng EN/VI và số Coin/XP làm tròn half-up tối đa 2 chữ số (ví dụ `7.88`).
+     - Thử reload extension khi đang chạy `POMODORO_STOPWATCH` rồi mở lại popup: xác nhận màn hình kết thúc hiển thị `+0` Coin / `+0` XP khớp thông báo hủy thưởng (Backlog 4a).
 
 ---
 
-## 6. RANH GIỚI KIỂM CHỨNG & HƯỚNG DẪN TỰ KIỂM TRA TRÊN CHROME POPUP
-
-- **Ranh giới kiểm chứng:** Môi trường hiện tại không chạy trình duyệt Chrome thật; toàn bộ `604` test vừa chạy thực thi trên Node.js (`tsx --test`) dùng React SSR (`renderToString`), mock 2D canvas và simulator `extensionClient.ts`. Giao diện tương tác trực tiếp trên Chrome Popup `400×600` (bấm Claim thực tế, đồng hồ tick trực tiếp, đổi tab `Day | Month | Year`, cuộn ở `400×600`) **chưa kiểm chứng trên trình duyệt thật**.
-- **Checklist kiểm tra thủ công trên Chrome (`chrome://extensions` → Load unpacked `/dist` → mở Popup `400×600`):**
-  1. **Tab `Quests` & Badge `Navbar`:** Hoàn thành 1 phiên Focus ngắn → kiểm tra huy hiệu đỏ trên icon `Quests` hiện số chờ nhận; mở tab `Quests`, xác nhận `First Spark` hiện nút `Claim`, bấm `Claim` → kiểm tra Header Coins/XP tăng đúng `+10C / +25XP`, banner xanh xuất hiện, huy hiệu giảm đi `1`, và tab `Stats` hôm nay **không** cộng `+10C / +25XP` của Quest vào `Focus Coins` / `Focus XP`.
-  2. **Tab `Stats` (`Day | Month | Year`):** Chuyển qua 3 tab, bấm `‹` lùi về ngày/tháng/năm trước (kiểm tra nút `›` bị khóa tại kỳ hiện tại và nút `Today / This Month / This Year` đưa về hiện tại), rê chuột / dùng `Tab` qua các cột `<StatsBarChart />` để kiểm tooltip không tràn mép `400px`.
-  3. **Khóa/mở `Focus Streak` theo `Elder's Hut`:** Trước khi xây `Elder's Hut` (*Lều Trưởng lão*), xác nhận thẻ `Focus Streak` hiện trạng thái `Locked` kèm tên công trình đúng ngôn ngữ EN/VI; đặt `Elder's Hut` trên Bản đồ rồi quay lại `Stats` → xác nhận thẻ lập tức mở khóa hiện chuỗi hiện tại & chuỗi dài nhất.
-  4. **Chuyển ngôn ngữ EN ↔ VI & Tab `Awards`:** Đổi qua lại `EN | VI` trên Header ở cả `Quests` và `Stats` để kiểm không còn chuỗi sót tiếng Anh/tiếng Việt, và tab `Awards` vẫn hiển thị `"Coming soon"`.
-
----
-
-CHỜ LỆNH BẮT ĐẦU GIAI ĐOẠN 6
+**DỪNG — CHỜ NGƯỜI DÙNG NGHIỆM THU VÀ DUYỆT ĐÓNG MILESTONE 5B.5.**

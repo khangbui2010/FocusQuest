@@ -1,7 +1,7 @@
 # Focus Quest — Technical Architecture Specification (Manifest V3)
 
-**Version:** 1.7.0  
-**Status:** MV3 Background, Offscreen LOFI Streaming, Civilization Engine (UX-5 Composite Terrain Bitmap), Schema v3 QuestCoordinator & Atomic Settlement (Stage 2b), Interactive QuestView & Upgraded StatsView (Stage 5c), Full Bilingual Architecture  
+**Version:** 1.8.0  
+**Status:** MV3 Background, Offscreen LOFI Streaming, Civilization Engine (UX-5 Composite Terrain Bitmap), Schema v3 QuestCoordinator & Atomic Settlement (Stage 2b), Interactive QuestView & Upgraded StatsView (Stage 5c), Structured ErrorCodes & Full Bilingual Hardening (Stage 6+7 — Milestone 5B.5 Complete)  
 **Target Platform:** Google Chrome Extension (Manifest V3, Chrome >= 116)  
 **Language & Stack:** TypeScript, React 19 (Popup & Blocked UI), Tailwind CSS 4, Chrome Extension APIs (`declarativeNetRequest`, `alarms`, `notifications`, `offscreen`, `storage`, `runtime`, `action`, `i18n`)  
 
@@ -124,6 +124,8 @@ export interface MessageResponse<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;
+  errorCode?: string;
+  errorParams?: ErrorParams;
 }
 ```
 Các action được hỗ trợ:
@@ -137,7 +139,8 @@ Các action được hỗ trợ:
 - Preferences: `SET_LANGUAGE`, `SET_CHIME_ENABLED`, `SET_MUSIC_PLAYER_EXPANDED`.
 - Focus Music Player: `MUSIC_GET_STATE`, `MUSIC_GET_CATALOG`, `MUSIC_REFRESH_CATALOG`, `MUSIC_PLAY_TRACK`, `MUSIC_PAUSE`, `MUSIC_RESUME`, `MUSIC_STOP`, `MUSIC_NEXT`, `MUSIC_PREVIOUS`, `MUSIC_SEEK`, `MUSIC_SET_VOLUME`, `MUSIC_SET_SHUFFLE`, `MUSIC_SET_REPEAT`.
 - SW ↔ Offscreen Document (lọc bằng `target: 'offscreen' | 'background'`): `MUSIC_PLAY`, `MUSIC_PAUSE`, `MUSIC_STOP`, `MUSIC_SEEK`, `MUSIC_SET_VOLUME`, `MUSIC_GET_STATUS` ↔ `MUSIC_POSITION`, `MUSIC_ENDED`, `MUSIC_ERROR`.
-- UI hiển thị lỗi qua `src/i18n/errorTranslator.ts` để giữ nguyên thông điệp chuẩn khi dùng EN và dịch tự nhiên khi dùng VI (gồm đầy đủ 6 lỗi `QuestCoordinator`).
+- **Lỗi có cấu trúc & Bản địa hóa (`src/types/errors.ts`, `src/i18n/errorTranslator.ts`):** Các coordinator và `MessageHandler` ném/trả `AppError` kèm `98` `ErrorCode` chuẩn hóa + `errorParams` (giữ `error: string` tiếng Anh tương thích ngược). Phía UI chuyển mọi exception qua `toUiErrorPayload` và render qua `localizeErrorMessage` (dịch đủ 98 mã + 4 mã offscreen legacy trong EN/VI, làm sạch mọi chuỗi lỗi kỹ thuật / stack trace).
+- **Thông báo & Hiển thị (`src/background/notificationFormatter.ts`, `src/core/reward/rewardPreview.ts`):** Chrome Notifications chạy qua `formatSessionNotificationContent` (đọc `settings.language`, định dạng số thập phân half-up tối đa 2 chữ số từ `formatRewardAmount` tách khỏi `SessionCoordinator`); `getSessionRewardPreview` dùng chung nguồn công thức cho cả Setup/Running/Outcome và phản ánh đúng `0 Coins / 0 XP` khi `POMODORO_STOPWATCH` bị `EXTENSION_DISABLED`/`EXTENSION_RELOADED`.
 
 ### 3.2. Idempotent Reward Processing & Session Persistence
 1. **Idempotency Guard:**
@@ -181,9 +184,10 @@ Các action được hỗ trợ:
 
 ## 6. Giao diện Popup, Cảnh quan UI, Quests & Stats (Stages B–E, UX-5 & 5c)
 - **Điều hướng Popup 400×600px:** `Navbar.tsx` dùng 5 tab đáy (`Quests | Focus | Map | Awards | Stats`), mặc định mở `map` (`CivilizationScreen`), hỗ trợ huy hiệu phần thưởng chưa nhận (`quest-unclaimed-badge` ẩn khi `0`, `1..9`, `9+` khi `>=10`) trên tab `Quests`, và đóng/mở `ProfileBottomSheet`, `RewardHelpModal`, `MusicPlayerSheet` và `SpriteGallery` (`#sprites` chỉ ở Web Preview).
-- **Tab Quests & Stats nâng cấp (Giai đoạn 5c):**
+- **Tab Quests, Stats & Stage 6–7 Polish (Giai đoạn 5c + 6–7):**
   - `src/ui/components/quests/QuestView.tsx` + `src/ui/utils/questFormatting.ts`: đọc động định nghĩa và cap Daily/Weekly từ `questCatalog.ts`, hiển thị 4 trạng thái thẻ (`IN_PROGRESS`, `READY`, `CLAIMED`, `EXPIRED`), đếm ngược reset 1s/giây kèm auto-refetch 1 lần khi chạm `0`, khóa chống bấm đúp khi gọi `CLAIM_QUEST_REWARD`, thẻ Quest Streak (0 Coin thụ động), và thông báo lỗi bản địa hóa qua `errorTranslator.ts`.
-  - `src/ui/components/StatsView.tsx` + `src/ui/utils/statsPeriod.ts` + `src/ui/utils/focusStatUnlock.ts`: nâng cấp 3 chế độ `Day | Month | Year` trên nền `statsAggregator.ts` & `StatsBarChart.tsx` (neo ngày địa phương via `getLocalDateKey`, khóa không bước qua tương lai, xử lý năm nhuận 29/02 và `completionRate === null`), kèm thẻ `Focus Streak` khóa/mở theo effect `FOCUS_STAT_UNLOCK` (`focus_metric_streak_analysis` của `stone_age_elder_hut`). Chỉ còn tab `Awards` giữ chỗ `"Coming soon"`.
+  - `src/ui/components/StatsView.tsx` + `src/ui/utils/statsPeriod.ts` + `src/ui/utils/focusStatUnlock.ts`: nâng cấp 3 chế độ `Day | Month | Year` trên nền `statsAggregator.ts` & `StatsBarChart.tsx` (neo ngày địa phương via `getLocalDateKey`, khóa không bước qua tương lai, xử lý năm nhuận 29/02 và `completionRate === null`; cột biểu đồ `<g role="img" tabIndex={0}>` tránh lỗi button lồng nhau), kèm thẻ `Focus Streak` khóa/mở theo effect `FOCUS_STAT_UNLOCK` (`focus_metric_streak_analysis` của `stone_age_elder_hut`). Chỉ còn tab `Awards` giữ chỗ `"Coming soon"`.
+  - `src/ui/components/RewardHelpModal.tsx`: đọc động hệ số & tỉ lệ cơ bản từ `DEFAULT_REWARD_CONFIG` + `MultiplierRules`, giải thích đầy đủ `CoinBonus`, All-or-Nothing/Settlement, Quests thưởng phẳng & độ chính xác số thực IEEE-754 trong EN/VI (`533` khóa i18n, kiểm tra tĩnh `0` chuỗi/thuộc tính hardcode trong `src/ui/` trừ `SpriteGallery.tsx`).
 - **Cảnh quan Canvas Tổng hợp Một Tấm (`UX-5`) & Hiệu ứng mở đất:**
   - `terrainDecor.ts` giữ nguyên thuật toán đặt cảnh quan mở & 6 mẫu rừng tối M1–M6 xác định (không lưu trong storage, không cản đặt công trình).
   - Toàn bộ nền địa hình của `MapGridView` được `terrainBitmapRenderer.ts` (`buildTerrainBitmapPlan`, `renderTerrainBitmap`, `renderTerrainBitmapIfNeeded`) + `TerrainBitmapCanvas.tsx` ghép sẵn vào **một `<canvas>` duy nhất** kích thước gốc `(cols × 16) × (rows × 16)` (`imageSmoothingEnabled = false`, `image-rendering: pixelated`), vẽ đúng thứ tự UX-3 (`nền -> lớp bù tối tùy chọn -> cây -> lớp phủ #020617` dùng `computeLockedForestOpacities`), có fallback màu phẳng khi ảnh spritesheet lỗi, và **chỉ vẽ lại khi `contentKey` đổi** (mở đất / hết hiệu ứng che / đổi seed — không bao giờ vẽ lại khi pan hoặc zoom), giúp triệt tiêu 100% khe sáng/lưới sub-pixel ở mọi mức DPR (`1..3`), zoom (kể cả Expansion auto-fit) và pan.

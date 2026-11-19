@@ -20,6 +20,7 @@ import {
   GetQuestStateResponseData,
 } from '../../types/messages.ts';
 import { QuestErrorCode, QuestPeriod, QuestState } from '../../types/quests.ts';
+import { extractCodedError } from '../../types/errors.ts';
 import {
   LOFI_BASE_URL,
   LOFI_CATALOG_CACHE_TTL_MS,
@@ -574,15 +575,25 @@ export async function sendExtensionMessage<T = unknown>(
             resolve({
               success: false,
               error: chrome.runtime.lastError.message || 'Background worker unreachable.',
+              errorCode: 'WORKER_UNREACHABLE',
             });
           } else {
-            resolve(response || { success: false, error: 'Empty response received.' });
+            resolve(
+              response || {
+                success: false,
+                error: 'Empty response received.',
+                errorCode: 'EMPTY_RESPONSE',
+              }
+            );
           }
         });
       } catch (err) {
+        const coded = extractCodedError(err);
         resolve({
           success: false,
-          error: err instanceof Error ? err.message : String(err),
+          error: coded.message ?? (err instanceof Error ? err.message : String(err)),
+          errorCode: coded.code ?? 'ACTION_FAILED',
+          errorParams: coded.params,
         });
       }
     });
@@ -683,7 +694,11 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
 
     case 'GET_ACTIVE_PROFILE': {
       if (mockProfiles.length === 0) {
-        return { success: false, error: 'No profiles found in storage.' };
+        return {
+          success: false,
+          error: 'No profiles found in storage.',
+          errorCode: 'NO_PROFILES_IN_STORAGE',
+        };
       }
       const found = mockProfiles.find((p) => p.id === mockState.activeProfile?.id);
       const active = found ?? mockProfiles.find((p) => p.isDefault) ?? mockProfiles[0];
@@ -782,6 +797,8 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
             action === 'SKIP_POMODORO_BREAK'
               ? 'Cannot skip break while in Focus phase.'
               : 'No active pomodoro session.',
+          errorCode:
+            action === 'SKIP_POMODORO_BREAK' ? 'CANNOT_SKIP_BREAK_IN_FOCUS' : 'ACTION_FAILED',
         };
       }
       const s = mockState.currentSession;
@@ -792,6 +809,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         return {
           success: false,
           error: 'Cannot skip break while in Focus phase.',
+          errorCode: 'CANNOT_SKIP_BREAK_IN_FOCUS',
         };
       }
 
@@ -922,7 +940,13 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
     }
 
     case 'PAUSE_SESSION': {
-      if (!mockState.currentSession) return { success: false, error: 'No active session.' };
+      if (!mockState.currentSession) {
+        return {
+          success: false,
+          error: 'No active session to pause.',
+          errorCode: 'NO_ACTIVE_SESSION_PAUSE',
+        };
+      }
       const s = mockState.currentSession;
       let newAccumulated = s.accumulatedFocusMs ?? 0;
       const isBreak =
@@ -949,7 +973,13 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
     }
 
     case 'RESUME_SESSION': {
-      if (!mockState.currentSession) return { success: false, error: 'No session to resume.' };
+      if (!mockState.currentSession) {
+        return {
+          success: false,
+          error: 'No session to resume.',
+          errorCode: 'NO_SESSION_RESUME',
+        };
+      }
       const s = mockState.currentSession;
       const pauseDuration = s.currentPauseStartedAt
         ? now - s.currentPauseStartedAt
@@ -995,7 +1025,9 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
     }
 
     case 'GIVE_UP_SESSION': {
-      if (!mockState.currentSession) return { success: false, error: 'No session.' };
+      if (!mockState.currentSession) {
+        return { success: false, error: 'No session to give up.', errorCode: 'NO_SESSION_GIVE_UP' };
+      }
       mockState.currentSession = {
         ...mockState.currentSession,
         status: 'ABANDONED',
@@ -1008,10 +1040,21 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
     }
 
     case 'FINISH_STOPWATCH': {
-      if (!mockState.currentSession) return { success: false, error: 'No session.' };
+      if (!mockState.currentSession) {
+        return {
+          success: false,
+          error: 'No active stopwatch session to finish.',
+          errorCode: 'NO_ACTIVE_STOPWATCH_FINISH',
+        };
+      }
       const s = mockState.currentSession;
       if (s.mode !== 'STOPWATCH' && s.mode !== 'POMODORO_STOPWATCH') {
-        return { success: false, error: "Cannot finish countdown with 'finishStopwatch'." };
+        return {
+          success: false,
+          error:
+            "Cannot finish countdown with 'finishStopwatch'. Countdown finishes when target is met.",
+          errorCode: 'COUNTDOWN_FINISH_STOPWATCH_DISALLOWED',
+        };
       }
       if (s.rewardProcessed || s.status === 'COMPLETED') {
         return {
@@ -1182,7 +1225,11 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
 
     case 'SWITCH_PROFILE': {
       if (mockState.currentSession && (mockState.currentSession.status === 'RUNNING' || mockState.currentSession.status === 'PAUSED')) {
-        return { success: false, error: 'Cannot switch active profile during a focus session. Finish your session first.' };
+        return {
+          success: false,
+          error: 'Cannot switch active profile during a focus session. Finish your session first.',
+          errorCode: 'ACTIVE_SESSION_LOCK_PROFILE_SWITCH',
+        };
       }
       const pId = (message as { payload: { profileId: string } }).payload.profileId;
       const found = mockProfiles.find((p) => p.id === pId);
@@ -1190,19 +1237,37 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         mockState.activeProfile = found;
         return { success: true, data: found as unknown as T };
       }
-      return { success: false, error: 'Profile not found' };
+      return {
+        success: false,
+        error: `Profile with ID '${pId}' not found.`,
+        errorCode: 'PROFILE_NOT_FOUND',
+        errorParams: { profileId: pId },
+      };
     }
 
     case 'ADD_DOMAIN': {
       if (mockState.currentSession && (mockState.currentSession.status === 'RUNNING' || mockState.currentSession.status === 'PAUSED')) {
-        return { success: false, error: 'Allowlist cannot be modified during a focus session. Finish your session first.' };
+        return {
+          success: false,
+          error: 'Allowlist cannot be modified during a focus session. Finish your session first.',
+          errorCode: 'ACTIVE_SESSION_LOCK_ALLOWLIST',
+        };
       }
       const { profileId, domainPattern } = (
         message as { payload: { profileId: string; domainPattern: string } }
       ).payload;
       const validation = DomainNormalizer.validateAllowlistPattern(domainPattern);
       if (!validation.isValid) {
-        return { success: false, error: `Cannot add domain: ${validation.error}` };
+        return {
+          success: false,
+          error: `Cannot add domain: ${validation.error}`,
+          errorCode: 'PROFILE_ADD_INVALID_DOMAIN',
+          errorParams: {
+            reason: validation.error || '',
+            reasonCode: validation.errorCode || 'DOMAIN_INVALID_FORMAT',
+            ...(validation.errorParams || {}),
+          },
+        };
       }
       const p = mockProfiles.find((x) => x.id === profileId);
       if (p) {
@@ -1215,12 +1280,21 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         }
         return { success: true, data: { ...p, allowedDomains: [...p.allowedDomains] } as unknown as T };
       }
-      return { success: false, error: `Profile with ID '${profileId}' not found.` };
+      return {
+        success: false,
+        error: `Profile with ID '${profileId}' not found.`,
+        errorCode: 'PROFILE_NOT_FOUND',
+        errorParams: { profileId },
+      };
     }
 
     case 'REMOVE_DOMAIN': {
       if (mockState.currentSession && (mockState.currentSession.status === 'RUNNING' || mockState.currentSession.status === 'PAUSED')) {
-        return { success: false, error: 'Allowlist cannot be modified during a focus session. Finish your session first.' };
+        return {
+          success: false,
+          error: 'Allowlist cannot be modified during a focus session. Finish your session first.',
+          errorCode: 'ACTIVE_SESSION_LOCK_ALLOWLIST',
+        };
       }
       const { profileId, domainPattern } = (
         message as { payload: { profileId: string; domainPattern: string } }
@@ -1237,32 +1311,63 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         }
         return { success: true, data: { ...p, allowedDomains: [...p.allowedDomains] } as unknown as T };
       }
-      return { success: false, error: `Profile with ID '${profileId}' not found.` };
+      return {
+        success: false,
+        error: `Profile with ID '${profileId}' not found.`,
+        errorCode: 'PROFILE_NOT_FOUND',
+        errorParams: { profileId },
+      };
     }
 
     case 'CREATE_PROFILE': {
       if (mockState.currentSession && (mockState.currentSession.status === 'RUNNING' || mockState.currentSession.status === 'PAUSED')) {
-        return { success: false, error: 'Cannot create profile during a focus session. Finish your session first.' };
+        return {
+          success: false,
+          error: 'Cannot create profile during a focus session. Finish your session first.',
+          errorCode: 'ACTIVE_SESSION_LOCK_PROFILE_CREATE',
+        };
       }
       const { name, initialDomains } = (
         message as { payload: { name: string; initialDomains?: string[] } }
       ).payload;
       const trimmed = (name || '').trim();
       if (!trimmed) {
-        return { success: false, error: 'Profile name cannot be empty or whitespace.' };
+        return {
+          success: false,
+          error: 'Profile name cannot be empty or whitespace.',
+          errorCode: 'PROFILE_NAME_EMPTY',
+        };
       }
       if (trimmed.length > 50) {
-        return { success: false, error: 'Profile name cannot exceed 50 characters.' };
+        return {
+          success: false,
+          error: 'Profile name cannot exceed 50 characters.',
+          errorCode: 'PROFILE_NAME_TOO_LONG',
+        };
       }
       const lower = trimmed.toLowerCase();
       if (mockProfiles.some((p) => p.name.trim().toLowerCase() === lower)) {
-        return { success: false, error: `A profile with the name '${trimmed}' already exists.` };
+        return {
+          success: false,
+          error: `A profile with the name '${trimmed}' already exists.`,
+          errorCode: 'PROFILE_DUPLICATE_NAME',
+          errorParams: { name: trimmed },
+        };
       }
       const normalizedDomains: string[] = [];
       for (const d of initialDomains || []) {
         const val = DomainNormalizer.validateAllowlistPattern(d);
         if (!val.isValid) {
-          return { success: false, error: `Cannot create profile: ${val.error}` };
+          return {
+            success: false,
+            error: `Cannot create profile: ${val.error}`,
+            errorCode: 'PROFILE_CREATE_INVALID_DOMAIN',
+            errorParams: {
+              reason: val.error || '',
+              reasonCode: val.errorCode || 'DOMAIN_INVALID_FORMAT',
+              ...(val.errorParams || {}),
+            },
+          };
         }
         if (!normalizedDomains.includes(val.normalizedDomain)) {
           normalizedDomains.push(val.normalizedDomain);
@@ -1285,26 +1390,52 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
 
     case 'RENAME_PROFILE': {
       if (mockState.currentSession && (mockState.currentSession.status === 'RUNNING' || mockState.currentSession.status === 'PAUSED')) {
-        return { success: false, error: 'Cannot rename profile during a focus session. Finish your session first.' };
+        return {
+          success: false,
+          error: 'Cannot rename profile during a focus session. Finish your session first.',
+          errorCode: 'ACTIVE_SESSION_LOCK_PROFILE_RENAME',
+        };
       }
       const payload = (message as { payload?: { profileId?: string; newName?: string } }).payload;
       if (!payload?.profileId || typeof payload.newName !== 'string') {
-        return { success: false, error: 'RENAME_PROFILE requires profileId and newName.' };
+        return {
+          success: false,
+          error: 'RENAME_PROFILE requires profileId and newName.',
+          errorCode: 'MISSING_RENAME_PROFILE_FIELDS',
+        };
       }
       const trimmed = payload.newName.trim();
       if (!trimmed) {
-        return { success: false, error: 'Profile name cannot be empty or whitespace.' };
+        return {
+          success: false,
+          error: 'Profile name cannot be empty or whitespace.',
+          errorCode: 'PROFILE_NAME_EMPTY',
+        };
       }
       if (trimmed.length > 50) {
-        return { success: false, error: 'Profile name cannot exceed 50 characters.' };
+        return {
+          success: false,
+          error: 'Profile name cannot exceed 50 characters.',
+          errorCode: 'PROFILE_NAME_TOO_LONG',
+        };
       }
       const targetIndex = mockProfiles.findIndex((p) => p.id === payload.profileId);
       if (targetIndex === -1) {
-        return { success: false, error: `Profile with ID '${payload.profileId}' not found.` };
+        return {
+          success: false,
+          error: `Profile with ID '${payload.profileId}' not found.`,
+          errorCode: 'PROFILE_NOT_FOUND',
+          errorParams: { profileId: payload.profileId },
+        };
       }
       const lower = trimmed.toLowerCase();
       if (mockProfiles.some((p) => p.id !== payload.profileId && p.name.trim().toLowerCase() === lower)) {
-        return { success: false, error: `A profile with the name '${trimmed}' already exists.` };
+        return {
+          success: false,
+          error: `A profile with the name '${trimmed}' already exists.`,
+          errorCode: 'PROFILE_DUPLICATE_NAME',
+          errorParams: { name: trimmed },
+        };
       }
       const updatedProfile: FocusProfile = {
         ...mockProfiles[targetIndex],
@@ -1320,18 +1451,35 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
 
     case 'DELETE_PROFILE': {
       if (mockState.currentSession && (mockState.currentSession.status === 'RUNNING' || mockState.currentSession.status === 'PAUSED')) {
-        return { success: false, error: 'Cannot delete profile during a focus session. Finish your session first.' };
+        return {
+          success: false,
+          error: 'Cannot delete profile during a focus session. Finish your session first.',
+          errorCode: 'ACTIVE_SESSION_LOCK_PROFILE_DELETE',
+        };
       }
       const payload = (message as { payload?: { profileId?: string; replacementActiveProfileId?: string } }).payload;
       if (!payload?.profileId) {
-        return { success: false, error: 'DELETE_PROFILE requires profileId.' };
+        return {
+          success: false,
+          error: 'DELETE_PROFILE requires profileId.',
+          errorCode: 'MISSING_PROFILE_ID',
+        };
       }
       const targetIndex = mockProfiles.findIndex((p) => p.id === payload.profileId);
       if (targetIndex === -1) {
-        return { success: false, error: `Profile with ID '${payload.profileId}' not found.` };
+        return {
+          success: false,
+          error: `Profile with ID '${payload.profileId}' not found.`,
+          errorCode: 'PROFILE_NOT_FOUND',
+          errorParams: { profileId: payload.profileId },
+        };
       }
       if (mockProfiles.length <= 1) {
-        return { success: false, error: 'Cannot delete the only remaining profile in the system.' };
+        return {
+          success: false,
+          error: 'Cannot delete the only remaining profile in the system.',
+          errorCode: 'PROFILE_DELETE_LAST',
+        };
       }
       const deletedProfile = mockProfiles[targetIndex];
       const remaining = mockProfiles.filter((p) => p.id !== payload.profileId);
@@ -1343,6 +1491,8 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
             return {
               success: false,
               error: `Replacement active profile with ID '${payload.replacementActiveProfileId}' does not exist.`,
+              errorCode: 'PROFILE_REPLACEMENT_NOT_FOUND',
+              errorParams: { profileId: payload.replacementActiveProfileId },
             };
           }
           nextActiveId = replacement.id;
@@ -1379,14 +1529,25 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
 
       const def = getBuildingDefinition(buildingDefinitionId);
       if (!def) {
-        return { success: false, error: `Unknown building definition: "${buildingDefinitionId}"` };
+        return {
+          success: false,
+          error: `Unknown building definition: "${buildingDefinitionId}"`,
+          errorCode: 'CIV_UNKNOWN_BUILDING_DEF',
+          errorParams: { buildingDefinitionId },
+        };
       }
 
       const currentLevel = calculatePlayerLevel(mockState.economy.totalXP);
       if (currentLevel < def.unlockRequirements.minPlayerLevel) {
         return {
           success: false,
-          error: `Building locked: requires Player Level ${def.unlockRequirements.minPlayerLevel}.`,
+          error: `Building "${def.name}" requires Player Level ${def.unlockRequirements.minPlayerLevel} (current: ${currentLevel})`,
+          errorCode: 'CIV_REQUIRES_LEVEL',
+          errorParams: {
+            buildingName: def.name,
+            requiredLevel: def.unlockRequirements.minPlayerLevel,
+            currentLevel,
+          },
         };
       }
 
@@ -1394,7 +1555,13 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
       if (lifetimeMinutes < def.unlockRequirements.minTotalFocusMinutes) {
         return {
           success: false,
-          error: `Building locked: requires ${def.unlockRequirements.minTotalFocusMinutes} lifetime focus minutes.`,
+          error: `Building "${def.name}" requires ${def.unlockRequirements.minTotalFocusMinutes} lifetime focus minutes (current: ${lifetimeMinutes})`,
+          errorCode: 'CIV_REQUIRES_FOCUS_MINUTES',
+          errorParams: {
+            buildingName: def.name,
+            requiredMinutes: def.unlockRequirements.minTotalFocusMinutes,
+            currentMinutes: lifetimeMinutes,
+          },
         };
       }
 
@@ -1404,14 +1571,26 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
       ) {
         return {
           success: false,
-          error: `Building locked: requires Era ${def.unlockRequirements.minEra}.`,
+          error: `Building "${def.name}" requires Era ${def.unlockRequirements.minEra} (current: ${mockCivilizationState.era})`,
+          errorCode: 'CIV_REQUIRES_ERA',
+          errorParams: {
+            buildingName: def.name,
+            requiredEra: def.unlockRequirements.minEra,
+            currentEra: mockCivilizationState.era,
+          },
         };
       }
 
       if (mockState.economy.focusCoins < def.baseCost) {
         return {
           success: false,
-          error: `Insufficient coins: requires ${def.baseCost} Coins, but balance is ${mockState.economy.focusCoins}.`,
+          error: `Insufficient coins: building "${def.name}" costs ${def.baseCost} Coins (current balance: ${mockState.economy.focusCoins})`,
+          errorCode: 'CIV_INSUFFICIENT_BUILDING_COINS',
+          errorParams: {
+            buildingName: def.name,
+            cost: def.baseCost,
+            balance: mockState.economy.focusCoins,
+          },
         };
       }
 
@@ -1419,7 +1598,9 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
       if (!validation.isValid) {
         return {
           success: false,
-          error: `Cannot place building at (${position.x}, ${position.y}): ${validation.reason || 'Placement invalid'}.`,
+          error: `Cannot place building: ${validation.reason || 'Placement rejected'}`,
+          errorCode: 'CIV_CANNOT_PLACE_BUILDING',
+          errorParams: { reason: validation.reason || 'Placement rejected' },
         };
       }
 
@@ -1428,7 +1609,9 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
       if (!placeOp.success) {
         return {
           success: false,
-          error: `Placement operation failed: ${placeOp.reason}`,
+          error: `Grid placement failed: ${placeOp.reason}`,
+          errorCode: 'CIV_GRID_PLACEMENT_FAILED',
+          errorParams: { reason: placeOp.reason || 'Placement rejected' },
         };
       }
 
@@ -1468,12 +1651,22 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
 
       const idx = mockCivilizationState.buildings.findIndex((b) => b.id === buildingInstanceId);
       if (idx === -1) {
-        return { success: false, error: `Building instance "${buildingInstanceId}" not found.` };
+        return {
+          success: false,
+          error: `Building instance "${buildingInstanceId}" not found`,
+          errorCode: 'CIV_BUILDING_NOT_FOUND',
+          errorParams: { buildingInstanceId },
+        };
       }
 
       const removeOp = mockGridMap.removeBuilding(buildingInstanceId);
       if (!removeOp.success) {
-        return { success: false, error: `Failed to remove building: ${removeOp.reason}` };
+        return {
+          success: false,
+          error: `Building removal failed: ${removeOp.reason}`,
+          errorCode: 'CIV_BUILDING_REMOVAL_FAILED',
+          errorParams: { reason: removeOp.reason || 'Removal failed' },
+        };
       }
 
       const updatedBuildings = mockCivilizationState.buildings.filter(
@@ -1501,7 +1694,11 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
     case 'EXPAND_LAND': {
       const payload = (message as { payload: ExpandLandPayload }).payload;
       if (!payload || typeof payload !== 'object') {
-        return { success: false, error: 'EXPAND_LAND requires payload object.' };
+        return {
+          success: false,
+          error: 'EXPAND_LAND requires payload object.',
+          errorCode: 'CIV_INVALID_EXPAND_PAYLOAD',
+        };
       }
 
       const rawPayload = payload as unknown as Record<string, unknown>;
@@ -1510,6 +1707,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
           success: false,
           error:
             'EXPAND_LAND requires origin coordinates only; direction and slotIndex are not supported.',
+          errorCode: 'CIV_EXPAND_UNSUPPORTED_FIELDS',
         };
       }
 
@@ -1517,6 +1715,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         return {
           success: false,
           error: 'EXPAND_LAND requires valid origin coordinates.',
+          errorCode: 'CIV_INVALID_EXPAND_ORIGIN_TYPE',
         };
       }
 
@@ -1524,6 +1723,8 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         return {
           success: false,
           error: `Land expansion failed: INVALID_ORIGIN (origin must align to ${CHUNK_WIDTH}x${CHUNK_HEIGHT} chunk grid).`,
+          errorCode: 'CIV_INVALID_EXPAND_ORIGIN_GRID',
+          errorParams: { chunkWidth: CHUNK_WIDTH, chunkHeight: CHUNK_HEIGHT },
         };
       }
 
@@ -1538,13 +1739,27 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
       });
 
       if (!evalResult.canExpand) {
-        return {
-          success: false,
-          error:
-            evalResult.reason === 'LEVEL_TOO_LOW'
-              ? `Land expansion #${evalResult.purchaseIndex} requires Player Level ${evalResult.requiredLevel} (current: ${playerLevel})`
-              : `Insufficient coins: chunk expansion #${evalResult.purchaseIndex} costs ${evalResult.cost} Coins (current balance: ${mockState.economy.focusCoins})`,
-        };
+        return evalResult.reason === 'LEVEL_TOO_LOW'
+          ? {
+              success: false,
+              error: `Land expansion #${evalResult.purchaseIndex} requires Player Level ${evalResult.requiredLevel} (current: ${playerLevel})`,
+              errorCode: 'CIV_EXPAND_REQUIRES_LEVEL',
+              errorParams: {
+                purchaseIndex: evalResult.purchaseIndex,
+                requiredLevel: evalResult.requiredLevel,
+                currentLevel: playerLevel,
+              },
+            }
+          : {
+              success: false,
+              error: `Insufficient coins: chunk expansion #${evalResult.purchaseIndex} costs ${evalResult.cost} Coins (current balance: ${mockState.economy.focusCoins})`,
+              errorCode: 'CIV_INSUFFICIENT_EXPAND_COINS',
+              errorParams: {
+                purchaseIndex: evalResult.purchaseIndex,
+                cost: evalResult.cost,
+                balance: mockState.economy.focusCoins,
+              },
+            };
       }
 
       const expansion = mockGridMap.expandChunk(payload.origin);
@@ -1552,6 +1767,8 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         return {
           success: false,
           error: `Land expansion failed: ${expansion.reason || 'cannot expand chunk'}`,
+          errorCode: 'CIV_LAND_EXPANSION_FAILED',
+          errorParams: { reason: expansion.reason || 'cannot expand chunk' },
         };
       }
 
@@ -1582,6 +1799,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         return {
           success: false,
           error: "SET_LANGUAGE requires valid language ('en' | 'vi').",
+          errorCode: 'INVALID_LANGUAGE',
         };
       }
       const nextSettings: UserSettings = {
@@ -1600,6 +1818,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         return {
           success: false,
           error: 'SET_CHIME_ENABLED requires boolean enabled flag.',
+          errorCode: 'INVALID_CHIME_FLAG',
         };
       }
       const nextSettings: UserSettings = {
@@ -1641,7 +1860,12 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         ? getTrackById(payload.trackId, mockMusicCatalog)
         : getTrackById(mockMusicState.currentTrackId, mockMusicCatalog) ?? mockMusicCatalog[0];
       if (!targetTrack) {
-        return { success: false, error: `Track '${payload?.trackId}' not found.` };
+        return {
+          success: false,
+          error: `Track '${payload?.trackId}' was not found in the Lofi music catalog.`,
+          errorCode: 'MUSIC_TRACK_NOT_FOUND',
+          errorParams: payload?.trackId ? { trackId: payload.trackId } : undefined,
+        };
       }
       const resumePos =
         (!payload?.trackId || payload.trackId === mockMusicState.currentTrackId) &&
@@ -1768,6 +1992,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         return {
           success: false,
           error: 'SET_MUSIC_PLAYER_EXPANDED requires boolean expanded flag.',
+          errorCode: 'INVALID_MUSIC_PLAYER_EXPANDED_FLAG',
         };
       }
       const prevSettings: UserSettings = mockState.settings ?? {
@@ -1837,6 +2062,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
           success: false,
           error: `Unknown quest "${questId}".`,
           errorCode: 'UNKNOWN_QUEST' satisfies QuestErrorCode,
+          errorParams: { questId },
         };
       }
       const def = getQuestDefinition(period, questId);
@@ -1845,6 +2071,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
           success: false,
           error: `Quest "${questId}" does not belong to period ${period}.`,
           errorCode: 'QUEST_PERIOD_MISMATCH' satisfies QuestErrorCode,
+          errorParams: { questId, period },
         };
       }
 
@@ -1871,6 +2098,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
             success: false,
             error: `Quest "${questId}" reward has already been claimed.`,
             errorCode: 'QUEST_ALREADY_CLAIMED' satisfies QuestErrorCode,
+            errorParams: { questId },
           };
         }
 
@@ -1879,6 +2107,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
             success: false,
             error: `Quest "${questId}" reward expired after period reset.`,
             errorCode: 'QUEST_EXPIRED' satisfies QuestErrorCode,
+            errorParams: { questId },
           };
         }
 
@@ -1888,6 +2117,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
           success: false,
           error: `Quest "${questId}" is not completed yet (${progress}/${target}).`,
           errorCode: 'QUEST_NOT_COMPLETED' satisfies QuestErrorCode,
+          errorParams: { questId, progress, target },
         };
       }
 

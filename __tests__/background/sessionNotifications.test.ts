@@ -111,6 +111,7 @@ class StubOffscreen implements IOffscreenAdapter {
 async function createHarness(options?: {
   throwOnNotification?: boolean;
   throwOnMusicHook?: boolean;
+  coinBonusRates?: number[];
 }) {
   const testCatalog = createTestCatalog();
   const adapter = new MemoryStorageAdapter();
@@ -139,7 +140,12 @@ async function createHarness(options?: {
     notifications,
     badge,
     blocking,
-    () => [],
+    () =>
+      (options?.coinBonusRates ?? []).map((rate, i) => ({
+        id: `test:bonus:${i}`,
+        source: 'BUILDING' as const,
+        rate,
+      })),
     async (event) => {
       if (options?.throwOnMusicHook) {
         throw new Error('Simulated catastrophic music hook error');
@@ -384,4 +390,143 @@ test('Notifications 10: Respects notificationsEnabled=false while soundEffects c
   );
   assert.equal(played, true);
   assert.equal(chimeCalls, 1);
+});
+
+test('Notifications 11 (Stage 6): All 7 dispatch paths localize EN & VI with half-up 2-decimal Coin formatting (e.g. 7.875 -> 7.88)', async () => {
+  async function collectAllSevenPaths(language: 'en' | 'vi') {
+    const { storage, profile, notifications, sessionCoordinator } = await createHarness({
+      coinBonusRates: [0.05], // +5% CoinBonus => 5m Countdown = 7.875 Coins -> formatted 7.88
+    });
+    await storage.updateSettings({ language, notificationsEnabled: true });
+
+    const sent: Array<{ id: string; title: string; message: string }> = [];
+    const origCreate = notifications.create.bind(notifications);
+    notifications.create = async (id, opts) => {
+      sent.push({ id, title: opts.title, message: opts.message });
+      return origCreate(id, opts);
+    };
+
+    // Path 1: COUNTDOWN complete (5m * 1.5 * 1.0 * 1.05 = 7.875 Coins -> 7.88, 25 XP)
+    await sessionCoordinator.startSession('COUNTDOWN', 5, profile.id);
+    await sessionCoordinator.completeCountdown();
+
+    // Path 2: STOPWATCH >= 5m finish (5m * 1.0 * 1.0 * 1.05 = 5.25 Coins, 15 XP)
+    await sessionCoordinator.startSession('STOPWATCH', 0, profile.id);
+    const nowSw = Date.now();
+    await storage.updateCurrentSession((s) =>
+      s ? { ...s, startedAt: nowSw - 5 * 60 * 1000, lastCheckpointAt: nowSw - 60 * 1000 } : s
+    );
+    await sessionCoordinator.finishStopwatch();
+
+    // Paths 3, 4, 5: POMODORO_COUNTDOWN Short Break -> Break Ended -> Long Break -> 100% Complete
+    const pCd = await sessionCoordinator.startSession('POMODORO_COUNTDOWN', 25, profile.id, {
+      focusDurationMinutes: 25,
+      focusIntervalDurationMinutes: 25,
+      shortBreakDurationMinutes: 5,
+      longBreakDurationMinutes: 15,
+      focusIntervalsPerCycle: 2,
+      targetFocusSessions: 2,
+      numberOfCycles: 2,
+    });
+    const cdF1 = buildPomodoroStageAlarmName(pCd.id, 1, 'FOCUS', pCd.pomodoroState!.phaseStartedAt);
+    const cdSb = (await sessionCoordinator.advancePomodoroStage(cdF1))!;
+    const cdSbAlarm = buildPomodoroStageAlarmName(cdSb.id, 1, 'SHORT_BREAK', cdSb.pomodoroState!.phaseStartedAt);
+    const cdF2 = (await sessionCoordinator.advancePomodoroStage(cdSbAlarm))!;
+    const cdF2Alarm = buildPomodoroStageAlarmName(cdF2.id, 2, 'FOCUS', cdF2.pomodoroState!.phaseStartedAt);
+    const cdLb = (await sessionCoordinator.advancePomodoroStage(cdF2Alarm))!;
+    const cdLbAlarm = buildPomodoroStageAlarmName(cdLb.id, 2, 'LONG_BREAK', cdLb.pomodoroState!.phaseStartedAt);
+    const cdF3 = (await sessionCoordinator.advancePomodoroStage(cdLbAlarm))!;
+    const cdF3Alarm = buildPomodoroStageAlarmName(cdF3.id, 1, 'FOCUS', cdF3.pomodoroState!.phaseStartedAt);
+    const cdSb2 = (await sessionCoordinator.advancePomodoroStage(cdF3Alarm))!;
+    const cdSb2Alarm = buildPomodoroStageAlarmName(cdSb2.id, 1, 'SHORT_BREAK', cdSb2.pomodoroState!.phaseStartedAt);
+    const cdF4 = (await sessionCoordinator.advancePomodoroStage(cdSb2Alarm))!;
+    const cdF4Alarm = buildPomodoroStageAlarmName(cdF4.id, 2, 'FOCUS', cdF4.pomodoroState!.phaseStartedAt);
+    await sessionCoordinator.advancePomodoroStage(cdF4Alarm);
+
+    // Paths 6 & 7: POMODORO_STOPWATCH break (accumulated decimal Coins) + finishStopwatch
+    const pSw = await sessionCoordinator.startSession('POMODORO_STOPWATCH', 0, profile.id, {
+      focusDurationMinutes: 5,
+      focusIntervalDurationMinutes: 5,
+      shortBreakDurationMinutes: 3,
+      longBreakDurationMinutes: 10,
+      focusIntervalsPerCycle: 2,
+      targetFocusSessions: 2,
+      numberOfCycles: 1,
+    });
+    const swF1 = buildPomodoroStageAlarmName(pSw.id, 1, 'FOCUS', pSw.pomodoroState!.phaseStartedAt);
+    const swSb = (await sessionCoordinator.advancePomodoroStage(swF1))!;
+    assert.ok(swSb);
+    await sessionCoordinator.finishStopwatch();
+
+    return sent;
+  }
+
+  const enSent = await collectAllSevenPaths('en');
+  const viSent = await collectAllSevenPaths('vi');
+
+  // Expect 1 (CD) + 1 (SW) + 7 (Pomo CD stages/finish: F1->SB, SB->F2, F2->LB, LB->F3, F3->SB, SB->F4, F4->Complete) + 2 (Pomo SW break + finish) = 11 notifications
+  assert.equal(enSent.length, 11);
+  assert.equal(viSent.length, 11);
+
+  // Path 1: COUNTDOWN with +5% CoinBonus (7.875 -> 7.88)
+  assert.equal(enSent[0].title, 'Focus Quest — Mission Complete!');
+  assert.ok(enSent[0].message.includes('7.88 Coins & 25 XP'), `Got: ${enSent[0].message}`);
+  assert.equal(enSent[0].message.includes('7.875'), false);
+
+  assert.equal(viSent[0].title, 'Focus Quest — Hoàn thành Phiên!');
+  assert.ok(viSent[0].message.includes('7.88 Coin & 25 XP'), `Got: ${viSent[0].message}`);
+  assert.equal(viSent[0].message.includes('7.875'), false);
+
+  // Path 2: STOPWATCH
+  assert.equal(enSent[1].title, 'Focus Quest — Mission Complete!');
+  assert.ok(enSent[1].message.includes('5.25 Coins & 15 XP'), `Got: ${enSent[1].message}`);
+  assert.equal(viSent[1].title, 'Focus Quest — Hoàn thành Phiên!');
+  assert.ok(viSent[1].message.includes('5.25 Coin & 15 XP'), `Got: ${viSent[1].message}`);
+
+  // Path 3: POMODORO_COUNTDOWN Short Break
+  assert.equal(enSent[2].title, 'Short Break Time!');
+  assert.ok(enSent[2].message.includes('5-minute break'));
+  assert.equal(viSent[2].title, 'Giờ Nghỉ Ngắn!');
+  assert.ok(viSent[2].message.includes('5 phút'));
+
+  // Path 4: POMODORO Break Ended
+  assert.equal(enSent[3].title, 'Break Ended!');
+  assert.ok(enSent[3].message.includes('interval 2 of Cycle 1'));
+  assert.equal(viSent[3].title, 'Hết Giờ Nghỉ!');
+  assert.ok(viSent[3].message.includes('pha 2 của Chu kỳ 1'));
+
+  // Long Break (part of break transition dispatch)
+  assert.equal(enSent[4].title, 'Long Break Time!');
+  assert.ok(enSent[4].message.includes('15-minute break'));
+  assert.equal(viSent[4].title, 'Giờ Nghỉ Dài!');
+  assert.ok(viSent[4].message.includes('15 phút'));
+
+  // Path 5: POMODORO_COUNTDOWN 100% completion (100m * 1.5 * 1.6 * 1.05 = 252 Coins, 800 XP)
+  assert.equal(enSent[8].title, 'Focus Quest — Mission Complete!');
+  assert.ok(enSent[8].message.includes('100-min Pomodoro'), `Got: ${enSent[8].message}`);
+  assert.ok(enSent[8].message.includes('252 Coins & 800 XP'), `Got: ${enSent[8].message}`);
+  assert.equal(viSent[8].title, 'Focus Quest — Hoàn thành Phiên!');
+  assert.ok(viSent[8].message.includes('Pomodoro 100 phút'), `Got: ${viSent[8].message}`);
+  assert.ok(viSent[8].message.includes('252 Coin & 800 XP'), `Got: ${viSent[8].message}`);
+
+  // Path 6: POMODORO_STOPWATCH break with accumulated Coins/XP (5m * 1.0 * 1.0 * 1.05 = 5.25 Coins, 15 XP)
+  assert.equal(enSent[9].title, 'Short Break Time!');
+  assert.ok(enSent[9].message.includes('Accumulated: 5.25 Coins & 15 XP'), `Got: ${enSent[9].message}`);
+  assert.equal(viSent[9].title, 'Giờ Nghỉ Ngắn!');
+  assert.ok(viSent[9].message.includes('Tích lũy: 5.25 Coin & 15 XP'), `Got: ${viSent[9].message}`);
+
+  // Path 7: POMODORO_STOPWATCH finishStopwatch (same interval completed -> 5.25 Coins, 15 XP)
+  assert.equal(enSent[10].title, 'Focus Quest — Mission Complete!');
+  assert.ok(enSent[10].message.includes('1 Pomodoro focus interval(s) (5 mins)'));
+  assert.ok(enSent[10].message.includes('5.25 Coins & 15 XP'), `Got: ${enSent[10].message}`);
+  assert.equal(viSent[10].title, 'Focus Quest — Hoàn thành Phiên!');
+  assert.ok(viSent[10].message.includes('1 pha Pomodoro (5 phút)'));
+  assert.ok(viSent[10].message.includes('5.25 Coin & 15 XP'), `Got: ${viSent[10].message}`);
+
+  // Verify notificationsEnabled=false mutes notifications for VI too
+  const mutedVi = await createHarness();
+  await mutedVi.storage.updateSettings({ language: 'vi', notificationsEnabled: false });
+  await mutedVi.sessionCoordinator.startSession('COUNTDOWN', 5, mutedVi.profile.id);
+  await mutedVi.sessionCoordinator.completeCountdown();
+  assert.equal(mutedVi.notifications.dispatchCount, 0);
 });

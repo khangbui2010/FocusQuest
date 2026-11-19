@@ -96,6 +96,9 @@ function renderTimer(session: SessionSnapshot, locale: SupportedLocale = 'en'): 
   )
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/<[^>]+>/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&#x27;/g, "'")
+    .replace(/&quot;/g, '"')
     .replace(/\s+/g, ' ');
 }
 
@@ -301,4 +304,73 @@ test('UX-2 Running Live Reward: POMODORO_COUNTDOWN shows Projected Reward / Thư
 
   // Key parity check
   assert.deepStrictEqual(Object.keys(VI_MESSAGES).sort(), Object.keys(EN_MESSAGES).sort());
+});
+
+test('Backlog 4a Outcome: POMODORO_STOPWATCH INTERRUPTED by EXTENSION_DISABLED or EXTENSION_RELOADED shows +0/+0 and forfeited notice (EN & VI), while BROWSER_CLOSED keeps retained reward', () => {
+  const baseInterrupted: SessionSnapshot = {
+    id: 'sess-psw-ext-int',
+    mode: 'POMODORO_STOPWATCH',
+    profileId: 'profile-study',
+    status: 'INTERRUPTED',
+    targetMinutes: 0,
+    lockedMultiplier: 1.0,
+    startedAt: 1700000000000,
+    currentPauseStartedAt: null,
+    totalPauseMs: 0,
+    pauseCount: 0,
+    pauseHistory: [],
+    lastHeartbeatAt: 1700002100000,
+    completedAt: 1700002100000,
+    rewardProcessed: true,
+    lastKnownValidFocusMinutes: 35,
+    pomodoroConfig: DEFAULT_POMODORO_CONFIG,
+    pomodoroState: {
+      currentPhase: 'FOCUS',
+      currentInterval: 2,
+      currentCycle: 1,
+      completedFocusCount: 1,
+      phaseStartedAt: 1700001500000,
+      phaseTargetDurationMinutes: 25,
+      phaseTotalPauseMs: 0,
+      totalCompletedFocusMinutes: 25,
+      accumulatedCoins: 25,
+      accumulatedXp: 75,
+    },
+  };
+
+  for (const reason of ['EXTENSION_DISABLED', 'EXTENSION_RELOADED'] as const) {
+    const forfeitedSession: SessionSnapshot = {
+      ...baseInterrupted,
+      interruptedReason: reason,
+    };
+
+    const enText = renderTimer(forfeitedSession, 'en');
+    assert.ok(enText.includes('1 (25m)'), `Expected completed interval summary in EN (${reason}): ${enText}`);
+    assert.ok(enText.includes('+0') && !enText.includes('+25') && !enText.includes('+75'),
+      `Must display 0 rewards for ${reason} in EN: ${enText}`);
+    assert.ok(enText.includes(EN_MESSAGES['timer.outcome.pomoStopwatchInterruptedForfeitedDesc']));
+    assert.ok(!enText.includes('safely retained in your wallet'));
+
+    const viText = renderTimer(forfeitedSession, 'vi');
+    assert.ok(viText.includes('1 (25m)'), `Expected completed interval summary in VI (${reason}): ${viText}`);
+    assert.ok(viText.includes('+0') && !viText.includes('+25') && !viText.includes('+75'),
+      `Must display 0 rewards for ${reason} in VI: ${viText}`);
+    assert.ok(viText.includes(VI_MESSAGES['timer.outcome.pomoStopwatchInterruptedForfeitedDesc']));
+    assert.ok(!viText.includes('được lưu an toàn vào ví'));
+  }
+
+  // Browser close with completed focus intervals still retains accumulated rewards
+  const browserClosedSession: SessionSnapshot = {
+    ...baseInterrupted,
+    interruptedReason: 'BROWSER_CLOSED',
+  };
+  const bcEn = renderTimer(browserClosedSession, 'en');
+  assert.ok(bcEn.includes('+25') && bcEn.includes('+75'));
+  assert.ok(bcEn.includes('safely retained in your wallet'));
+  assert.ok(!bcEn.includes(EN_MESSAGES['timer.outcome.pomoStopwatchInterruptedForfeitedDesc']));
+
+  const bcVi = renderTimer(browserClosedSession, 'vi');
+  assert.ok(bcVi.includes('+25') && bcVi.includes('+75'));
+  assert.ok(bcVi.includes('được lưu an toàn vào ví'));
+  assert.ok(!bcVi.includes(VI_MESSAGES['timer.outcome.pomoStopwatchInterruptedForfeitedDesc']));
 });
