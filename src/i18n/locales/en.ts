@@ -246,9 +246,7 @@ export const EN_MESSAGES = {
   'timer.actions.endSessionShort': 'End Session',
 
   'timer.modal.giveUpTitle': 'Give up this focus session?',
-  'timer.modal.giveUpBodyBefore': 'If you stop now, this session will be marked as abandoned.',
-  'timer.modal.giveUpBodyZero': '0 Coins and 0 XP',
-  'timer.modal.giveUpBodyAfter': 'will be awarded. Your actual elapsed focus minutes will be saved to your daily stats.',
+  'timer.modal.giveUpBody': 'If you stop now, this session will be marked as abandoned and no rewards will be earned. Your actual elapsed focus minutes will still be saved to your stats.',
   'timer.modal.keepFocusing': 'Keep Focusing',
   'timer.modal.confirmGiveUp': 'Give Up',
   'timer.modal.finishTitle': 'Finish this session?',

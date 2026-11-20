@@ -956,9 +956,7 @@ export const TimerView: React.FC<TimerViewProps> = ({
                 </h3>
               </div>
               <p className="text-xs text-slate-600 dark:text-slate-300 mb-5 leading-relaxed">
-                {t('timer.modal.giveUpBodyBefore')}{' '}
-                <strong>{t('timer.modal.giveUpBodyZero')}</strong>{' '}
-                {t('timer.modal.giveUpBodyAfter')}
+                {t('timer.modal.giveUpBody')}
               </p>
               <div className="flex items-center justify-end gap-2">
                 <button

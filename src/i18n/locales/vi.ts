@@ -248,9 +248,7 @@ export const VI_MESSAGES: Record<TranslationKey, string> = {
   'timer.actions.endSessionShort': 'Kết thúc',
 
   'timer.modal.giveUpTitle': 'Bỏ cuộc phiên tập trung này?',
-  'timer.modal.giveUpBodyBefore': 'Nếu dừng ngay bây giờ, phiên này sẽ bị đánh dấu là bỏ dở.',
-  'timer.modal.giveUpBodyZero': '0 Coin và 0 XP',
-  'timer.modal.giveUpBodyAfter': 'sẽ được cộng. Số phút tập trung thực tế của bạn vẫn được lưu vào thống kê ngày.',
+  'timer.modal.giveUpBody': 'Nếu dừng ngay bây giờ, phiên này sẽ bị đánh dấu là bỏ dở và không có phần thưởng nào được nhận. Số phút tập trung thực tế của bạn vẫn được lưu vào thống kê.',
   'timer.modal.keepFocusing': 'Tiếp tục Tập trung',
   'timer.modal.confirmGiveUp': 'Bỏ cuộc',
   'timer.modal.finishTitle': 'Kết thúc phiên này?',
