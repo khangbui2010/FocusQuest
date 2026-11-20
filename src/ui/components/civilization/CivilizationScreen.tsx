@@ -31,6 +31,8 @@ import {
   detectNewlyAddedChunks,
   prefersReducedMotion,
 } from './expansionReveal.ts';
+
+const EXPANSION_CINEMATIC_GRACE_MS = 900;
 import { useTranslation } from '../../../i18n/I18nContext.tsx';
 import {
   localizeErrorMessage,
@@ -72,11 +74,14 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
     useState<ActiveExpansionReveal | null>(null);
   const [unrevealedChunkOrigin, setUnrevealedChunkOrigin] = useState<GridCoordinate | null>(null);
   const [expansionAnnouncement, setExpansionAnnouncement] = useState<string>('');
+  const [isCinematicWaiting, setIsCinematicWaiting] = useState<boolean>(false);
+  const [isTerrainUpdating, setIsTerrainUpdating] = useState<boolean>(false);
 
   const knownChunkOriginsRef = useRef<GridCoordinate[] | null>(null);
   const revealSequenceIdRef = useRef<number>(0);
   const impactTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const completeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cinematicGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearRevealTimers = useCallback(() => {
     if (impactTimerRef.current !== null) {
@@ -92,6 +97,9 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
   useEffect(() => {
     return () => {
       clearRevealTimers();
+      if (cinematicGraceTimerRef.current !== null) {
+        clearTimeout(cinematicGraceTimerRef.current);
+      }
     };
   }, [clearRevealTimers]);
 
@@ -195,7 +203,10 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
       if (inspectedBuilding) {
         setInspectedBuilding(null);
       } else if (selectedExpansionOrigin) {
-        setSelectedExpansionOrigin(null);
+        if (!isCinematicWaiting) {
+          setSelectedExpansionOrigin(null);
+          setIsCinematicWaiting(false);
+        }
       } else if (isExpansionMode) {
         setIsExpansionMode(false);
       } else if (isCatalogOpen) {
@@ -248,11 +259,15 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
     setInspectedBuilding(null);
     setPlacementDef(null);
     setSelectedExpansionOrigin(null);
+    setIsCinematicWaiting(false);
+    setIsTerrainUpdating(false);
     setIsExpansionMode((prev) => !prev);
   };
 
   const handleCancelExpansionMode = () => {
     setSelectedExpansionOrigin(null);
+    setIsCinematicWaiting(false);
+    setIsTerrainUpdating(false);
     setIsExpansionMode(false);
   };
 
@@ -316,19 +331,34 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
     }
   };
 
-  const handleConfirmExpandLand = async (origin: GridCoordinate) => {
-    if (isSubmitting) return;
-    setIsSubmitting(true);
+  const handleSelectExpansionSlot = (origin: GridCoordinate) => {
     setErrorMsg(null);
+    setIsCinematicWaiting(true);
+    setSelectedExpansionOrigin(origin);
+  };
+
+  const handleCinematicArrived = useCallback(() => {
+    setIsCinematicWaiting(false);
+  }, []);
+
+  const handleConfirmExpandLand = async (origin: GridCoordinate) => {
+    if (isSubmitting || isTerrainUpdating) return;
+    setIsSubmitting(true);
+    setIsTerrainUpdating(true);
+    setErrorMsg(null);
+    let committed = false;
     try {
       const res = await expandLandClient({ origin });
       if (res.success && res.data) {
+        committed = true;
         setCivState(res.data.civilizationState);
         setEconomy(res.data.economy);
         setSelectedExpansionOrigin(null);
+        setIsTerrainUpdating(false);
         setIsExpansionMode(false);
         await onStateMutated?.();
       } else {
+        setIsTerrainUpdating(false);
         setErrorMsg({
           message: res.error || 'Could not expand territory.',
           code: res.errorCode ?? 'CIV_EXPAND_REQUEST_FAILED',
@@ -336,8 +366,17 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
         });
       }
     } catch (err) {
+      setIsTerrainUpdating(false);
       setErrorMsg(toUiErrorPayload(err, 'CIV_EXPAND_REQUEST_FAILED', 'Expansion request failed.'));
     } finally {
+      if (committed) {
+        if (cinematicGraceTimerRef.current !== null) {
+          clearTimeout(cinematicGraceTimerRef.current);
+        }
+        cinematicGraceTimerRef.current = setTimeout(() => {
+          cinematicGraceTimerRef.current = null;
+        }, EXPANSION_CINEMATIC_GRACE_MS);
+      }
       setIsSubmitting(false);
     }
   };
@@ -396,13 +435,12 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
           isSubmitting={isSubmitting}
           isExpansionMode={isExpansionMode}
           selectedExpansionOrigin={selectedExpansionOrigin}
-          onSelectExpansionSlot={(origin) => {
-            setErrorMsg(null);
-            setSelectedExpansionOrigin(origin);
-          }}
+          onSelectExpansionSlot={handleSelectExpansionSlot}
           onInvalidExpansionClick={() => setErrorMsg({ message: t('civ.expand.onlyAdjacentHint') })}
           activeExpansionReveal={activeExpansionReveal}
           unrevealedChunkOrigin={unrevealedChunkOrigin}
+          expansionCommitted={false}
+          onCinematicArrived={handleCinematicArrived}
         />
       )}
 
@@ -432,13 +470,16 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
       />
 
       <LandExpansionModal
-        isOpen={isExpansionMode && Boolean(selectedExpansionOrigin)}
+        isOpen={isExpansionMode && Boolean(selectedExpansionOrigin) && !isCinematicWaiting}
         selectedOrigin={selectedExpansionOrigin}
         chunksCount={chunksCount}
         playerLevel={playerLevel}
         playerCoins={economy.focusCoins}
         onConfirm={handleConfirmExpandLand}
-        onClose={() => setSelectedExpansionOrigin(null)}
+        onClose={() => {
+          setSelectedExpansionOrigin(null);
+          setIsCinematicWaiting(false);
+        }}
         isSubmitting={isSubmitting}
       />
     </div>
