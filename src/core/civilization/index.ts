@@ -12,3 +12,5 @@ export * from './buildingCatalog.ts';
 export * from './civilizationState.ts';
 export * from './civilizationBonusHelper.ts';
 export * from './landExpansion.ts';
+export * from './buildingUpgrade.ts';
+

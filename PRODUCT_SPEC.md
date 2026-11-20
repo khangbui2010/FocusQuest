@@ -1,9 +1,9 @@
 # Focus Quest — Product Specification
 
-**Document Version:** 1.5.0-synced  
+**Document Version:** 1.6.0-synced  
 **Target Release:** MVP v1.0  
 **Role:** Senior Product Architect & Product Manager  
-**Status:** Formal Product Specification (Synced through Milestone UX-5 & Milestone 5B.5 Complete — Stage 6+7)  
+**Status:** Formal Product Specification (Synced through Milestone 5B.5 Closed, UX-1..UX-6 Approved & Milestone 5C — Stage 5C-1 Building Upgrades)  
 
 ---
 
@@ -139,7 +139,13 @@ Sản phẩm áp dụng triết lý **Positive Reinforcement (Khen thưởng tí
   - **Zero Passive Income:** Không có sản xuất thụ động, không có idle production. Coins chỉ được tạo ra khi người dùng hoàn thành phiên Focus thực tế.
   - **Lưới bản đồ & Mở rộng đất:** Khởi đầu `8 × 8` ô (`64` ô, gồm 4 chunks `4 × 4`). Người chơi mở rộng từng chunk `4 × 4` (`+16` ô) liền kề biên giới theo danh sách ô khả dụng động (`getAvailableExpansionSlots`), hỗ trợ tọa độ âm. Chi phí chunk mới thứ `k`: `cost(k) = round(60 × prod(i = 1..k-1) min(1.5, 1.25 + 0.01 × (i - 1)))` (`60, 75, 95, ...`) và yêu cầu `Player Level >= k + 2` (`Lv. 3, 4, 5, ...`).
   - **Cảnh quan & Rừng (Lớp hiển thị UI thuần):** Vùng đất đã mở hiển thị cỏ, mảng đất, đá rêu, mầm/nấm và bụi thưa; vùng chưa mở xung quanh hiển thị rừng tối (`40%` lớp phủ tối) với các cụm tán lá `2×2`, chữ thập `3×3`, cây `1×2` và `1×1` sinh xác định theo chunk `4×4`, kèm animation rìu chém rừng + rung nhẹ sau khi commit mở rộng đất. Cảnh quan không lưu dữ liệu game và không chặn đặt công trình.
-  - **3 Nhóm công trình:** `DECORATIVE` (thẩm mỹ), `FOCUS_SUPPORT` (mở khóa thống kê/tính năng), `ECONOMY_EFFECT` (thưởng CoinBonus cộng dồn cho phiên Focus). Nút nâng cấp công trình hiện khóa ở `"Milestone 5C"`.
+  - **3 Nhóm công trình & Quy tắc Nâng cấp (`Milestone 5C-1`):**
+    - `DECORATIVE` (*Campfire*, *Ancient Totem*) và `FOCUS_SUPPORT` (*Meditation Cave*, *Elder's Hut*): giữ nguyên hiệu ứng cố định, **không nâng cấp**.
+    - `ECONOMY_EFFECT` (*Foraging Post* `+2%/cấp`, *Primitive Granary* `+3%/cấp`): hỗ trợ nâng cấp tới `maxLevel = 5` thông qua `UPGRADE_BUILDING`, nhân tỷ lệ `CoinBonus = rate × level` (vẫn chỉ áp dụng cho Coins khi hoàn thành phiên Focus; XP và Quests hoàn toàn không bị ảnh hưởng).
+    - **Công thức phí & Level gate nâng cấp (`L → L+1`):** Chi phí `round(baseCost × upgradeCostMultiplier^(L - 1))`; yêu cầu `Player Level >= unlockRequirements.minPlayerLevel + L`.
+    - **Giới hạn xây dựng — Build Limit (`MAX_ECONOMY_EFFECT_BUILDINGS = 4` mỗi loại):** Tối đa **4** công trình cho **mỗi loại** thuộc nhóm `ECONOMY_EFFECT` hoạt động đồng thời trên bản đồ (`Foraging Post` tối đa 4, `Primitive Granary` tối đa 4; trần `CoinBonus` lý thuyết Thời đại Đồ Đá: `4 × +10% + 4 × +15% = +100%`; phá dỡ công trình giải phóng ngay 1 slot của đúng loại đó). Không giới hạn số công trình `DECORATIVE` hay `FOCUS_SUPPORT`.
+    - **Hoàn tiền khi Phá dỡ (`50%`):** Phá dỡ bất kỳ công trình nào hoàn trả nguyên tử **`50%`** (`BUILDING_DEMOLISH_REFUND_RATE = 0.5`) tổng số Focus Coins đã đầu tư (`baseCost + tổng phí nâng cấp 1..level-1`) theo độ chính xác IEEE-754 đầy đủ (`15 × 0.5 = 7.5`, UI làm tròn half-up tối đa 2 chữ số thập phân).
+    - Chuyển đổi Kỷ nguyên (`BRONZE_AGE`) thuộc **Giai đoạn 5C-2**; nút mở rộng Era chưa kích hoạt.
 
 ---
 
@@ -193,13 +199,13 @@ Sản phẩm áp dụng triết lý **Positive Reinforcement (Khen thưởng tí
 
 ## 12. Phong cách & Kiến trúc Giao diện (UI Architecture)
 - **Công nghệ UI:** **React 19 + Tailwind CSS 4** cho Popup (`index.html`), Blocked Page (`blocked.html` + module `blocked.js` tuân thủ CSP MV3) và Chrome `_locales` (`en`, `vi`).
-- **Điều hướng & Song ngữ:** Thanh điều hướng đáy 5 tab cố định (`Quests | Focus | Map | Awards | Stats`), mặc định mở màn hình bản đồ `Map` ở giữa; song ngữ 100% EN/VI trên UI (`533` khóa parity), `98` mã lỗi có cấu trúc (`AppError` / `errorTranslator.ts`), `RewardHelpModal` đọc động công thức/`CoinBonus`/settlement/precision, thông báo Chrome, và trang chặn `blocked.html`. Tab `Quests` (Manual Claim, huy hiệu chưa nhận) và `Stats` (Day/Month/Year + `Focus Streak` mở qua `Elder's Hut`) đã hoàn thiện ở Stage 5c; hiện chỉ còn `Awards` ở trạng thái giữ chỗ `"Coming soon"`.
+- **Điều hướng & Song ngữ:** Thanh điều hướng đáy 5 tab cố định (`Quests | Focus | Map | Awards | Stats`), mặc định mở màn hình bản đồ `Map` ở giữa; song ngữ 100% EN/VI trên UI (`545+` khóa parity), `107` mã lỗi có cấu trúc (`AppError` / `errorTranslator.ts`), `RewardHelpModal` đọc động công thức/`CoinBonus`/settlement/precision, thông báo Chrome, và trang chặn `blocked.html`. Tab `Quests` (Manual Claim, huy hiệu chưa nhận) và `Stats` (Day/Month/Year + `Focus Streak` mở qua `Elder's Hut`) đã hoàn thiện ở Stage 5c; hiện chỉ còn `Awards` ở trạng thái giữ chỗ `"Coming soon"`.
 - **Ranh giới:** UI là view/controller mỏng; **tuyệt đối không trực tiếp quyết định thời gian tập trung chính thức hoặc tự trao Coins/XP**.
 
 ---
 
 ## 13. Hệ thống Nhiệm vụ Hàng ngày & Hàng tuần (Quest Engine, Coordinator & UI — Stages 2b, 5c & 6–7)
-> **Trạng thái tích hợp:** Toàn bộ **Milestone 5B.5 (1a → 7)** đã hoàn tất: domain thuần (`src/core/quests/`), Schema v3 (`fq_quests`), quyết toán nguyên tử cùng phiên Focus (`SessionCoordinator` / `StorageManager`), `QuestCoordinator`, `QuestView`, badge `Navbar`, `StatsView` (`Day | Month | Year` + `FOCUS_STAT_UNLOCK`), và Giai đoạn 6–7 (notification EN/VI 7 nhánh, `RewardHelpModal` động, 98 `ErrorCode` chuẩn hóa & nghiệm thu tài liệu). Phần thưởng khi Claim chỉ cộng phẳng Coins/XP vào `ECONOMY` (dùng đúng `calculatePlayerLevel`, **không ghi vào `fq_daily_stats`**). Bước tiếp theo là hệ thống `Awards` thật & Milestone `5C`.
+> **Trạng thái tích hợp:** Toàn bộ **Milestone 5B.5 (1a → 7) ĐÃ ĐÓNG (APPROVED)**: domain thuần (`src/core/quests/`), Schema v3 (`fq_quests`), quyết toán nguyên tử cùng phiên Focus (`SessionCoordinator` / `StorageManager`), `QuestCoordinator`, `QuestView`, badge `Navbar`, `StatsView` (`Day | Month | Year` + `FOCUS_STAT_UNLOCK`), và Giai đoạn 6–7 (notification EN/VI 7 nhánh, `RewardHelpModal` động, 98+ `ErrorCode` chuẩn hóa & nghiệm thu tài liệu). Phần thưởng khi Claim chỉ cộng phẳng Coins/XP vào `ECONOMY` (dùng đúng `calculatePlayerLevel`, **không ghi vào `fq_daily_stats`**). **Milestone 5C — Giai đoạn 5C-1 (`UPGRADE_BUILDING`, hoàn tiền phá dỡ 50%, giới hạn 4 công trình kinh tế)** đã hoàn thiện; bước tiếp theo là `5C-2` (Bronze Age) và hệ thống `Awards` thật.
 
 - **Nhiệm vụ Hàng ngày (Daily Quests — Cap: `40 Coins · 100 XP / ngày`):**
   1. `daily_first_spark` (*First Spark*): Hoàn thành `1` phiên Focus hợp lệ → `10 Coins · 25 XP`.

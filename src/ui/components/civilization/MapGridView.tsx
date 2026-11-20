@@ -925,8 +925,15 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
                     height={height}
                     className="block w-full h-full pointer-events-none drop-shadow-[0_1px_1px_rgba(38,43,68,0.45)]"
                   />
-                  {widthCells > 1 && (
-                    <span className="absolute bottom-0.5 right-0.5 px-1 py-[1px] rounded bg-slate-950/75 text-white text-[8px] font-bold leading-none tabular-nums pointer-events-none">
+                  {(widthCells > 1 || inst.level > 1) && (
+                    <span
+                      data-building-level-badge={inst.level}
+                      className={`absolute bottom-0.5 right-0.5 px-1 py-[1px] rounded text-[8px] font-bold leading-none tabular-nums pointer-events-none ${
+                        inst.level > 1
+                          ? 'bg-slate-950/85 text-amber-300 border border-amber-400/70'
+                          : 'bg-slate-950/75 text-white'
+                      }`}
+                    >
                       Lv.{inst.level}
                       {bonusPercent ? ` +${bonusPercent}%` : ''}
                     </span>
@@ -935,8 +942,11 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
               ) : (
                 <>
                   {renderBuildingIcon(def?.iconIdentifier ?? '', widthCells > 1 ? 'w-4 h-4' : 'w-3 h-3')}
-                  {widthCells > 1 && (
-                    <span className="mt-0.5 text-[8px] font-bold leading-none tabular-nums">
+                  {(widthCells > 1 || inst.level > 1) && (
+                    <span
+                      data-building-level-badge={inst.level}
+                      className="mt-0.5 text-[8px] font-bold leading-none tabular-nums"
+                    >
                       Lv.{inst.level}
                       {bonusPercent ? ` +${bonusPercent}%` : ''}
                     </span>

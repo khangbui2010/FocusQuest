@@ -23,3 +23,9 @@ export const LAND_EXPANSION_RATIO_BASE = 1.25;
 export const LAND_EXPANSION_RATIO_STEP = 0.01;
 export const LAND_EXPANSION_RATIO_CAP = 1.5;
 export const LAND_EXPANSION_LEVEL_OFFSET = 2;
+
+// Milestone 5C-1: Building Upgrade, Demolish Refund & Economy Cap constants
+export const BUILDING_UPGRADE_PLAYER_LEVEL_STEP = 1;
+export const BUILDING_DEMOLISH_REFUND_RATE = 0.5;
+export const MAX_ECONOMY_EFFECT_BUILDINGS = 4;
+

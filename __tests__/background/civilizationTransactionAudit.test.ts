@@ -434,13 +434,15 @@ test('Audit 8: Settlement occurring concurrently with building removal immediate
   // Active bonuses must now be empty
   assert.strictEqual(h.civilizationCoordinator.getActiveCoinBonuses().length, 0);
 
-  // Final economy must be serialized accurately
+  // Final economy must be serialized accurately (Stage 5C-1 includes 50% demolish refund = +30 Coins)
   const econ = await h.storage.getEconomy();
-  // If remove ran first: 240 + (20 * 1.5 * 1.0) = 270.0
-  // If complete ran first: 240 + (20 * 1.5 * 1.02) = 270.6
-  const validBalances = [270.0, 270.6];
+  // Initial 300 -> place Foraging Post (-60) = 240.
+  // Remove refunds 50% (+30 Coins -> 270).
+  // If remove ran first: 240 + 30 + (20 * 1.5 * 1.0) = 300.0
+  // If complete ran first: 240 + (20 * 1.5 * 1.02) + 30 = 300.6
+  const validBalances = [300.0, 300.6];
   const matched = validBalances.some((b) => Math.abs(econ.focusCoins - b) < EPSILON);
-  assert.ok(matched, `Final balance ${econ.focusCoins} must be either 270.0 or 270.6`);
+  assert.ok(matched, `Final balance ${econ.focusCoins} must be either 300.0 or 300.6`);
 });
 
 // -----------------------------------------------------------------------------

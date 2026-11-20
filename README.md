@@ -19,11 +19,12 @@ Focus Quest transforms daily study and focused work into a civilization-building
   - **Building Categories:**
     - `DECORATIVE`: Aesthetic and cultural monuments (Campfire, Ancient Totem).
     - `FOCUS_SUPPORT`: Unlocks statistics and focus insights (Elder's Hut, Meditation Cave).
-    - `ECONOMY_EFFECT`: Grants additive CoinBonus percentages to focus session rewards (+2%, +3% per level).
+    - `ECONOMY_EFFECT`: Grants additive CoinBonus percentages to focus session rewards (+2%, +3% per level, upgradeable up to Lv. 5 via `UPGRADE_BUILDING`, Build Limit: 4 per building type / max Stone Age +100% CoinBonus).
+  - **Building Upgrades & Demolish Refund (`Stage 5C-1`):** Upgrade `ECONOMY_EFFECT` buildings up to Lv. 5 atomically under `StorageMutex` (`cost = round(baseCost × multiplier^level)`, gated by `minPlayerLevel + currentLevel`), while `DECORATIVE` and `FOCUS_SUPPORT` display `Can't Upgrade`; demolishing any building refunds 50% of cumulative Coins invested.
 - **Focus Music Player (MV3 Offscreen Streaming):** Streams curated tracks from the online `FocusQuest-LOFI-archive` catalog through a Chrome Offscreen Document (`Chrome >= 116`), persisting playback position past Chrome's 30s audio idle cutoff with a session-scoped mini-player and expandable bottom sheet.
 - **Map-First 5-Tab Popup & Analytics Engine (`Stage 5c`):** Compact `Quests | Focus | Map | Awards | Stats` bottom navigation (hidden inside active/post-focus sessions until Exit), upgraded `StatsView` (`Day | Month | Year` navigation, custom SVG `StatsBarChart`, and `Focus Streak` gated by `Elder's Hut` `FOCUS_STAT_UNLOCK`), and half-up 2-decimal UI display (`formatRewardAmount`) preserving full IEEE-754 precision in storage.
 - **Daily & Weekly Quests (`Stage 2b` + `Stage 5c`):** Interactive `QuestView` (4 card states, manual claim via `CLAIM_QUEST_REWARD`, unclaimed badge on `Navbar`, live reset countdowns, Quest Streak with zero passive Coins), `QuestCoordinator`, Schema v3 migration, and atomic Session-Quest settlement under `StorageMutex` with rollback compensation.
-- **Full EN/VI Localization & MV3 CSP Compliance (`Stage 6+7`):** `533`-key EN/VI dictionary parity across UI, dynamic `RewardHelpModal`, all 7 Chrome notification paths, `98` structured `ErrorCode`s with technical error sanitization (`errorTranslator.ts`), Chrome `_locales`, and CSP-safe `blocked.html` + `blocked.js`.
+- **Full EN/VI Localization & MV3 CSP Compliance (`Stage 6+7` & `Stage 5C-1`):** `543`-key EN/VI dictionary parity across UI, dynamic `RewardHelpModal`, all 7 Chrome notification paths, `107` structured `ErrorCode`s with technical error sanitization (`errorTranslator.ts`), Chrome `_locales`, and CSP-safe `blocked.html` + `blocked.js`.
 - **Concurrency & Transaction Safety:** All mutations execute inside atomic critical sections guarded by `StorageMutex` with rollback compensation.
 
 ---
@@ -68,7 +69,7 @@ npm install
 # Start local interactive dev preview (Port 3000)
 npm run dev
 
-# Run comprehensive test suite (605/605 tests)
+# Run comprehensive test suite (625/625 tests)
 npm test
 
 # Typecheck and lint codebase
@@ -78,14 +79,14 @@ npm run lint
 npm run build
 ```
 
-> **Verification scope:** Automated tests execute on Node.js (`tsx --test`) using React SSR (`renderToString`), mock 2D canvas context, and mock Chrome adapters for background services. Core runtime flows—the `400×600` popup (5-tab navigation, grid map, dark forest overlay, axe chop reveal animation), `blocked.html` with DNR rules, `chrome.i18n` & `manifest.json`, Offscreen Audio streaming (including Pause > 30s recovery), and remote music catalog fetching—have additionally been manually verified end-to-end in unpacked Chrome (`>= 116`). **Stages 5c (`QuestView`/`StatsView`), UX-5 `<TerrainBitmapCanvas>`, Stage 2b real Service Worker quests, and Stage 6+7 polish still require final visual/runtime verification in unpacked Chrome.**
+> **Verification scope:** Automated tests execute on Node.js (`tsx --test`) using React SSR (`renderToString`), mock 2D canvas context, and mock Chrome adapters for background services. Previously completed milestones (`UX-1`–`UX-6`, `UX-5` terrain canvas, `UX-5.1` persistent camera, `LOFI-1`/`1b`/`2`, and `Milestone 5B.5` stages `1a`–`7` including `2b`, `5c`, `6+7`) have been verified and accepted in unpacked Chrome (`>= 116`). **Stage 5C-1 (`UPGRADE_BUILDING`, 50% demolish refund, per-building Build Limit, `Can't Upgrade` labels)** is verified via automated Node.js tests and still requires final visual/runtime verification in unpacked Chrome.
 
 ---
 
 ## 🗺️ Roadmap
 
+- **Milestone 5C — Stage 5C-2 Era Progression:** Advance civilization progression from the Stone Age into the **Bronze Age** and subsequent historical eras (`Stage 5C-1` Economy building upgrades are implemented and awaiting Chrome acceptance).
 - **Awards System:** Implement achievement tracking and milestones to replace the remaining `Awards` tab `"Coming soon"` placeholder (`Quests`, `Stats`, and Milestone `5B.5` localization/polish are complete).
-- **Milestone 5C — Era Progression & Upgrades:** Enable `UPGRADE_BUILDING` (unlocking the currently locked `"Milestone 5C"` upgrade action) and advance civilization progression into the **Bronze Age** and subsequent historical eras.
 
 ---
 

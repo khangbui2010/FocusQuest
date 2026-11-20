@@ -34,6 +34,7 @@ export type MessageAction =
   | 'GET_CIVILIZATION_STATE'
   | 'PLACE_BUILDING'
   | 'REMOVE_BUILDING'
+  | 'UPGRADE_BUILDING'
   | 'EXPAND_LAND'
   | 'GET_QUEST_STATE'
   | 'CLAIM_QUEST_REWARD'
@@ -93,6 +94,11 @@ export interface RemoveBuildingPayload {
   buildingInstanceId: string;
 }
 
+export interface UpgradeBuildingPayload {
+  buildingId: string;
+  expectedLevel: number;
+}
+
 export interface ExpandLandPayload {
   origin: GridCoordinate;
 }
@@ -149,6 +155,16 @@ export interface PlaceBuildingResponseData {
 export interface RemoveBuildingResponseData {
   removedBuildingId: string;
   civilizationState: CivilizationState;
+  economy?: PlayerEconomy;
+  refundedCoins?: number;
+}
+
+export interface UpgradeBuildingResponseData {
+  civilizationState: CivilizationState;
+  economy: PlayerEconomy;
+  building: BuildingInstance;
+  newLevel: number;
+  cost: number;
 }
 
 export interface ExpandLandResponseData {
@@ -195,6 +211,7 @@ export type ExtensionMessage =
   | { action: 'GET_CIVILIZATION_STATE' }
   | { action: 'PLACE_BUILDING'; payload: PlaceBuildingPayload }
   | { action: 'REMOVE_BUILDING'; payload: RemoveBuildingPayload }
+  | { action: 'UPGRADE_BUILDING'; payload: UpgradeBuildingPayload }
   | { action: 'EXPAND_LAND'; payload: ExpandLandPayload }
   | { action: 'GET_QUEST_STATE' }
   | { action: 'CLAIM_QUEST_REWARD'; payload: ClaimQuestRewardPayload }

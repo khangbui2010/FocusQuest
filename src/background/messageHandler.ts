@@ -395,6 +395,26 @@ export class MessageHandler {
           return { success: true, data: result };
         }
 
+        case 'UPGRADE_BUILDING': {
+          if (
+            !msg.payload ||
+            typeof msg.payload !== 'object' ||
+            typeof msg.payload.buildingId !== 'string' ||
+            !msg.payload.buildingId.trim() ||
+            typeof msg.payload.expectedLevel !== 'number' ||
+            !Number.isInteger(msg.payload.expectedLevel) ||
+            msg.payload.expectedLevel < 1
+          ) {
+            return {
+              success: false,
+              error: 'UPGRADE_BUILDING requires valid buildingId and expectedLevel.',
+              errorCode: 'CIV_INVALID_UPGRADE_PAYLOAD',
+            };
+          }
+          const result = await this.civilizationCoordinator.upgradeBuilding(msg.payload);
+          return { success: true, data: result };
+        }
+
         case 'EXPAND_LAND': {
           if (!msg.payload || typeof msg.payload !== 'object') {
             return {

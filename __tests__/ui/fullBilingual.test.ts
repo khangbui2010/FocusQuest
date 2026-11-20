@@ -127,7 +127,7 @@ test('Stage E UI SSR: RewardHelpModal, StatsView, CivilizationHeader, BuildingCa
   assert.ok(catalogVi.includes('Danh Mục Công Trình'));
   assert.ok(catalogVi.includes('Lửa trại'));
 
-  // BuildingDetailsModal (must keep Milestone 5C invariant in both locales)
+  // BuildingDetailsModal (Stage 5C-1: fixed for Decor/Focus Support, upgradeable for Economy)
   const detailsProps = {
     building: sampleInstance,
     onClose: () => {},
@@ -136,9 +136,30 @@ test('Stage E UI SSR: RewardHelpModal, StatsView, CivilizationHeader, BuildingCa
   const detailsEn = renderWithLocale('en', React.createElement(BuildingDetailsModal, detailsProps));
   const detailsVi = renderWithLocale('vi', React.createElement(BuildingDetailsModal, detailsProps));
   assert.ok(detailsEn.includes('Demolish Building'));
-  assert.ok(detailsEn.includes('Milestone 5C'));
+  assert.ok(detailsEn.includes('Fixed effect · Cannot be upgraded'));
   assert.ok(detailsVi.includes('Phá dỡ Công trình'));
-  assert.ok(detailsVi.includes('Milestone 5C'));
+  assert.ok(detailsVi.includes('Hiệu ứng cố định · Không nâng cấp'));
+
+  const econDetailsProps = {
+    building: {
+      id: 'b_econ',
+      definitionId: 'stone_age_foraging_post',
+      position: { x: 0, y: 0 },
+      level: 1,
+      placedAt: 1700000000000,
+    },
+    playerLevel: 2,
+    playerCoins: 150,
+    onUpgrade: async () => {},
+    onClose: () => {},
+    onRemove: async () => {},
+  };
+  const econEn = renderWithLocale('en', React.createElement(BuildingDetailsModal, econDetailsProps));
+  const econVi = renderWithLocale('vi', React.createElement(BuildingDetailsModal, econDetailsProps));
+  assert.ok(econEn.includes('Upgrade Building'));
+  assert.ok(econEn.includes('+2% → +4% CoinBonus'));
+  assert.ok(econVi.includes('Nâng Cấp Công Trình'));
+  assert.ok(econVi.includes('+2% → +4% CoinBonus'));
 
   // CivilizationScreen loading state
   const screenEn = renderWithLocale('en', React.createElement(CivilizationScreen));
@@ -383,8 +404,15 @@ test('Stage 6 errorTranslator: table-driven EN/VI check across ALL_KNOWN_ERROR_C
     CIV_INSUFFICIENT_BUILDING_COINS: { buildingName: 'Meditation Cave', cost: 120, balance: 30 },
     CIV_CANNOT_PLACE_BUILDING: { reason: 'CELL_OCCUPIED' },
     CIV_GRID_PLACEMENT_FAILED: { reason: 'OUT_OF_BOUNDS' },
+    CIV_ECONOMY_BUILDING_LIMIT_REACHED: { buildingName: 'Foraging Post', limit: 4, currentCount: 4 },
     CIV_BUILDING_NOT_FOUND: { buildingInstanceId: 'bld-404' },
     CIV_BUILDING_REMOVAL_FAILED: { reason: 'NOT_FOUND' },
+    BUILDING_NOT_FOUND: { buildingId: 'bld-404' },
+    BUILDING_MAX_LEVEL: { buildingName: 'Foraging Post', maxLevel: 5 },
+    UPGRADE_PLAYER_LEVEL_REQUIRED: { buildingName: 'Foraging Post', requiredLevel: 3, currentLevel: 2 },
+    BUILDING_LEVEL_MISMATCH: { buildingId: 'bld-1', expectedLevel: 1, currentLevel: 2 },
+    CIV_UPGRADE_NOT_SUPPORTED: { buildingName: 'Campfire' },
+    CIV_UPGRADE_ERA_LOCKED: { buildingName: 'Foraging Post', requiredEra: 'BRONZE_AGE' },
     CIV_INVALID_EXPAND_ORIGIN_GRID: { chunkWidth: 4, chunkHeight: 4 },
     CIV_EXPAND_REQUIRES_LEVEL: { purchaseIndex: 1, requiredLevel: 3, currentLevel: 1 },
     CIV_INSUFFICIENT_EXPAND_COINS: { purchaseIndex: 1, cost: 60, balance: 15 },

@@ -99,9 +99,18 @@ export const ALL_KNOWN_ERROR_CODES: readonly ErrorCode[] = [
   'CIV_INSUFFICIENT_BUILDING_COINS',
   'CIV_CANNOT_PLACE_BUILDING',
   'CIV_GRID_PLACEMENT_FAILED',
+  'CIV_ECONOMY_BUILDING_LIMIT_REACHED',
   'CIV_INVALID_BUILDING_INSTANCE_ID',
   'CIV_BUILDING_NOT_FOUND',
   'CIV_BUILDING_REMOVAL_FAILED',
+  'CIV_INVALID_UPGRADE_PAYLOAD',
+  'CIV_UPGRADE_REQUEST_FAILED',
+  'BUILDING_NOT_FOUND',
+  'BUILDING_MAX_LEVEL',
+  'UPGRADE_PLAYER_LEVEL_REQUIRED',
+  'BUILDING_LEVEL_MISMATCH',
+  'CIV_UPGRADE_NOT_SUPPORTED',
+  'CIV_UPGRADE_ERA_LOCKED',
   'CIV_INVALID_EXPAND_PAYLOAD',
   'CIV_EXPAND_UNSUPPORTED_FIELDS',
   'CIV_INVALID_EXPAND_ORIGIN_TYPE',
@@ -247,6 +256,10 @@ const EXACT_VI_ERROR_MAP: Record<string, string> = {
   'Placement request failed.': 'Yêu cầu đặt công trình thất bại.',
   'Could not remove building.': 'Không thể phá dỡ công trình.',
   'Removal request failed.': 'Yêu cầu phá dỡ công trình thất bại.',
+  'Could not upgrade building.': 'Không thể nâng cấp công trình.',
+  'Upgrade request failed.': 'Yêu cầu nâng cấp công trình thất bại.',
+  'UPGRADE_BUILDING requires valid buildingId and expectedLevel.':
+    'Yêu cầu nâng cấp cần mã công trình và cấp hiện tại hợp lệ.',
   'Could not expand territory.': 'Không thể mở rộng lãnh thổ.',
   'Expansion request failed.': 'Yêu cầu mở rộng lãnh thổ thất bại.',
   'Invalid payload: expected object for PLACE_BUILDING': 'Dữ liệu đặt công trình không hợp lệ.',
@@ -652,6 +665,20 @@ function translateByErrorCode(
       const reason = translatePlacementReason(locale, str('reason', 'Placement rejected'));
       return isVi ? `Đặt công trình trên bản đồ thất bại: ${reason}.` : `Grid placement failed: ${reason}`;
     }
+    case 'CIV_ECONOMY_BUILDING_LIMIT_REACHED': {
+      const limit = str('limit', '4');
+      const current = str('currentCount', limit);
+      const rawName = str('buildingName');
+      const bName = rawName ? resolveBuildingDisplayByRawName(locale, rawName) : '';
+      if (bName) {
+        return isVi
+          ? `Đã đạt giới hạn xây dựng cho "${bName}" (${current}/${limit}).`
+          : `Build Limit reached for "${bName}" (${current}/${limit} placed).`;
+      }
+      return isVi
+        ? `Đã đạt giới hạn xây dựng (${current}/${limit}).`
+        : `Build Limit reached (${current}/${limit} placed).`;
+    }
     case 'CIV_INVALID_BUILDING_INSTANCE_ID':
       return isVi ? 'Thiếu mã công trình cần xóa.' : 'REMOVE_BUILDING requires valid buildingInstanceId.';
     case 'CIV_BUILDING_NOT_FOUND': {
@@ -673,6 +700,57 @@ function translateByErrorCode(
         : reason
           ? `Building removal failed: ${reason}`
           : 'Building removal failed.';
+    }
+    case 'CIV_INVALID_UPGRADE_PAYLOAD':
+      return isVi
+        ? 'Yêu cầu nâng cấp cần mã công trình và cấp hiện tại hợp lệ.'
+        : 'UPGRADE_BUILDING requires valid buildingId and expectedLevel.';
+    case 'CIV_UPGRADE_REQUEST_FAILED':
+      return isVi ? 'Không thể nâng cấp công trình.' : 'Could not upgrade building.';
+    case 'BUILDING_NOT_FOUND': {
+      const id = str('buildingId');
+      return isVi
+        ? id
+          ? `Không tìm thấy công trình "${id}".`
+          : 'Không tìm thấy công trình cần nâng cấp.'
+        : id
+          ? `Building "${id}" not found.`
+          : 'Building not found.';
+    }
+    case 'BUILDING_MAX_LEVEL': {
+      const bName = resolveBuildingDisplayByRawName(locale, str('buildingName', 'Building'));
+      const maxLv = str('maxLevel', '?');
+      return isVi
+        ? `Công trình "${bName}" đã đạt cấp tối đa (Lv. ${maxLv}).`
+        : `Building "${bName}" is already at max level (Lv. ${maxLv}).`;
+    }
+    case 'UPGRADE_PLAYER_LEVEL_REQUIRED': {
+      const bName = resolveBuildingDisplayByRawName(locale, str('buildingName', 'Building'));
+      const req = str('requiredLevel', '?');
+      const cur = str('currentLevel', '?');
+      return isVi
+        ? `Nâng cấp "${bName}" yêu cầu Player Level ${req} (hiện tại: Lv. ${cur}).`
+        : `Upgrading "${bName}" requires Player Level ${req} (current: Lv. ${cur}).`;
+    }
+    case 'BUILDING_LEVEL_MISMATCH': {
+      const exp = str('expectedLevel', '?');
+      const cur = str('currentLevel', '?');
+      return isVi
+        ? `Cấp công trình đã thay đổi (kỳ vọng Lv. ${exp}, hiện tại Lv. ${cur}). Vui lòng thử lại.`
+        : `Building level changed concurrently (expected Lv. ${exp}, current Lv. ${cur}). Please try again.`;
+    }
+    case 'CIV_UPGRADE_NOT_SUPPORTED': {
+      const bName = resolveBuildingDisplayByRawName(locale, str('buildingName', 'Building'));
+      return isVi
+        ? `Công trình "${bName}" giữ nguyên hiệu ứng hiện tại và không thể nâng cấp.`
+        : `Building "${bName}" keeps its fixed effect and cannot be upgraded.`;
+    }
+    case 'CIV_UPGRADE_ERA_LOCKED': {
+      const bName = resolveBuildingDisplayByRawName(locale, str('buildingName', 'Building'));
+      const reqEra = str('requiredEra') ? getLocalizedEraName(locale, str('requiredEra')) : str('requiredEra');
+      return isVi
+        ? `Nâng cấp "${bName}" yêu cầu Thời đại ${reqEra}.`
+        : `Upgrading "${bName}" requires Era ${reqEra || str('requiredEra')}.`;
     }
     case 'CIV_INVALID_EXPAND_PAYLOAD':
       return isVi ? 'Dữ liệu mở rộng đất không hợp lệ.' : 'EXPAND_LAND requires payload object.';

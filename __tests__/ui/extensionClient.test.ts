@@ -1,15 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  DEV_SERVER_MOCK_LIMITS,
   buildSimulatedDailyStats,
+  createInitialMockState,
+  createInitialSimulatedQuestState,
   getDailyStatsClient,
   isChromeExtension,
+  isDevServerMockMode,
   sendExtensionMessage,
 } from '../../src/ui/services/extensionClient.ts';
 import { FullSessionStateResponse } from '../../src/types/messages.ts';
 import { SessionSnapshot } from '../../src/types/session.ts';
 import { FocusProfile } from '../../src/types/profiles.ts';
 import { DailyStatRecord } from '../../src/types/storageSchema.ts';
+import { calculatePlayerLevel } from '../../src/core/economy/levelSystem.ts';
+import { countUnclaimed, rolloverQuestState } from '../../src/core/quests/questEngine.ts';
 import {
   aggregateMonthStats,
   aggregateYearStats,
@@ -361,4 +367,40 @@ test('UI ExtensionClient (Stage 3): GET_DAILY_STATS simulator returns determinis
   assert.equal(year.months[11].focusMinutes, 0, 'Dec 2026 is after 2026-11-17 anchor');
   const prevYear = aggregateYearStats(fixedA, '2025');
   assert.ok(prevYear.totalFocusMinutes > 0, '405-day span must include late 2025 history');
+});
+
+test('UI ExtensionClient (Dev Server Only): max/infinite mock data activates strictly when devServerMode is true', () => {
+  assert.equal(isDevServerMockMode(), false, 'Node test runner must NOT enable dev-server mock overrides');
+
+  const nowMs = Date.UTC(2026, 10, 17, 10, 0, 0);
+  const devState = createInitialMockState(true, nowMs);
+
+  assert.equal(devState.economy.focusCoins, DEV_SERVER_MOCK_LIMITS.focusCoins);
+  assert.equal(devState.economy.totalXP, DEV_SERVER_MOCK_LIMITS.totalXP);
+  assert.equal(devState.economy.level, 9999);
+  assert.equal(devState.economy.level, calculatePlayerLevel(devState.economy.totalXP));
+  assert.equal(devState.lifetimeFocusMinutes, DEV_SERVER_MOCK_LIMITS.lifetimeFocusMinutes);
+  assert.equal(devState.todayStats?.totalFocusMinutes, DEV_SERVER_MOCK_LIMITS.dailyFocusMinutes);
+  assert.equal(devState.todayStats?.completedSessions, DEV_SERVER_MOCK_LIMITS.dailyCompletedSessions);
+  assert.equal(devState.todayStats?.abandonedSessions, 0);
+
+  const devQuests = createInitialSimulatedQuestState(nowMs, true);
+  const rolledQuests = rolloverQuestState(devQuests, nowMs);
+  assert.equal(countUnclaimed(rolledQuests, nowMs), 6);
+  assert.equal(rolledQuests.streak.currentDays, DEV_SERVER_MOCK_LIMITS.questStreakDays);
+  assert.equal(rolledQuests.streak.longestDays, DEV_SERVER_MOCK_LIMITS.questStreakDays);
+
+  const devStats = buildSimulatedDailyStats('2026-11-17', null, true);
+  const devStreak = calculateFocusStreak(devStats, '2026-11-17');
+  assert.equal(devStreak.current, 405);
+  assert.equal(devStreak.longest, 405);
+
+  const devOct = aggregateMonthStats(devStats, '2026-10');
+  assert.equal(devOct.activeDays, devOct.daysInMonth);
+  assert.equal(devOct.completionRate, 1);
+  assert.equal(devOct.peakDay?.focusMinutes, DEV_SERVER_MOCK_LIMITS.dailyFocusMinutes);
+
+  const devNov = aggregateMonthStats(devStats, '2026-11');
+  assert.equal(devNov.activeDays, 17);
+  assert.equal(devNov.completionRate, 1);
 });

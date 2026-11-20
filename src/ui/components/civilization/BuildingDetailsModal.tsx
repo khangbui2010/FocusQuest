@@ -1,10 +1,22 @@
-import React, { useState, useEffect } from 'react';
-import { X, Trash2, MapPin, ArrowUpCircle, AlertTriangle } from 'lucide-react';
-import { BuildingInstance } from '../../../core/civilization/buildingTypes.ts';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  getBuildingDefinition,
-  calculateUpgradeCost,
-} from '../../../core/civilization/buildingCatalog.ts';
+  X,
+  Trash2,
+  MapPin,
+  ArrowUpCircle,
+  AlertTriangle,
+  AlertCircle,
+  CheckCircle2,
+} from 'lucide-react';
+import {
+  BuildingInstance,
+  CivilizationEra,
+} from '../../../core/civilization/buildingTypes.ts';
+import { getBuildingDefinition } from '../../../core/civilization/buildingCatalog.ts';
+import {
+  calculateBuildingDemolishRefund,
+  evaluateBuildingUpgrade,
+} from '../../../core/civilization/buildingUpgrade.ts';
 import { renderBuildingIcon } from './BuildingCatalogPanel.tsx';
 import { PixelSprite, getBuildingSprite } from './spriteRegistry.ts';
 import { formatRewardAmount } from '../../utils/formatters.ts';
@@ -13,11 +25,19 @@ import {
   getLocalizedBuildingName,
 } from '../../utils/buildingI18n.ts';
 import { useTranslation } from '../../../i18n/I18nContext.tsx';
+import { localizeErrorMessage, UiErrorPayload } from '../../../i18n/errorTranslator.ts';
+import { prefersReducedMotion } from './expansionReveal.ts';
 
 export interface BuildingDetailsModalProps {
   building: BuildingInstance | null;
   onClose: () => void;
   onRemove: (instanceId: string) => Promise<void>;
+  onUpgrade?: (instanceId: string, expectedLevel: number) => Promise<void>;
+  playerLevel?: number;
+  playerCoins?: number;
+  currentEra?: CivilizationEra;
+  upgradeError?: UiErrorPayload | null;
+  upgradeSuccessLevel?: number | null;
   isSubmitting?: boolean;
 }
 
@@ -25,13 +45,23 @@ export const BuildingDetailsModal: React.FC<BuildingDetailsModalProps> = ({
   building,
   onClose,
   onRemove,
+  onUpgrade,
+  playerLevel = 1,
+  playerCoins = 0,
+  currentEra = 'STONE_AGE',
+  upgradeError = null,
+  upgradeSuccessLevel = null,
   isSubmitting = false,
 }) => {
   const { locale, t } = useTranslation();
   const [confirmDemolish, setConfirmDemolish] = useState(false);
+  const [inFlightBuildingId, setInFlightBuildingId] = useState<string | null>(null);
+  const inFlightLockRef = useRef<string | null>(null);
 
   useEffect(() => {
     setConfirmDemolish(false);
+    setInFlightBuildingId(null);
+    inFlightLockRef.current = null;
   }, [building?.id]);
 
   if (!building) return null;
@@ -45,13 +75,16 @@ export const BuildingDetailsModal: React.FC<BuildingDetailsModalProps> = ({
       ? 36 / sprite.height
       : 1
     : 1;
-  const name = getLocalizedBuildingName(locale, def ?? building.definitionId, def?.name ?? building.definitionId);
+  const name = getLocalizedBuildingName(
+    locale,
+    def ?? building.definitionId,
+    def?.name ?? building.definitionId
+  );
   const description = def
     ? getLocalizedBuildingDescription(locale, def, def.description)
     : '';
   const maxLevel = def?.maxLevel ?? 1;
   const footprintLabel = def ? `${def.footprint.width}×${def.footprint.height}` : '1×1';
-  const upgradeCost = def ? calculateUpgradeCost(def, building.level) : 0;
   const placedDate = new Date(building.placedAt).toISOString().slice(0, 10);
 
   const coinBonusEffect = def?.effects.find((e) => e.type === 'COIN_BONUS');
@@ -59,6 +92,53 @@ export const BuildingDetailsModal: React.FC<BuildingDetailsModalProps> = ({
     coinBonusEffect && coinBonusEffect.type === 'COIN_BONUS'
       ? formatRewardAmount(coinBonusEffect.rate * building.level * 100)
       : null;
+
+  const upgradeEval = evaluateBuildingUpgrade({
+    instance: building,
+    definition: def,
+    currentEra,
+    playerLevel,
+    playerCoins,
+  });
+
+  const isUpgradeBusy = isSubmitting || inFlightBuildingId === building.id;
+  const canTriggerUpgrade = Boolean(onUpgrade) && upgradeEval.canUpgrade && !isUpgradeBusy;
+  const demolishRefund = calculateBuildingDemolishRefund(def, building.level);
+  const reducedMotion = prefersReducedMotion();
+  const showUpgradeSuccess = upgradeSuccessLevel === building.level;
+
+  const handleUpgradeClick = async () => {
+    if (!onUpgrade || !upgradeEval.canUpgrade || isSubmitting) return;
+    if (inFlightLockRef.current === building.id) return;
+
+    inFlightLockRef.current = building.id;
+    setInFlightBuildingId(building.id);
+    try {
+      await onUpgrade(building.id, building.level);
+    } finally {
+      if (inFlightLockRef.current === building.id) {
+        inFlightLockRef.current = null;
+      }
+      setInFlightBuildingId(null);
+    }
+  };
+
+  let upgradeBtnLabel = t('civ.details.upgradeBtn');
+  if (!upgradeEval.isCategoryUpgradeable) {
+    upgradeBtnLabel = t('civ.details.upgradeFixedBadge');
+  } else if (upgradeEval.reason === 'BUILDING_MAX_LEVEL') {
+    upgradeBtnLabel = t('civ.details.upgradeMaxBadge');
+  } else if (isUpgradeBusy) {
+    upgradeBtnLabel = t('civ.details.upgradingBtn');
+  } else if (upgradeEval.reason === 'PLAYER_LEVEL_REQUIRED') {
+    upgradeBtnLabel = t('civ.details.upgradeNeedLevelShort', {
+      required: upgradeEval.requiredPlayerLevel,
+    });
+  } else if (upgradeEval.reason === 'INSUFFICIENT_COINS') {
+    upgradeBtnLabel = t('civ.catalog.needCoins', {
+      cost: formatRewardAmount(upgradeEval.cost),
+    });
+  }
 
   return (
     <div
@@ -174,30 +254,109 @@ export const BuildingDetailsModal: React.FC<BuildingDetailsModalProps> = ({
             )}
           </div>
 
-          {/* Upgrade Section (Milestone 5C notice, never fake upgrade) */}
-          <div className="p-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
-            <div className="min-w-0">
-              <div className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">
-                {t('civ.details.upgradeTitle')}
+          {/* Upgrade Section (Milestone 5C-1) */}
+          <div
+            data-testid="building-upgrade-section"
+            className={`p-2.5 rounded-xl border space-y-1.5 ${
+              showUpgradeSuccess
+                ? 'bg-emerald-50/80 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-700'
+                : 'bg-slate-50/70 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">
+                  {t('civ.details.upgradeTitle')}
+                </div>
+
+                {!upgradeEval.isCategoryUpgradeable ? (
+                  <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                    {t('civ.details.upgradeNonUpgradeable')}
+                  </div>
+                ) : upgradeEval.reason === 'BUILDING_MAX_LEVEL' ? (
+                  <div className="text-[10px] text-emerald-700 dark:text-emerald-400 font-medium">
+                    {t('civ.details.upgradeMax')}
+                  </div>
+                ) : (
+                  <div className="space-y-0.5 text-[10px] tabular-nums">
+                    <div className="text-slate-600 dark:text-slate-300">
+                      {t('civ.details.upgradeNext', {
+                        level: upgradeEval.nextLevel ?? building.level + 1,
+                        cost: formatRewardAmount(upgradeEval.cost),
+                      })}
+                    </div>
+                    {upgradeEval.nextCoinBonusRate > upgradeEval.currentCoinBonusRate && (
+                      <div className="text-emerald-700 dark:text-emerald-400 font-medium">
+                        {t('civ.details.upgradeBonusPreview', {
+                          current: formatRewardAmount(upgradeEval.currentCoinBonusRate * 100),
+                          next: formatRewardAmount(upgradeEval.nextCoinBonusRate * 100),
+                        })}
+                      </div>
+                    )}
+                    {upgradeEval.reason === 'PLAYER_LEVEL_REQUIRED' && (
+                      <div className="text-amber-600 dark:text-amber-400 font-medium">
+                        {t('civ.details.upgradeNeedLevel', {
+                          required: upgradeEval.requiredPlayerLevel,
+                        })}
+                      </div>
+                    )}
+                    {upgradeEval.reason === 'INSUFFICIENT_COINS' &&
+                      upgradeEval.shortfallCoins > 0 && (
+                        <div className="text-rose-600 dark:text-rose-400 font-medium">
+                          {t('civ.details.upgradeNeedCoins', {
+                            shortfall: formatRewardAmount(upgradeEval.shortfallCoins),
+                          })}
+                        </div>
+                      )}
+                  </div>
+                )}
               </div>
-              <div className="text-[10px] text-slate-500 dark:text-slate-400 tabular-nums">
-                {building.level >= maxLevel
-                  ? t('civ.details.upgradeMax')
-                  : t('civ.details.upgradeNext', {
-                      level: building.level + 1,
-                      cost: formatRewardAmount(upgradeCost),
-                    })}
-              </div>
+
+              <button
+                type="button"
+                data-testid="building-upgrade-btn"
+                disabled={!canTriggerUpgrade}
+                onClick={handleUpgradeClick}
+                className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold rounded-md whitespace-nowrap shrink-0 transition-colors ${
+                  canTriggerUpgrade
+                    ? 'bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-slate-200 dark:border-slate-700 cursor-not-allowed'
+                }`}
+              >
+                <ArrowUpCircle className="w-3.5 h-3.5 shrink-0" />
+                <span>{upgradeBtnLabel}</span>
+              </button>
             </div>
 
-            <button
-              type="button"
-              disabled
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-slate-200 dark:border-slate-700 rounded-md whitespace-nowrap shrink-0 cursor-not-allowed"
-            >
-              <ArrowUpCircle className="w-3.5 h-3.5 shrink-0" />
-              <span>{t('civ.details.upgradeLockedBtn')}</span>
-            </button>
+            {showUpgradeSuccess && (
+              <div
+                data-testid="building-upgrade-success"
+                className={`flex items-center gap-1 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 ${
+                  reducedMotion ? '' : 'animate-pulse'
+                }`}
+              >
+                <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                <span>{t('civ.details.upgradeSuccess', { level: building.level })}</span>
+              </div>
+            )}
+
+            {upgradeError && (
+              <div
+                role="alert"
+                data-testid="building-upgrade-error"
+                className="flex items-start gap-1.5 text-[10px] text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-lg px-2 py-1"
+              >
+                <AlertCircle className="w-3 h-3 shrink-0 mt-0.5" />
+                <span>
+                  {localizeErrorMessage(
+                    locale,
+                    upgradeError.message,
+                    upgradeError.code,
+                    upgradeError.params
+                  )}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Demolish Action */}
@@ -205,7 +364,7 @@ export const BuildingDetailsModal: React.FC<BuildingDetailsModalProps> = ({
             {!confirmDemolish ? (
               <button
                 type="button"
-                disabled={isSubmitting}
+                disabled={isUpgradeBusy}
                 onClick={() => setConfirmDemolish(true)}
                 className="w-full py-2 px-3 inline-flex items-center justify-center gap-1.5 text-xs font-semibold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/30 hover:bg-rose-100 dark:hover:bg-rose-950/50 border border-rose-200 dark:border-rose-900/60 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
               >
@@ -216,12 +375,17 @@ export const BuildingDetailsModal: React.FC<BuildingDetailsModalProps> = ({
               <div className="space-y-2 p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/60">
                 <div className="flex items-start gap-1.5 text-[11px] text-rose-700 dark:text-rose-300">
                   <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                  <span>{t('civ.details.demolishWarning', { name })}</span>
+                  <span>
+                    {t('civ.details.demolishWarning', {
+                      name,
+                      refund: formatRewardAmount(demolishRefund),
+                    })}
+                  </span>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    disabled={isSubmitting}
+                    disabled={isUpgradeBusy}
                     onClick={() => setConfirmDemolish(false)}
                     className="py-1.5 px-3 text-[11px] font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors cursor-pointer"
                   >
@@ -229,11 +393,11 @@ export const BuildingDetailsModal: React.FC<BuildingDetailsModalProps> = ({
                   </button>
                   <button
                     type="button"
-                    disabled={isSubmitting}
+                    disabled={isUpgradeBusy}
                     onClick={() => onRemove(building.id)}
                     className="py-1.5 px-3 text-[11px] font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
                   >
-                    {isSubmitting ? t('civ.details.removingBtn') : t('civ.details.confirmDemolishBtn')}
+                    {isUpgradeBusy ? t('civ.details.removingBtn') : t('civ.details.confirmDemolishBtn')}
                   </button>
                 </div>
               </div>

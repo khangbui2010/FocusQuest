@@ -30,11 +30,19 @@ import {
 } from '../core/civilization/placementValidator.ts';
 import { extractBuildingCoinBonuses } from '../core/civilization/civilizationBonusHelper.ts';
 import {
+  applyBuildingUpgrade,
+  calculateBuildingDemolishRefund,
+  canPlaceAnotherBuildingOfCategory,
+  evaluateBuildingUpgrade,
+} from '../core/civilization/buildingUpgrade.ts';
+import {
   PlaceBuildingPayload,
   RemoveBuildingPayload,
+  UpgradeBuildingPayload,
   ExpandLandPayload,
   PlaceBuildingResponseData,
   RemoveBuildingResponseData,
+  UpgradeBuildingResponseData,
   ExpandLandResponseData,
 } from '../types/messages.ts';
 import { CoinBonus } from '../types/economy.ts';
@@ -181,7 +189,21 @@ export class CivilizationCoordinator {
           );
         }
 
-        // 4. Check currency sufficiency against fresh locked economy
+        // 4. Check per-building Build Limit
+        const limitCheck = canPlaceAnotherBuildingOfCategory(definition, civilization.buildings);
+        if (!limitCheck.allowed) {
+          throw new AppError(
+            'CIV_ECONOMY_BUILDING_LIMIT_REACHED',
+            `Build Limit reached for "${definition.name}" (${limitCheck.currentCount}/${limitCheck.limit} placed).`,
+            {
+              buildingName: definition.name,
+              limit: limitCheck.limit ?? 0,
+              currentCount: limitCheck.currentCount,
+            }
+          );
+        }
+
+        // 5. Check currency sufficiency against fresh locked economy
         if (economy.focusCoins < definition.baseCost) {
           throw new AppError(
             'CIV_INSUFFICIENT_BUILDING_COINS',
@@ -269,51 +291,212 @@ export class CivilizationCoordinator {
       );
     }
 
-    const tx = await this.storage.executeCivilizationTransaction<string>(
-      ({ civilization, gridMap }) => {
-        const instance = civilization.buildings.find((b) => b.id === payload.buildingInstanceId);
-        if (!instance) {
-          throw new AppError(
-            'CIV_BUILDING_NOT_FOUND',
-            `Building instance "${payload.buildingInstanceId}" not found`,
-            { instanceId: payload.buildingInstanceId }
-          );
-        }
-
-        const removalResult = gridMap.removeBuilding(payload.buildingInstanceId);
-        if (!removalResult.success) {
-          const reason = removalResult.reason || 'unknown';
-          throw new AppError(
-            'CIV_BUILDING_REMOVAL_FAILED',
-            `Building removal failed: ${reason}`,
-            { reason }
-          );
-        }
-
-        const nextBuildings = civilization.buildings.filter((b) => b.id !== payload.buildingInstanceId);
-        const nextCivilization: CivilizationState = {
-          ...civilization,
-          grid: gridMap.toSnapshot(),
-          buildings: nextBuildings,
-          lastUpdated: Date.now(),
-        };
-
-        // Pre-calculate CoinBonuses before storage commit so onCommitted is a pure, zero-throw assignment
-        const nextBonuses = extractBuildingCoinBonuses(nextBuildings);
-
-        return {
-          result: payload.buildingInstanceId,
-          nextCivilization,
-          onCommitted: () => {
-            this.cachedBonuses = nextBonuses;
-          },
-        };
+    const tx = await this.storage.executeCivilizationTransaction<{
+      removedBuildingId: string;
+      refundedCoins: number;
+    }>(({ civilization, gridMap }) => {
+      const instance = civilization.buildings.find((b) => b.id === payload.buildingInstanceId);
+      if (!instance) {
+        throw new AppError(
+          'CIV_BUILDING_NOT_FOUND',
+          `Building instance "${payload.buildingInstanceId}" not found`,
+          { instanceId: payload.buildingInstanceId }
+        );
       }
-    );
+
+      const removalResult = gridMap.removeBuilding(payload.buildingInstanceId);
+      if (!removalResult.success) {
+        const reason = removalResult.reason || 'unknown';
+        throw new AppError(
+          'CIV_BUILDING_REMOVAL_FAILED',
+          `Building removal failed: ${reason}`,
+          { reason }
+        );
+      }
+
+      const definition = getBuildingDefinition(instance.definitionId);
+      const refundCoins = calculateBuildingDemolishRefund(definition, instance.level);
+
+      const nextBuildings = civilization.buildings.filter((b) => b.id !== payload.buildingInstanceId);
+      const nextCivilization: CivilizationState = {
+        ...civilization,
+        grid: gridMap.toSnapshot(),
+        buildings: nextBuildings,
+        lastUpdated: Date.now(),
+      };
+
+      // Pre-calculate CoinBonuses before storage commit so onCommitted is a pure, zero-throw assignment
+      const nextBonuses = extractBuildingCoinBonuses(nextBuildings);
+
+      return {
+        result: {
+          removedBuildingId: payload.buildingInstanceId,
+          refundedCoins: refundCoins,
+        },
+        nextCivilization,
+        refundCoins,
+        onCommitted: () => {
+          this.cachedBonuses = nextBonuses;
+        },
+      };
+    });
 
     return {
-      removedBuildingId: tx.result,
+      removedBuildingId: tx.result.removedBuildingId,
       civilizationState: tx.civilization,
+      economy: tx.economy,
+      refundedCoins: tx.result.refundedCoins,
+    };
+  }
+
+  /**
+   * Upgrades an existing building instance by +1 level atomically under StorageMutex:
+   * - Validates building existence, expectedLevel concurrency token, category upgradeability,
+   *   max level, unlocked era, Player Level gate, and Coins sufficiency.
+   * - Deducts Coins and updates CivilizationState in a single storage transaction.
+   * - Refreshes CoinBonus cache via synchronous onCommitted hook.
+   */
+  async upgradeBuilding(payload: UpgradeBuildingPayload): Promise<UpgradeBuildingResponseData> {
+    if (
+      !payload ||
+      typeof payload !== 'object' ||
+      !isValidBuildingId(payload.buildingId) ||
+      typeof payload.expectedLevel !== 'number' ||
+      !Number.isInteger(payload.expectedLevel) ||
+      payload.expectedLevel < 1
+    ) {
+      throw new AppError(
+        'CIV_INVALID_UPGRADE_PAYLOAD',
+        'UPGRADE_BUILDING requires valid buildingId and expectedLevel.'
+      );
+    }
+
+    const tx = await this.storage.executeCivilizationTransaction<{
+      building: BuildingInstance;
+      cost: number;
+    }>(({ economy, civilization }) => {
+      const instance = civilization.buildings.find((b) => b.id === payload.buildingId);
+      if (!instance) {
+        throw new AppError(
+          'BUILDING_NOT_FOUND',
+          `Building "${payload.buildingId}" not found.`,
+          { buildingId: payload.buildingId }
+        );
+      }
+
+      const definition = getBuildingDefinition(instance.definitionId);
+      if (!definition) {
+        throw new AppError(
+          'BUILDING_NOT_FOUND',
+          `Building "${payload.buildingId}" not found.`,
+          { buildingId: payload.buildingId }
+        );
+      }
+
+      const playerLevel = Math.min(
+        economy.level ?? calculatePlayerLevel(economy.totalXP),
+        calculatePlayerLevel(economy.totalXP)
+      );
+
+      const evalResult = evaluateBuildingUpgrade({
+        instance,
+        definition,
+        currentEra: civilization.era,
+        playerLevel,
+        playerCoins: economy.focusCoins,
+        expectedLevel: payload.expectedLevel,
+      });
+
+      if (!evalResult.canUpgrade) {
+        switch (evalResult.reason) {
+          case 'LEVEL_MISMATCH':
+            throw new AppError(
+              'BUILDING_LEVEL_MISMATCH',
+              `Building level changed concurrently (expected Lv. ${payload.expectedLevel}, current Lv. ${instance.level}). Please try again.`,
+              {
+                buildingId: instance.id,
+                expectedLevel: payload.expectedLevel,
+                currentLevel: instance.level,
+              }
+            );
+          case 'NON_UPGRADEABLE_CATEGORY':
+            throw new AppError(
+              'CIV_UPGRADE_NOT_SUPPORTED',
+              `Building "${definition.name}" keeps its fixed effect and cannot be upgraded.`,
+              { buildingName: definition.name }
+            );
+          case 'BUILDING_MAX_LEVEL':
+            throw new AppError(
+              'BUILDING_MAX_LEVEL',
+              `Building "${definition.name}" is already at max level (Lv. ${definition.maxLevel}).`,
+              { buildingName: definition.name, maxLevel: definition.maxLevel }
+            );
+          case 'ERA_LOCKED':
+            throw new AppError(
+              'CIV_UPGRADE_ERA_LOCKED',
+              `Upgrading "${definition.name}" requires Era ${definition.era}.`,
+              { buildingName: definition.name, requiredEra: definition.era }
+            );
+          case 'PLAYER_LEVEL_REQUIRED':
+            throw new AppError(
+              'UPGRADE_PLAYER_LEVEL_REQUIRED',
+              `Upgrading "${definition.name}" requires Player Level ${evalResult.requiredPlayerLevel} (current: Lv. ${playerLevel}).`,
+              {
+                buildingName: definition.name,
+                requiredLevel: evalResult.requiredPlayerLevel,
+                currentLevel: playerLevel,
+              }
+            );
+          case 'INSUFFICIENT_COINS':
+            throw new AppError(
+              'CIV_INSUFFICIENT_BUILDING_COINS',
+              `Insufficient coins: building "${definition.name}" costs ${evalResult.cost} Coins (current balance: ${economy.focusCoins})`,
+              {
+                buildingName: definition.name,
+                cost: evalResult.cost,
+                balance: economy.focusCoins,
+              }
+            );
+          default:
+            throw new AppError(
+              'BUILDING_NOT_FOUND',
+              `Building "${payload.buildingId}" not found.`,
+              { buildingId: payload.buildingId }
+            );
+        }
+      }
+
+      const upgradedInstance = applyBuildingUpgrade(instance);
+      const nextBuildings = civilization.buildings.map((b) =>
+        b.id === instance.id ? upgradedInstance : b
+      );
+      const nextCivilization: CivilizationState = {
+        ...civilization,
+        buildings: nextBuildings,
+        lastUpdated: Date.now(),
+      };
+
+      const nextBonuses = extractBuildingCoinBonuses(nextBuildings);
+
+      return {
+        result: {
+          building: upgradedInstance,
+          cost: evalResult.cost,
+        },
+        nextCivilization,
+        deductCoins: evalResult.cost,
+        onCommitted: () => {
+          this.cachedBonuses = nextBonuses;
+        },
+      };
+    });
+
+    return {
+      civilizationState: tx.civilization,
+      economy: tx.economy,
+      building: tx.result.building,
+      newLevel: tx.result.building.level,
+      cost: tx.result.cost,
     };
   }
 

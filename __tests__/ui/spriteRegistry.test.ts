@@ -296,7 +296,8 @@ test('BuildingDetailsModal SSR (4a): renders building sprite in header and falls
 
   assert.ok(caveHtml.includes('data-sprite-id="stone_age_study_cave"'));
   assert.ok(caveHtml.includes('Meditation Cave'));
-  assert.ok(caveHtml.includes('Milestone 5C'));
+  assert.ok(caveHtml.includes('Upgrade Building'));
+  assert.ok(caveHtml.includes('Fixed effect · Cannot be upgraded'));
 
   const unknownHtml = renderToString(
     React.createElement(BuildingDetailsModal, {

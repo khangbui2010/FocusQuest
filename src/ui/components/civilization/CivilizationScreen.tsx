@@ -16,6 +16,7 @@ import {
   getCivilizationStateClient,
   placeBuildingClient,
   removeBuildingClient,
+  upgradeBuildingClient,
   expandLandClient,
   sendExtensionMessage,
   onStorageChange,
@@ -79,6 +80,8 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
   );
   const [placementDef, setPlacementDef] = useState<BuildingDefinition | null>(null);
   const [inspectedBuilding, setInspectedBuilding] = useState<BuildingInstance | null>(null);
+  const [upgradeModalError, setUpgradeModalError] = useState<UiErrorPayload | null>(null);
+  const [upgradeSuccessLevel, setUpgradeSuccessLevel] = useState<number | null>(null);
   const [activeExpansionReveal, setActiveExpansionReveal] =
     useState<ActiveExpansionReveal | null>(null);
   const [unrevealedChunkOrigin, setUnrevealedChunkOrigin] = useState<GridCoordinate | null>(null);
@@ -406,7 +409,12 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
       if (!isMountedRef.current) return;
       if (res.success && res.data) {
         setCivState(res.data.civilizationState);
+        if (res.data.economy) {
+          setEconomy(res.data.economy);
+        }
         setInspectedBuilding(null);
+        setUpgradeModalError(null);
+        setUpgradeSuccessLevel(null);
         await onStateMutated?.();
       } else {
         setErrorMsg({
@@ -418,6 +426,40 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
     } catch (err) {
       if (!isMountedRef.current) return;
       setErrorMsg(toUiErrorPayload(err, 'CIV_REMOVE_REQUEST_FAILED', 'Removal request failed.'));
+    } finally {
+      if (isMountedRef.current) {
+        setIsSubmitting(false);
+      }
+    }
+  };
+
+  const handleUpgradeBuilding = async (buildingId: string, expectedLevel: number) => {
+    if (isSubmitting || isExpansionFlowActive(flowStateRef.current)) return;
+    setIsSubmitting(true);
+    setErrorMsg(null);
+    setUpgradeModalError(null);
+    setUpgradeSuccessLevel(null);
+    try {
+      const res = await upgradeBuildingClient({ buildingId, expectedLevel });
+      if (!isMountedRef.current) return;
+      if (res.success && res.data) {
+        setCivState(res.data.civilizationState);
+        setEconomy(res.data.economy);
+        setInspectedBuilding(res.data.building);
+        setUpgradeSuccessLevel(res.data.newLevel);
+        await onStateMutated?.();
+      } else {
+        setUpgradeModalError({
+          message: res.error || 'Could not upgrade building.',
+          code: res.errorCode ?? 'CIV_UPGRADE_REQUEST_FAILED',
+          params: res.errorParams,
+        });
+      }
+    } catch (err) {
+      if (!isMountedRef.current) return;
+      setUpgradeModalError(
+        toUiErrorPayload(err, 'CIV_UPGRADE_REQUEST_FAILED', 'Upgrade request failed.')
+      );
     } finally {
       if (isMountedRef.current) {
         setIsSubmitting(false);
@@ -582,6 +624,8 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
           onInspectBuilding={(inst) => {
             if (isExpansionFlowActive(flowStateRef.current)) return;
             setErrorMsg(null);
+            setUpgradeModalError(null);
+            setUpgradeSuccessLevel(null);
             setInspectedBuilding(inst);
           }}
           isSubmitting={isSubmitting}
@@ -615,13 +659,24 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
         playerCoins={economy.focusCoins}
         lifetimeFocusMinutes={effectiveLifetimeFocusMinutes}
         currentEra={civState?.era ?? 'STONE_AGE'}
+        placedBuildings={civState?.buildings ?? []}
         onSelectBuilding={handleSelectBuildingForPlacement}
       />
 
       <BuildingDetailsModal
         building={inspectedBuilding}
-        onClose={() => setInspectedBuilding(null)}
+        onClose={() => {
+          setInspectedBuilding(null);
+          setUpgradeModalError(null);
+          setUpgradeSuccessLevel(null);
+        }}
         onRemove={handleRemoveBuilding}
+        onUpgrade={handleUpgradeBuilding}
+        playerLevel={playerLevel}
+        playerCoins={economy.focusCoins}
+        currentEra={civState?.era ?? 'STONE_AGE'}
+        upgradeError={upgradeModalError}
+        upgradeSuccessLevel={upgradeSuccessLevel}
         isSubmitting={isSubmitting}
       />
 

@@ -472,6 +472,10 @@ export class StorageManager {
 
       // 3. Compute final economy with rigorous input validation & IEEE-754 precision
       let finalEconomy = currentEconomy;
+      let economyChanged = false;
+      let deductAmount = 0;
+      let refundAmount = 0;
+
       if (outcome.deductCoins !== undefined && outcome.deductCoins !== null) {
         if (typeof outcome.deductCoins !== 'number' || !Number.isFinite(outcome.deductCoins)) {
           throw new Error(
@@ -483,23 +487,41 @@ export class StorageManager {
             `Invalid deductCoins: cannot be negative, received ${outcome.deductCoins}`
           );
         }
-        if (outcome.deductCoins > 0) {
-          if (currentEconomy.focusCoins < outcome.deductCoins) {
-            throw new Error(
-              `Insufficient coins: requires ${outcome.deductCoins}, has ${currentEconomy.focusCoins}`
-            );
-          }
-          const exactDeductedBalance = currentEconomy.focusCoins - outcome.deductCoins;
-          if (exactDeductedBalance < 0 || !Number.isFinite(exactDeductedBalance)) {
-            throw new Error(
-              `Economy balance invariant violated: balance would become ${exactDeductedBalance}`
-            );
-          }
-          finalEconomy = {
-            ...currentEconomy,
-            focusCoins: exactDeductedBalance,
-          };
+        deductAmount = outcome.deductCoins;
+      }
+
+      if (outcome.refundCoins !== undefined && outcome.refundCoins !== null) {
+        if (typeof outcome.refundCoins !== 'number' || !Number.isFinite(outcome.refundCoins)) {
+          throw new Error(
+            `Invalid refundCoins: expected finite number, received ${String(outcome.refundCoins)}`
+          );
         }
+        if (outcome.refundCoins < 0) {
+          throw new Error(
+            `Invalid refundCoins: cannot be negative, received ${outcome.refundCoins}`
+          );
+        }
+        refundAmount = outcome.refundCoins;
+      }
+
+      if (deductAmount > 0 && currentEconomy.focusCoins < deductAmount) {
+        throw new Error(
+          `Insufficient coins: requires ${deductAmount}, has ${currentEconomy.focusCoins}`
+        );
+      }
+
+      if (deductAmount > 0 || refundAmount > 0) {
+        const nextFocusCoins = currentEconomy.focusCoins - deductAmount + refundAmount;
+        if (nextFocusCoins < 0 || !Number.isFinite(nextFocusCoins)) {
+          throw new Error(
+            `Economy balance invariant violated: balance would become ${nextFocusCoins}`
+          );
+        }
+        finalEconomy = {
+          ...currentEconomy,
+          focusCoins: nextFocusCoins,
+        };
+        economyChanged = true;
       }
 
       // 4. Validate final civilization state if modified
@@ -520,7 +542,7 @@ export class StorageManager {
         itemsToSet[STORAGE_KEYS.CIVILIZATION] = finalCivilization;
         hasChanges = true;
       }
-      if (outcome.deductCoins && outcome.deductCoins > 0) {
+      if (economyChanged) {
         itemsToSet[STORAGE_KEYS.ECONOMY] = finalEconomy;
         hasChanges = true;
       }
@@ -670,5 +692,6 @@ export interface CivilizationTransactionOutcome<T> {
   readonly result: T;
   readonly nextCivilization?: CivilizationState;
   readonly deductCoins?: number;
+  readonly refundCoins?: number;
   readonly onCommitted?: (committedCivilization: CivilizationState, committedEconomy: PlayerEconomy) => void;
 }

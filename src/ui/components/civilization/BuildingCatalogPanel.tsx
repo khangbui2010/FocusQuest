@@ -14,10 +14,15 @@ import {
 import {
   BuildingCategory,
   BuildingDefinition,
+  BuildingInstance,
   CivilizationEra,
   isEraUnlocked,
 } from '../../../core/civilization/buildingTypes.ts';
 import { getAllBuildingDefinitions } from '../../../core/civilization/buildingCatalog.ts';
+import {
+  canPlaceAnotherBuildingOfCategory,
+  isBuildingCategoryUpgradeable,
+} from '../../../core/civilization/buildingUpgrade.ts';
 import { PixelSprite, getBuildingSprite } from './spriteRegistry.ts';
 import { useTranslation } from '../../../i18n/I18nContext.tsx';
 import { formatRewardAmount } from '../../utils/formatters.ts';
@@ -34,6 +39,7 @@ export interface BuildingCatalogPanelProps {
   playerCoins: number;
   lifetimeFocusMinutes: number;
   currentEra?: CivilizationEra;
+  placedBuildings?: readonly BuildingInstance[];
   onSelectBuilding: (def: BuildingDefinition) => void;
 }
 
@@ -97,6 +103,7 @@ export const BuildingCatalogPanel: React.FC<BuildingCatalogPanelProps> = ({
   playerCoins,
   lifetimeFocusMinutes,
   currentEra = 'STONE_AGE',
+  placedBuildings = [],
   onSelectBuilding,
 }) => {
   const { locale, t } = useTranslation();
@@ -178,9 +185,11 @@ export const BuildingCatalogPanel: React.FC<BuildingCatalogPanelProps> = ({
             const eraLocked = def.unlockRequirements.minEra
               ? !isEraUnlocked(currentEra, def.unlockRequirements.minEra)
               : false;
+            const limitCheck = canPlaceAnotherBuildingOfCategory(def, placedBuildings);
+            const capReached = !limitCheck.allowed;
             const insufficientCoins = playerCoins < def.baseCost;
             const isLocked = levelLocked || focusLocked || eraLocked;
-            const canBuild = !isLocked && !insufficientCoins;
+            const canBuild = !isLocked && !capReached && !insufficientCoins;
 
             let actionLabel = t('civ.catalog.buildBtn');
             if (levelLocked) {
@@ -193,6 +202,11 @@ export const BuildingCatalogPanel: React.FC<BuildingCatalogPanelProps> = ({
               });
             } else if (eraLocked) {
               actionLabel = t('civ.catalog.lockedEra');
+            } else if (capReached && limitCheck.limit !== null) {
+              actionLabel = t('civ.catalog.economyCapReachedBtn', {
+                current: limitCheck.currentCount,
+                max: limitCheck.limit,
+              });
             } else if (insufficientCoins) {
               actionLabel = t('civ.catalog.needCoins', { cost: formatRewardAmount(def.baseCost) });
             }
@@ -266,7 +280,29 @@ export const BuildingCatalogPanel: React.FC<BuildingCatalogPanelProps> = ({
                         {def.footprint.width}×{def.footprint.height}
                       </span>
                       <span aria-hidden="true">·</span>
-                      <span>{t('civ.catalog.maxLevel', { maxLevel: def.maxLevel })}</span>
+                      <span>
+                        {isBuildingCategoryUpgradeable(def.category)
+                          ? t('civ.catalog.maxLevel', { maxLevel: def.maxLevel })
+                          : t('civ.catalog.cantUpgrade')}
+                      </span>
+                      {limitCheck.limit !== null && (
+                        <>
+                          <span aria-hidden="true">·</span>
+                          <span
+                            data-testid="catalog-economy-cap"
+                            className={`font-semibold tabular-nums ${
+                              limitCheck.currentCount >= limitCheck.limit
+                                ? 'text-amber-600 dark:text-amber-400'
+                                : 'text-emerald-600 dark:text-emerald-400'
+                            }`}
+                          >
+                            {t('civ.catalog.economyCapBadge', {
+                              current: limitCheck.currentCount,
+                              max: limitCheck.limit,
+                            })}
+                          </span>
+                        </>
+                      )}
                     </div>
 
                     <p className="mt-1 text-[11px] text-slate-600 dark:text-slate-300 leading-snug">

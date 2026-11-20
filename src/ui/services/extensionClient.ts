@@ -5,9 +5,11 @@ import {
   StartSessionPayload,
   PlaceBuildingPayload,
   RemoveBuildingPayload,
+  UpgradeBuildingPayload,
   ExpandLandPayload,
   PlaceBuildingResponseData,
   RemoveBuildingResponseData,
+  UpgradeBuildingResponseData,
   ExpandLandResponseData,
   MusicStateResponseData,
   MusicPlayPayload,
@@ -19,7 +21,7 @@ import {
   ClaimQuestRewardResponseData,
   GetQuestStateResponseData,
 } from '../../types/messages.ts';
-import { QuestErrorCode, QuestPeriod, QuestState } from '../../types/quests.ts';
+import { QuestErrorCode, QuestPeriod, QuestProgress, QuestState } from '../../types/quests.ts';
 import { extractCodedError } from '../../types/errors.ts';
 import {
   LOFI_BASE_URL,
@@ -52,6 +54,12 @@ import { isValidCoordinate } from '../../core/civilization/placementValidator.ts
 import { evaluateExpansion } from '../../core/civilization/landExpansion.ts';
 import { getBuildingDefinition } from '../../core/civilization/buildingCatalog.ts';
 import { BuildingInstance, isEraUnlocked } from '../../core/civilization/buildingTypes.ts';
+import {
+  applyBuildingUpgrade,
+  calculateBuildingDemolishRefund,
+  canPlaceAnotherBuildingOfCategory,
+  evaluateBuildingUpgrade,
+} from '../../core/civilization/buildingUpgrade.ts';
 import { calculatePlayerLevel } from '../../core/economy/levelSystem.ts';
 import { DEFAULT_REWARD_CONFIG, RewardEngine } from '../../core/reward/rewardEngine.ts';
 import { extractBuildingCoinBonuses } from '../../core/civilization/civilizationBonusHelper.ts';
@@ -84,37 +92,98 @@ export const isChromeExtension = (): boolean => {
   );
 };
 
+// Detect whether running inside Vite Dev Server (excluded from production build & Node tests)
+export function isDevServerMockMode(): boolean {
+  return (
+    typeof import.meta !== 'undefined' &&
+    typeof import.meta.env !== 'undefined' &&
+    import.meta.env.DEV === true
+  );
+}
+
+export const DEV_SERVER_MOCK_LIMITS = {
+  focusCoins: 999_999_999,
+  totalXP: 4_999_000_000, // Resolves cleanly to Lv. 9999 via calculatePlayerLevel
+  lifetimeFocusMinutes: 999_999,
+  dailyFocusMinutes: 1440,
+  dailyCompletedSessions: 999,
+  dailyCoinsEarned: 999_999,
+  dailyXpEarned: 999_999,
+  questStreakDays: 999,
+} as const;
+
+export function createInitialMockState(
+  devServerMode: boolean = isDevServerMockMode(),
+  nowMs: number = Date.now()
+): FullSessionStateResponse {
+  const todayKey = getLocalDateKey(nowMs);
+  if (devServerMode) {
+    return {
+      currentSession: null,
+      activeProfile: {
+        id: 'profile-study-research',
+        name: 'Study & Research',
+        allowedDomains: [],
+        isDefault: true,
+        createdAt: nowMs,
+        updatedAt: nowMs,
+      },
+      economy: {
+        focusCoins: DEV_SERVER_MOCK_LIMITS.focusCoins,
+        totalXP: DEV_SERVER_MOCK_LIMITS.totalXP,
+        level: calculatePlayerLevel(DEV_SERVER_MOCK_LIMITS.totalXP),
+      },
+      todayStats: {
+        date: todayKey,
+        totalFocusMinutes: DEV_SERVER_MOCK_LIMITS.dailyFocusMinutes,
+        completedSessions: DEV_SERVER_MOCK_LIMITS.dailyCompletedSessions,
+        abandonedSessions: 0,
+        coinsEarned: DEV_SERVER_MOCK_LIMITS.dailyCoinsEarned,
+        xpEarned: DEV_SERVER_MOCK_LIMITS.dailyXpEarned,
+      },
+      isBlockingActive: false,
+      lifetimeFocusMinutes: DEV_SERVER_MOCK_LIMITS.lifetimeFocusMinutes,
+      settings: {
+        soundEnabled: false,
+        notificationsEnabled: true,
+      },
+    };
+  }
+
+  return {
+    currentSession: null,
+    activeProfile: {
+      id: 'profile-study-research',
+      name: 'Study & Research',
+      allowedDomains: [],
+      isDefault: true,
+      createdAt: nowMs,
+      updatedAt: nowMs,
+    },
+    economy: {
+      focusCoins: 120,
+      totalXP: 450,
+      level: 3,
+    },
+    todayStats: {
+      date: todayKey,
+      totalFocusMinutes: 50,
+      completedSessions: 2,
+      abandonedSessions: 0,
+      coinsEarned: 100,
+      xpEarned: 250,
+    },
+    isBlockingActive: false,
+    lifetimeFocusMinutes: 50,
+    settings: {
+      soundEnabled: false,
+      notificationsEnabled: true,
+    },
+  };
+}
+
 // Fallback in-memory mock state for web browser preview
-const mockState: FullSessionStateResponse = {
-  currentSession: null,
-  activeProfile: {
-    id: 'profile-study-research',
-    name: 'Study & Research',
-    allowedDomains: [],
-    isDefault: true,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-  },
-  economy: {
-    focusCoins: 120,
-    totalXP: 450,
-    level: 3,
-  },
-  todayStats: {
-    date: getLocalDateKey(),
-    totalFocusMinutes: 50,
-    completedSessions: 2,
-    abandonedSessions: 0,
-    coinsEarned: 100,
-    xpEarned: 250,
-  },
-  isBlockingActive: false,
-  lifetimeFocusMinutes: 50,
-  settings: {
-    soundEnabled: false,
-    notificationsEnabled: true,
-  },
-};
+const mockState: FullSessionStateResponse = createInitialMockState();
 
 const SIM_DURATION_PATTERN = [25, 45, 60, 30, 85, 50, 70] as const;
 
@@ -122,10 +191,12 @@ const SIM_DURATION_PATTERN = [25, 45, 60, 30, 85, 50, 70] as const;
  * Deterministic ~405-day DailyStatRecord generator for standalone web preview.
  * Zero Math.random() calls; includes rest weeks, gap days, a 16-day historical
  * streak, and a 5-day current streak ending on `todayDateKey`.
+ * In Vite Dev Server (`devServerMode === true`), maximizes all metrics for testing.
  */
 export function buildSimulatedDailyStats(
   todayDateKey: string,
-  liveTodayStats?: DailyStatRecord | null
+  liveTodayStats?: DailyStatRecord | null,
+  devServerMode: boolean = isDevServerMockMode()
 ): Record<string, DailyStatRecord> {
   const anchor = isValidDateKey(todayDateKey) ? todayDateKey : getLocalDateKey();
   const records: Record<string, DailyStatRecord> = {};
@@ -133,6 +204,22 @@ export function buildSimulatedDailyStats(
   for (let offset = -404; offset <= 0; offset++) {
     const key = addDaysToDateKey(anchor, offset);
     if (!key) continue;
+
+    if (devServerMode) {
+      if (offset === 0 && liveTodayStats && liveTodayStats.date === anchor) {
+        records[key] = { ...liveTodayStats };
+      } else {
+        records[key] = {
+          date: key,
+          totalFocusMinutes: DEV_SERVER_MOCK_LIMITS.dailyFocusMinutes,
+          completedSessions: DEV_SERVER_MOCK_LIMITS.dailyCompletedSessions,
+          abandonedSessions: 0,
+          coinsEarned: DEV_SERVER_MOCK_LIMITS.dailyCoinsEarned,
+          xpEarned: DEV_SERVER_MOCK_LIMITS.dailyXpEarned,
+        };
+      }
+      continue;
+    }
 
     if (offset === 0) {
       if (liveTodayStats && liveTodayStats.date === anchor) {
@@ -244,9 +331,45 @@ let mockProfiles: FocusProfile[] = [
 let mockCivilizationState: CivilizationState = createInitialCivilizationState();
 let mockGridMap: GridMap = GridMap.fromSnapshot(mockCivilizationState.grid);
 
-function createInitialSimulatedQuestState(nowMs: number = Date.now()): QuestState {
+export function createInitialSimulatedQuestState(
+  nowMs: number = Date.now(),
+  devServerMode: boolean = isDevServerMockMode()
+): QuestState {
   const todayKey = getLocalDateKey(nowMs);
   const initial = createInitialQuestState(nowMs);
+
+  if (devServerMode) {
+    const daily: Record<string, QuestProgress> = {};
+    const weekly: Record<string, QuestProgress> = {};
+    for (const def of ALL_QUEST_DEFINITIONS) {
+      const maxProgress: QuestProgress = {
+        questId: def.id,
+        period: def.period,
+        progress: def.target,
+        target: def.target,
+        completed: true,
+        claimed: false,
+        claimedAt: null,
+      };
+      if (def.period === 'DAILY') {
+        daily[def.id] = maxProgress;
+      } else {
+        weekly[def.id] = maxProgress;
+      }
+    }
+    return {
+      ...initial,
+      daily,
+      weekly,
+      weeklyActiveDateKeys: [todayKey],
+      streak: {
+        currentDays: DEV_SERVER_MOCK_LIMITS.questStreakDays,
+        longestDays: DEV_SERVER_MOCK_LIMITS.questStreakDays,
+        lastCompletedDateKey: todayKey,
+      },
+    };
+  }
+
   return applyCompletedSession(
     initial,
     {
@@ -1620,6 +1743,20 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         };
       }
 
+      const limitCheck = canPlaceAnotherBuildingOfCategory(def, mockCivilizationState.buildings);
+      if (!limitCheck.allowed) {
+        return {
+          success: false,
+          error: `Build Limit reached for "${def.name}" (${limitCheck.currentCount}/${limitCheck.limit} placed).`,
+          errorCode: 'CIV_ECONOMY_BUILDING_LIMIT_REACHED',
+          errorParams: {
+            buildingName: def.name,
+            limit: limitCheck.limit ?? 0,
+            currentCount: limitCheck.currentCount,
+          },
+        };
+      }
+
       if (mockState.economy.focusCoins < def.baseCost) {
         return {
           success: false,
@@ -1698,6 +1835,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         };
       }
 
+      const existingInstance = mockCivilizationState.buildings[idx];
       const removeOp = mockGridMap.removeBuilding(buildingInstanceId);
       if (!removeOp.success) {
         return {
@@ -1707,6 +1845,10 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
           errorParams: { reason: removeOp.reason || 'Removal failed' },
         };
       }
+
+      const def = getBuildingDefinition(existingInstance.definitionId);
+      const refundedCoins = calculateBuildingDemolishRefund(def, existingInstance.level);
+      mockState.economy.focusCoins += refundedCoins;
 
       const updatedBuildings = mockCivilizationState.buildings.filter(
         (b) => b.id !== buildingInstanceId
@@ -1722,6 +1864,150 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
       const resData: RemoveBuildingResponseData = {
         removedBuildingId: buildingInstanceId,
         civilizationState: mockCivilizationState,
+        economy: { ...mockState.economy },
+        refundedCoins,
+      };
+
+      return {
+        success: true,
+        data: resData as unknown as T,
+      };
+    }
+
+    case 'UPGRADE_BUILDING': {
+      const payload = (message as { payload: UpgradeBuildingPayload }).payload;
+      if (
+        !payload ||
+        typeof payload !== 'object' ||
+        typeof payload.buildingId !== 'string' ||
+        !payload.buildingId.trim() ||
+        typeof payload.expectedLevel !== 'number' ||
+        !Number.isInteger(payload.expectedLevel) ||
+        payload.expectedLevel < 1
+      ) {
+        return {
+          success: false,
+          error: 'UPGRADE_BUILDING requires valid buildingId and expectedLevel.',
+          errorCode: 'CIV_INVALID_UPGRADE_PAYLOAD',
+        };
+      }
+
+      const instance = mockCivilizationState.buildings.find((b) => b.id === payload.buildingId);
+      if (!instance) {
+        return {
+          success: false,
+          error: `Building "${payload.buildingId}" not found.`,
+          errorCode: 'BUILDING_NOT_FOUND',
+          errorParams: { buildingId: payload.buildingId },
+        };
+      }
+
+      const definition = getBuildingDefinition(instance.definitionId);
+      if (!definition) {
+        return {
+          success: false,
+          error: `Building "${payload.buildingId}" not found.`,
+          errorCode: 'BUILDING_NOT_FOUND',
+          errorParams: { buildingId: payload.buildingId },
+        };
+      }
+
+      const playerLevel = Math.min(
+        mockState.economy.level ?? calculatePlayerLevel(mockState.economy.totalXP),
+        calculatePlayerLevel(mockState.economy.totalXP)
+      );
+
+      const evalResult = evaluateBuildingUpgrade({
+        instance,
+        definition,
+        currentEra: mockCivilizationState.era,
+        playerLevel,
+        playerCoins: mockState.economy.focusCoins,
+        expectedLevel: payload.expectedLevel,
+      });
+
+      if (!evalResult.canUpgrade) {
+        switch (evalResult.reason) {
+          case 'LEVEL_MISMATCH':
+            return {
+              success: false,
+              error: `Building level changed concurrently (expected Lv. ${payload.expectedLevel}, current Lv. ${instance.level}). Please try again.`,
+              errorCode: 'BUILDING_LEVEL_MISMATCH',
+              errorParams: {
+                buildingId: instance.id,
+                expectedLevel: payload.expectedLevel,
+                currentLevel: instance.level,
+              },
+            };
+          case 'NON_UPGRADEABLE_CATEGORY':
+            return {
+              success: false,
+              error: `Building "${definition.name}" keeps its fixed effect and cannot be upgraded.`,
+              errorCode: 'CIV_UPGRADE_NOT_SUPPORTED',
+              errorParams: { buildingName: definition.name },
+            };
+          case 'BUILDING_MAX_LEVEL':
+            return {
+              success: false,
+              error: `Building "${definition.name}" is already at max level (Lv. ${definition.maxLevel}).`,
+              errorCode: 'BUILDING_MAX_LEVEL',
+              errorParams: { buildingName: definition.name, maxLevel: definition.maxLevel },
+            };
+          case 'ERA_LOCKED':
+            return {
+              success: false,
+              error: `Upgrading "${definition.name}" requires Era ${definition.era}.`,
+              errorCode: 'CIV_UPGRADE_ERA_LOCKED',
+              errorParams: { buildingName: definition.name, requiredEra: definition.era },
+            };
+          case 'PLAYER_LEVEL_REQUIRED':
+            return {
+              success: false,
+              error: `Upgrading "${definition.name}" requires Player Level ${evalResult.requiredPlayerLevel} (current: Lv. ${playerLevel}).`,
+              errorCode: 'UPGRADE_PLAYER_LEVEL_REQUIRED',
+              errorParams: {
+                buildingName: definition.name,
+                requiredLevel: evalResult.requiredPlayerLevel,
+                currentLevel: playerLevel,
+              },
+            };
+          case 'INSUFFICIENT_COINS':
+            return {
+              success: false,
+              error: `Insufficient coins: building "${definition.name}" costs ${evalResult.cost} Coins (current balance: ${mockState.economy.focusCoins})`,
+              errorCode: 'CIV_INSUFFICIENT_BUILDING_COINS',
+              errorParams: {
+                buildingName: definition.name,
+                cost: evalResult.cost,
+                balance: mockState.economy.focusCoins,
+              },
+            };
+          default:
+            return {
+              success: false,
+              error: `Building "${payload.buildingId}" not found.`,
+              errorCode: 'BUILDING_NOT_FOUND',
+              errorParams: { buildingId: payload.buildingId },
+            };
+        }
+      }
+
+      const upgraded = applyBuildingUpgrade(instance);
+      mockState.economy.focusCoins -= evalResult.cost;
+      mockCivilizationState = {
+        ...mockCivilizationState,
+        buildings: mockCivilizationState.buildings.map((b) =>
+          b.id === instance.id ? upgraded : b
+        ),
+        lastUpdated: Date.now(),
+      };
+
+      const resData: UpgradeBuildingResponseData = {
+        civilizationState: mockCivilizationState,
+        economy: { ...mockState.economy },
+        building: upgraded,
+        newLevel: upgraded.level,
+        cost: evalResult.cost,
       };
 
       return {
@@ -2232,6 +2518,18 @@ export async function removeBuildingClient(
 ): Promise<MessageResponse<RemoveBuildingResponseData>> {
   return sendExtensionMessage<RemoveBuildingResponseData>({
     action: 'REMOVE_BUILDING',
+    payload,
+  });
+}
+
+/**
+ * Typed client helper: upgrade an existing building on the civilization grid.
+ */
+export async function upgradeBuildingClient(
+  payload: UpgradeBuildingPayload
+): Promise<MessageResponse<UpgradeBuildingResponseData>> {
+  return sendExtensionMessage<UpgradeBuildingResponseData>({
+    action: 'UPGRADE_BUILDING',
     payload,
   });
 }

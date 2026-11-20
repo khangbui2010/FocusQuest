@@ -64,12 +64,13 @@ test('Civilization Client: placeBuildingClient validates placement, deducts coin
   });
   assert.equal(oobRes.success, false);
 
-  // 4. Removing the building frees the cell
+  // 4. Removing the building frees the cell and refunds 50% (7.5 Coins)
   const removeRes = await removeBuildingClient({
     buildingInstanceId: placedId,
   });
   assert.equal(removeRes.success, true);
   assert.equal(removeRes.data?.removedBuildingId, placedId);
+  assert.equal(removeRes.data?.refundedCoins, 7.5);
 
   // 5. Placing at (2, 2) succeeds again now that cell is freed
   const replaceRes = await placeBuildingClient({
@@ -94,12 +95,13 @@ test('Civilization Client: expandLandClient requires origin, deducts Coins, enfo
   } as unknown as { origin: { x: number; y: number } });
   assert.equal(rejectedDir.success, false);
 
-  // Expand adjacent East chunk (8, 0): k=1 requires Lv. 3 and costs 60 Coins (mockState has Lv. 3, 90 Coins left after campfire tests)
+  // Expand adjacent East chunk (8, 0): k=1 requires Lv. 3 and costs 60 Coins
+  // (mockState starts at 120, two campfires placed & demolished with 50% refund => 105 Coins before expand -> 45 after)
   const expandEast = await expandLandClient({ origin: { x: 8, y: 0 } });
   assert.equal(expandEast.success, true, `Expected expandEast success, got ${expandEast.error}`);
   assert.ok(expandEast.data);
   assert.equal(expandEast.data.cost, 60);
-  assert.equal(expandEast.data.economy.focusCoins, 30);
+  assert.equal(expandEast.data.economy.focusCoins, 45);
   assert.equal(expandEast.data.civilizationState.grid.chunks.length, initialChunks + 1);
 
   // Second expansion k=2 (0, -4) requires Lv. 4 -> fails at default Lv. 3 without deducting Coins
@@ -209,8 +211,8 @@ test('Civilization UI: BuildingCatalogPanel returns null when isOpen is false', 
   assert.equal(html, '');
 });
 
-test('Civilization UI: BuildingDetailsModal renders building information and demolish action', () => {
-  const html = renderToString(
+test('Civilization UI: BuildingDetailsModal renders building information, Stage 5C-1 upgrade section and demolish action', () => {
+  const htmlDecor = renderToString(
     React.createElement(BuildingDetailsModal, {
       building: {
         id: 'test_bld_1',
@@ -221,14 +223,43 @@ test('Civilization UI: BuildingDetailsModal renders building information and dem
       },
       onClose: () => {},
       onRemove: async () => {},
+      onUpgrade: async () => {},
+      playerLevel: 5,
+      playerCoins: 500,
       isSubmitting: false,
     })
   );
 
-  assert.ok(html.includes('Campfire'), 'must display building name');
-  assert.ok(html.includes('(3, 4)'), 'must display position');
-  assert.ok(html.includes('Demolish Building'), 'must display demolish action');
-  assert.ok(html.includes('Milestone 5C'), 'must mention upgrade in future milestone');
+  assert.ok(htmlDecor.includes('Campfire'), 'must display building name');
+  assert.ok(htmlDecor.includes('(3, 4)'), 'must display position');
+  assert.ok(htmlDecor.includes('Demolish Building'), 'must display demolish action');
+  assert.ok(htmlDecor.includes('Fixed effect · Cannot be upgraded'), 'decorative building must remain non-upgradeable');
+  assert.ok(
+    htmlDecor.includes('Can&#x27;t Upgrade') || htmlDecor.includes("Can't Upgrade"),
+    'decorative upgrade button must show Can\'t Upgrade'
+  );
+
+  const htmlEcon = renderToString(
+    React.createElement(BuildingDetailsModal, {
+      building: {
+        id: 'test_bld_econ',
+        definitionId: 'stone_age_foraging_post',
+        position: { x: 0, y: 0 },
+        level: 1,
+        placedAt: 1700000000000,
+      },
+      onClose: () => {},
+      onRemove: async () => {},
+      onUpgrade: async () => {},
+      playerLevel: 2,
+      playerCoins: 150,
+      isSubmitting: false,
+    })
+  );
+
+  assert.ok(htmlEcon.includes('Next Lv. 2 · Cost: 96 Coins'), 'must display next level and cost');
+  assert.ok(htmlEcon.includes('+2% → +4% CoinBonus'), 'must preview CoinBonus delta');
+  assert.ok(htmlEcon.includes('>Upgrade<'), 'must display enabled Upgrade button');
 });
 
 test('Civilization UI: LandExpansionModal renders chunk confirmation details (cost, level, balance, focus minutes) without compass', () => {
