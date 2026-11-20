@@ -313,7 +313,7 @@ test('Civilization UI: MapGridView renders 8x8 unlocked chunks, darkened locked 
   assert.ok(!html.includes('data-terrain-id='), 'must not render V1 entity terrain nodes');
   assert.ok(!html.includes('data-expansion-candidate='), 'must not render expansion candidates in normal mode');
 
-  // Expansion mode keeps >=4-cell margin (24x24 with 2-chunk margin), auto-zooms out (<100%), and shows exact adjacent candidate chunks
+  // Expansion mode keeps >=4-cell margin (24x24 with 2-chunk margin), preserves current zoom (100%), and shows exact adjacent candidate chunks
   const expectedSlots = GridMap.fromSnapshot(state.grid).getAvailableExpansionSlots();
   const htmlExpand = renderToString(
     React.createElement(MapGridView, {
@@ -331,7 +331,7 @@ test('Civilization UI: MapGridView renders 8x8 unlocked chunks, darkened locked 
   assert.ok(htmlExpand.includes('data-expansion-mode="true"'), 'must flag expansion mode');
   assert.ok(htmlExpand.includes('data-render-width="24"'), 'expansion mode must pad >=4 cells around 8x8 grid');
   assert.ok(htmlExpand.includes('data-render-height="24"'), 'expansion mode must pad >=4 cells around 8x8 grid');
-  assert.ok(!htmlExpand.includes('>100%<'), 'expansion mode must auto-zoom out so all candidate chunks fit');
+  assert.ok(htmlExpand.includes('>100%<'), 'UX-5.1 persistent camera must keep initial zoom (100%) on entering expansion mode');
   const candidateMatches = htmlExpand.match(/data-expansion-candidate="/g) ?? [];
   assert.equal(candidateMatches.length, expectedSlots.length, 'rendered candidate count must equal getAvailableExpansionSlots().length');
 

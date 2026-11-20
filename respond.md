@@ -1,90 +1,148 @@
-# BÁO CÁO NGHIỆM THU — MILESTONE UX / GIAI ĐOẠN UX-6
+# BÁO CÁO NGHIỆM THU — MILESTONE UX / GIAI ĐOẠN UX-5.1
 
-**Giai đoạn:** Milestone UX — Giai đoạn UX-6 *(Đóng băng số phút tập trung & phần thưởng trên màn kết thúc phiên đã xong — KHÔNG thuộc Phase 5, 5B.5 hay Milestone LOFI)*  
-**Ngày hoàn thành:** 2026-11-19  
-**File sao lưu báo cáo cũ:** `/respond_ux6_prev.md` *(sao lưu nguyên vẹn báo cáo Stage 6 + 7 trước khi ghi đè; giữ nguyên toàn bộ các bản `respond_*_prev.md` trước đó)*  
-**Trạng thái:** **`609 / 609` tests PASS 3/3 lần** | **`npm run lint` (`tsc --noEmit`) PASS (`0` errors)** | **`npm run clean && npm run build` PASS (`1,208,670 B` / `26` tệp, `696ms`)** — **DỪNG CHỜ DUYỆT GIAI ĐOẠN UX-6**
-
----
-
-## 1. BƯỚC 0 — KIỂM TOÁN HIỆN TRẠNG & XÁC MINH NGUYÊN NHÂN GỐC
-
-### 1.1. Bước 0a — Các điểm đọc thời gian / phút tập trung / phần thưởng của phiên đã kết thúc (`src/`)
-
-| Điểm trong mã nguồn | Hành vi TRƯỚC UX-6 | Rủi ro khi để màn tổng kết qua Machine Sleep | Xử lý SAU UX-6 |
-|---|---|---|---|
-| `src/ui/components/TimerView.tsx:297-312` | `useEffect` mở `setInterval(() => setCurrentTime(Date.now()), 1000)` vô điều kiện bất kể `session.status`. | Khi mở lại popup sau Sleep ở `ABANDONED`/`COMPLETED`/`INTERRUPTED`, `currentTime` nhảy lên `Date.now()` mới. | Khóa `setInterval` sau `isActiveTimer` (`RUNNING` \| `PAUSED`); `IDLE` và mọi trạng thái kết thúc hoàn toàn không chạy ticker. |
-| `src/ui/components/TimerView.tsx:328-365` | `TimeCalculator.calculateElapsedTime` nhận `currentTime` đồng hồ thật và chưa có `completedAt`. | `actualFocusMs = Date.now() - startedAt - totalPauseMs` phình to theo thời gian máy Sleep (ví dụ +4h → `245m`). | Thêm `effectiveCurrentTime` (`resolveSessionEndTimestamp(session)` khi terminal, `0` khi `IDLE`), truyền `completedAt: session.completedAt`, bỏ `currentPauseStartedAt`, đặt `pomodoroPhaseCalc = null`. |
-| `src/ui/components/TimerView.tsx:453-466` | `focusMinutes` chỉ đọc `lastKnownValidFocusMinutes` khi `INTERRUPTED`, mọi nhánh `ABANDONED` / `STOPWATCH COMPLETED` đọc `elapsed.actualFocusMinutes`. | `COUNTDOWN ABANDONED` hay `STOPWATCH COMPLETED` đều bị đếm tiếp qua `Date.now()` sau Sleep hoặc chênh trên Pomodoro/Stopwatch. | Đọc trực tiếp Single Source of Truth `getFrozenSessionFocusMinutes(session)`; Pomodoro `totalPomoFocusMins` giữ nguyên `pomodoroState?.totalCompletedFocusMinutes ?? focusMinutes` (bảo toàn UX-2 & Backlog 4a). |
-| `src/core/reward/rewardPreview.ts:407-432` | `getSessionRewardPreviewFromSnapshot(session, options?)` nếu không truyền `actualFocusMinutes` thì fallback `0` cho `STOPWATCH COMPLETED`. | Caller trực tiếp trên terminal `STOPWATCH` không truyền `actualFocusMinutes` sẽ tính sai reward (`+0`). | Khi `options?.actualFocusMinutes === undefined` và `isTerminalSessionStatus(session.status)` đúng, tự động phân giải qua `getFrozenSessionFocusMinutes(session)`. |
-| `src/core/quests/questEngine.ts:713` | `toQuestOutcomeDelta` dùng `endTime = session.completedAt ?? session.lastHeartbeatAt` cho `STOPWATCH COMPLETED`. | Đã an toàn (không dùng `Date.now()`). | Giữ nguyên 100%, không sửa Quest Engine. |
-| `src/core/reward/rewardEngine.ts:151` | `processRewardWithIdempotencyGuard` chỉ dùng fallback `Date.now()` nếu thiếu `completedAt` và `!rewardProcessed`. | Không kích hoạt ở luồng bình thường (`rewardProcessed: true` & có `completedAt`). | Giữ nguyên 100%, không sửa Reward Engine. |
-
-### 1.2. Bước 0b — Kiểm toán mọi nhánh kết thúc trong `SessionCoordinator` (`src/background/sessionCoordinator.ts`)
-
-| Nhánh kết thúc | Vị trí dòng | Trường đóng băng được ghi | Giá trị khớp `dailyStatDelta.focusMinutes`? |
-|---|---|---|---|
-| `giveUpCountdown()` (`COUNTDOWN` / `POMODORO_*` → `ABANDONED`) | `:815-824` | `completedAt: now`, `finalFocusMinutes: focusMinutesToRecord`, `currentPauseStartedAt: null` | Khớp 100% (`focusMinutesToRecord`, kể cả khi Give Up từ `PAUSED`). |
-| `finishStopwatch()` (`POMODORO_STOPWATCH` → `COMPLETED`) | `:968-987` | `completedAt: now`, `finalFocusMinutes: actualFocusMinutes`, `pomodoroState.totalCompletedFocusMinutes: rewardFocusMinutes` | Khớp 100% (`actualFocusMinutes`). |
-| `finishStopwatch()` (`STOPWATCH` → `COMPLETED`) | `:1068-1078` | `completedAt: now`, `finalFocusMinutes: actualFocusMinutes` | Khớp 100% (`actualFocusMinutes`, kể cả nhánh `accumulatedFocusMs` checkpoint). |
-| `completeCountdown()` (`COUNTDOWN` → `COMPLETED`) | `:1178-1185` | `completedAt: now`, `finalFocusMinutes: session.targetMinutes` | Khớp 100% (`session.targetMinutes`, kể cả khi wake trễ hơn target). |
-| `advancePomodoroStage()` (`POMODORO_COUNTDOWN` 100% → `COMPLETED`) | `:1417-1436` | `completedAt: now`, `finalFocusMinutes: plannedFocusMinutes` | Khớp 100% (`plannedFocusMinutes`). |
-| `handleExtensionDisabledRecovery()` (`COUNTDOWN`/`POMO_CD`/`POMO_SW`/`STOPWATCH` → `INTERRUPTED`) | `:1764-1782`, `:1808-1825`, `:1851-1862` | `completedAt: now`, `lastKnownValidFocusMinutes: validMinutes`, `finalFocusMinutes: validMinutes`, `currentPauseStartedAt: null` | Khớp 100% (`validMinutes`). |
-| `handleBrowserStartupRecovery()` (`COUNTDOWN`/`STOPWATCH`/`POMO_SW`/`POMO_CD` → `INTERRUPTED`) | `:2408-2419`, `:2488-2499`, `:2557-2575`, `:2650-2668` | `completedAt: now`, `lastKnownValidFocusMinutes`, `finalFocusMinutes` | Khớp 100% (`validMinutes` / `totalActualMinutes`). |
-| Web Preview Simulator (`src/ui/services/extensionClient.ts`) | `:632-639`, `:841-859`, `:1029-1078`, `:1203-1215` | Bổ sung `finalFocusMinutes` mọi nhánh + vá `GIVE_UP_SESSION` khi đang `PAUSED` (`finalizePause`, `currentPauseStartedAt: null`, `pauseExpiresAt: null`). | Đồng bộ parity 100% với `SessionCoordinator`. |
-
-### 1.3. Bước 0c — Idempotency khi Re-entry / Wake / Restart nhiều giờ sau khi kết thúc
-- `executeLifecycleRecovery()` (`src/background/sessionCoordinator.ts:1981-1987`): Khi `TimerStateMachine.isTerminal(session.status)` đúng, chỉ dọn blocking/badge/lifecycle marker và chạy `triggerSessionSyncHookInternal`, **tuyệt đối không** chuyển trạng thái lại hay gọi `commitSessionOutcomeInternal`.
-- `getFullState()` và các transition guards (`rewardProcessed || status === 'COMPLETED'`) bảo toàn `completedAt` và `finalFocusMinutes` nguyên vẹn qua nhiều lần wake/startup (`ux6TerminalOutcomeFreeze.test.ts` test 4 xác nhận 0 thay đổi economy/dailyStats sau +6h wake + startup + `getFullState`).
-
-### 1.4. Bước 0d — Bất biến UI màn kết thúc, `Exit` & Điều hướng (`App.tsx`, `sessionNavigation.ts`, `TimerView.tsx`)
-- `isInFocusSession(session)` (`src/ui/utils/sessionNavigation.ts:24-26`): Vẫn giữ tab khóa ở `'focus'` và ẩn `<Navbar />` trên mọi trạng thái kết thúc tới khi người dùng bấm `Exit` / `Thoát` (`outcome-exit-btn`).
-- Bấm `Exit` vẫn gọi `executeExitSessionAction` → `RESET_SESSION` → `refreshState()` → chuyển về `'map'` và giữ hiển thị lỗi + cho phép retry nếu lỗi (`ux1SessionNavigationAndProfile.test.ts` & `ux6TerminalOutcomeFreeze.test.ts`).
+**Giai đoạn:** Milestone UX — Giai đoạn UX-5.1 *(Persistent Camera Expansion & Cinematic Recenter — KHÔNG thuộc Phase 5, 5B.5 hay Milestone LOFI)*  
+**Ngày hoàn thành:** 2026-11-20  
+**File sao lưu báo cáo cũ:** `/respond_ux51_prev.md` *(sao lưu nguyên vẹn báo cáo UX-6 trước khi ghi đè; giữ nguyên toàn bộ các bản `respond_*_prev.md` trước đó)*  
+**Trạng thái:** **`614 / 614` tests PASS 3/3 lần** | **`npm run lint` (`tsc --noEmit`) PASS (`0` errors)** | **`npm run clean && npm run build` PASS (`1,217,229 B` / `26` tệp, `772ms`)** — **DỪNG CHỜ DUYỆT GIAI ĐOẠN UX-5.1**
 
 ---
 
-## 2. CHI TIẾT THAY ĐỔI MÃ NGUỒN (UX-6)
+## 1. HIỆN TRẠNG HỆ THỐNG CAMERA (TRƯỚC & SAU UX-5.1)
 
-1. **`src/types/session.ts` (`line 79`) — Giải trình trường OPTIONAL:**
-   - Thêm `finalFocusMinutes?: number;` vào `SessionSnapshot`, **giữ nguyên `CURRENT_SCHEMA_VERSION = 3` và `CURRENT_CIVILIZATION_SCHEMA_VERSION = 2`**.
-   - *Lý do thật sự cần thiết:* Số phút đóng băng ở vài nhánh không trùng `Math.floor((completedAt - startedAt - totalPauseMs) / 60000)` — ví dụ: `COUNTDOWN COMPLETED` đánh thức trễ (chốt `targetMinutes` chứ không vượt target), `STOPWATCH` phục hồi từ `accumulatedFocusMs` khi đồng hồ hệ thống lùi, hoặc `INTERRUPTED BROWSER_CLOSED` (chốt tại `lastCheckpointAt`/`lastHeartbeatAt` trước lúc trình duyệt đóng chứ không gồm thời gian đóng máy). Trường optional đảm bảo khớp bit-exact với `dailyStatDelta.focusMinutes` mà vẫn tương thích ngược 100% với dữ liệu lưu cũ trong `chrome.storage.local` chưa có trường này.
-2. **`src/core/timer/timeCalculator.ts` (`lines 27-131`, `299-359`):**
-   - Xuất `isTerminalSessionStatus(status)`, `resolveSessionEndTimestamp(session, liveCurrentTime?)` (không bao giờ rơi về `Date.now()` cho phiên kết thúc), và `getFrozenSessionFocusMinutes(session)` (thứ tự ưu tiên: `finalFocusMinutes` → `lastKnownValidFocusMinutes` khi `INTERRUPTED` → `targetMinutes` khi `COUNTDOWN COMPLETED` → `lastKnownValidFocusMinutes` khác → fallback `TimeCalculator.calculateElapsedTime` tại `resolveSessionEndTimestamp(session)` có trừ `currentPauseStartedAt` chưa finalize và chặn trần `targetMinutes` nếu `COUNTDOWN` cũ thiếu `completedAt`).
-   - Mở rộng `TimeCalculator.calculateElapsedTime` nhận `completedAt?: number | null`, khóa `effectiveEndTime` tại `completedAt` với phiên terminal và không kích hoạt `isAutoResumeDue` trên snapshot terminal.
-3. **`src/core/reward/rewardPreview.ts` (`lines 11-14`, `407-432`):**
-   - `getSessionRewardPreviewFromSnapshot` tự động phân giải `actualFocusMinutes = getFrozenSessionFocusMinutes(session)` cho mọi phiên terminal khi caller không truyền tham số thủ công.
-4. **`src/ui/components/TimerView.tsx` (`lines 31-37`, `295-365`, `453-466`):**
-   - Chặn `setInterval` ticker khi `session` không phải `RUNNING`/`PAUSED`.
-   - Tính `elapsed` theo `effectiveCurrentTime` đóng băng + `completedAt: session.completedAt`, vô hiệu hóa `pomodoroPhaseCalc` và dùng `getFrozenSessionFocusMinutes(session)` cho `focusMinutes` màn tổng kết.
-5. **`src/background/sessionCoordinator.ts` (`12` nhánh terminal) & `src/ui/services/extensionClient.ts`:**
-   - Ghi đồng nhất `finalFocusMinutes` trên toàn bộ nhánh `ABANDONED`, `COMPLETED`, `INTERRUPTED` (kể cả `handleExtensionDisabledRecovery` & `handleBrowserStartupRecovery`) mà **không sửa** công thức thưởng, thời điểm quyết toán, LOFI hooks hay transaction mutex.
-   - Vá simulator `GIVE_UP_SESSION` trong `extensionClient.ts` để finalize pause đang mở và dọn `currentPauseStartedAt: null` khớp `SessionCoordinator`.
-6. **`__tests__/ui/ux6TerminalOutcomeFreeze.test.ts` (`4` tests mới):**
-   - Test 1: Repro chính bug báo cáo (`COUNTDOWN` `ABANDONED` từ `RUNNING` +5m và từ `PAUSED` +7m focus / 2m pause → +4h / +5h Sleep → UI & `PopupShell` giữ nguyên `5m` / `7m`, không `245m` / `307m`, `+0` thưởng, còn nút `Exit` / `Thoát`, ẩn `Navbar`).
-   - Test 2: Toàn bộ 4 mode (`STOPWATCH COMPLETED`, `COUNTDOWN COMPLETED` wake trễ +3m, `POMODORO_COUNTDOWN ABANDONED`, `POMODORO_STOPWATCH COMPLETED`) giữ nguyên phút, `completedIntervals (Xm)`, và Coin/XP sau +6h Sleep.
-   - Test 3: `INTERRUPTED` (`BROWSER_CLOSED` 120m downtime vẫn giữ `12m`), snapshot cũ thiếu `finalFocusMinutes`, snapshot terminal còn `currentPauseStartedAt`, Stopwatch cũ thiếu `finalFocusMinutes`, snapshot hỏng thiếu cả `completedAt` và `finalFocusMinutes`, và hợp đồng `TimeCalculator.calculateElapsedTime` + `completedAt`.
-   - Test 4: Idempotency sau +6h Sleep qua `SERVICE_WORKER_WAKE`, `BROWSER_STARTUP`, `getFullState` (không đổi economy/stats/session) + kiểm tra parity simulator `PAUSE_SESSION` → `GIVE_UP_SESSION`.
+- **Trước UX-5.1 (`MapGridView.tsx` & `CivilizationHeader.tsx`):**
+  - Khi bật **Expansion Mode**, `MapGridView` lưu snapshot `{ pan, zoom }` nhưng gọi ngay `computeExpansionFitZoom(mapWidthPx, mapHeightPx)` và ép `setPan({ x: 0, y: 0 })`, làm bản đồ tự động zoom out và dịch tâm về toàn bộ lãnh thổ.
+  - Banner `expansion-mode-banner` trong `CivilizationHeader` nằm trong flow bình thường (`normal flow`), đẩy phần khung `<MapGridView>` co chiều cao theo chiều dọc khi vào/thoát Expansion Mode.
+  - Chọn một chunk ứng viên mở ngay `LandExpansionModal` tại góc nhìn zoom-out thay vì trượt camera tới chunk đã chọn.
+- **Sau UX-5.1 (Persistent Camera + Valid Expansion Preview + Cinematic Recenter):**
+  - Vào Expansion Mode (`EXPANSION_SELECTING`) **giữ nguyên hoàn toàn** `pan`, `zoom` hiện tại và kích thước viewport (`expansion-mode-banner` đổi sang `absolute top-full inset-x-0 z-20`, không làm nhảy `0px` chiều cao `<MapGridView>`). Không còn lời gọi runtime nào tới `computeExpansionFitZoom` (chỉ giữ export để không gãy unit test số học UX-3/UX-5).
+  - Các chunk ứng viên hợp lệ từ `gridMap.getAvailableExpansionSlots()` vẫn hiển thị highlight trên bản đồ hiện tại; chọn 1 chunk hợp lệ khóa mọi tương tác chọn khác và điều khiển camera thủ công, trượt camera mượt (`600ms`, `easeInOutCubic` qua `requestAnimationFrame`, giữ nguyên `zoom`) tới tâm chunk rồi mới mở `LandExpansionModal` xác nhận nghiệp vụ.
+  - Xác nhận thành công chạy trọn vẹn rìu chém (`680ms`) & reveal/shake (`1150ms`) trong khi giữ camera bám chặt tâm chunk (kể cả khi mở về Tây/Bắc qua `useIsomorphicLayoutEffect`), rồi trượt mượt về `CameraSnapshot` ban đầu trước khi mở khóa về `NORMAL`. Hủy modal hoặc giao dịch lỗi cũng trả camera mượt về `EXPANSION_SELECTING` mà không kẹt lock và không sửa game state.
 
 ---
 
-## 3. KẾT QUẢ CHẠY LỆNH XÁC MINH CUỐI (SAU MỌI CHỈNH SỬA)
+## 2. DANH SÁCH FILE ĐÃ THAY ĐỔI
+
+1. **`src/ui/components/civilization/expansionCamera.ts`** *(Tạo mới — 198 dòng)*:
+   - Định nghĩa state machine 6 trạng thái (`ExpansionFlowState`), bảng chuyển trạng thái hợp lệ `VALID_EXPANSION_TRANSITIONS`, `canTransitionExpansionFlow`, `transitionExpansionFlow`, và các guard (`isExpansionFlowActive`, `canSelectExpansionSlot`, `canCancelExpansionMode`, `isManualCameraLocked`, `isExpansionCandidatesVisible`).
+   - Định nghĩa `CameraSnapshot`, `createCameraSnapshot`, `computeRestoredPanFromSnapshot` (bù dịch tâm world khi `renderBox` mở rộng 4 hướng), `computeChunkCenterPan`, `easeInOutCubic`, `interpolatePan`, `EXPANSION_CINEMATIC_MS = 600`.
+2. **`src/ui/components/civilization/CivilizationHeader.tsx`** *(Cập nhật)*:
+   - Bổ sung props tùy chọn tương thích ngược `isExpansionLocked?: boolean` và `canCancelExpansion?: boolean`; khóa các nút `Expand`, `Build`, `Cancel (Esc)` khi bị khóa.
+   - Đổi `expansion-mode-banner` sang overlay `absolute top-full inset-x-0 z-20` dưới header `relative z-20` để kích thước `<MapGridView>` không đổi khi bật/tắt Expansion Mode.
+3. **`src/ui/components/civilization/MapGridView.tsx`** *(Cập nhật)*:
+   - Re-export `EXPANSION_CINEMATIC_MS`, `computeChunkCenterPan`, `easeInOutCubic`, `interpolatePan`; nhận `expansionFlowState`, `onCinematicArrived`, `onCameraReturnArrived`.
+   - Lưu `CameraSnapshot` khi vào Expansion Mode mà không đổi `pan`/`zoom`; gỡ bỏ auto-fit zoom out runtime; gắn `ResizeObserver` theo dõi viewport; khóa drag, wheel, 4 nút toolbar camera (`Zoom Out`, `Reset`, `Zoom In`, `Recenter`) khi `isManualCameraLocked`; trượt `CINEMATIC_MOVING` và `CAMERA_RETURNING` qua `requestAnimationFrame` + `easeInOutCubic` (tôn trọng `prefersReducedMotion()`), đồng bộ bù `renderBox` trong `CHOPPING`/`TERRAIN_UPDATING` qua `useIsomorphicLayoutEffect`, dọn sạch RAF/timers/`ResizeObserver` khi unmount.
+   - Đẩy nhãn Territory Summary sang `top-12` trong Expansion Mode để không bị banner overlay che khuất.
+4. **`src/ui/components/civilization/CivilizationScreen.tsx`** *(Cập nhật)*:
+   - Tích hợp state machine 6 trạng thái qua `updateFlowState` + các ref chống stale closure & race (`flowStateRef`, `isCinematicAnimatingRef`, `returnTargetRef`, `isConfirmInFlightRef`, `isMountedRef`).
+   - Re-validate slot hợp lệ lúc click và trước khi gọi `expandLandClient`; bảo vệ `Esc` theo đúng state; xử lý hủy modal / lỗi API quay về `CAMERA_RETURNING -> EXPANSION_SELECTING` an toàn; dọn timers & `keydown` listener khi unmount.
+5. **`__tests__/ui/civilizationView.test.ts`** *(Cập nhật dòng 334)*:
+   - Cập nhật assertion cũ `!htmlExpand.includes('>100%<')` (vốn test hành vi auto zoom-out trước UX-5.1) sang `htmlExpand.includes('>100%<')`.
+6. **`__tests__/ui/ux51ExpansionCamera.test.ts`** *(Tạo mới — 423 dòng, 5 tests)*:
+   - Bộ kiểm thử toàn diện snapshot/bù tâm 4 hướng, toán học camera/easing, state machine 6 trạng thái, render SSR 6 trạng thái + giữ nguyên UX-5, lifecycle trước/sau commit & kiểm toán tĩnh nguồn.
+7. **`PROJECT_STATUS.md`** & **`respond.md`** *(Cập nhật)*:
+   - Ghi nhận trạng thái UX-5.1 và kết quả kiểm định sau chỉnh sửa.
+
+---
+
+## 3. STATE MACHINE MỚI (6 TRẠNG THÁI)
+
+Định nghĩa tại `src/ui/components/civilization/expansionCamera.ts`:
+
+```text
+NORMAL
+  └─[Bật Expansion Mode]──────────────────────────────► EXPANSION_SELECTING
+EXPANSION_SELECTING
+  ├─[Bấm Cancel / Esc]────────────────────────────────► CAMERA_RETURNING ──► NORMAL
+  └─[Chọn 1 chunk hợp lệ (re-validated)]──────────────► CINEMATIC_MOVING
+CINEMATIC_MOVING
+  ├─[Trượt tới tâm chunk + Mở LandExpansionModal]
+  │   ├─[Hủy modal / Esc / API error / hết slot]──────► CAMERA_RETURNING ──► EXPANSION_SELECTING
+  │   └─[Xác nhận mở đất thành công (expandLandClient)]► CHOPPING (680ms)
+CHOPPING
+  └─[EXPANSION_IMPACT_MS = 680ms, lộ đất chunk mới]───► TERRAIN_UPDATING (tới 1150ms)
+TERRAIN_UPDATING
+  └─[Kết thúc reveal + shake]─────────────────────────► CAMERA_RETURNING ──► NORMAL
+```
+
+- **Quy tắc khóa từng trạng thái:**
+  - `NORMAL`: Camera tự do, không hiển thị candidate.
+  - `EXPANSION_SELECTING`: Camera pan/zoom tự do; hiển thị các candidate; được phép chọn 1 chunk hoặc Cancel/Esc.
+  - `CINEMATIC_MOVING`: Khóa `pan`, `wheel`, 4 nút toolbar zoom/recenter, nút `Expand`, `Build`, `Cancel (Esc)`, và khóa chọn chunk khác (`slotDisabled = true`). Nếu animation chưa xong (`isCinematicAnimating`), `LandExpansionModal` chưa mở và `Esc` bị chặn; sau khi camera tới nơi, modal mở cho phép xác nhận hoặc hủy (`CAMERA_RETURNING -> EXPANSION_SELECTING`).
+  - `CHOPPING` & `TERRAIN_UPDATING`: Ẩn overlay candidate, giữ khóa toàn bộ camera & Cancel, giữ nguyên tâm chunk giữa màn hình trong lúc rìu chém (`0–680ms`) → mở lộ đất & rung nhẹ (`680–1150ms`).
+  - `CAMERA_RETURNING`: Khóa toàn bộ camera & Cancel trong suốt `600ms` trượt mượt về snapshot ban đầu rồi mới mở khóa sang `NORMAL` (sau mở đất/hủy chế độ) hoặc `EXPANSION_SELECTING` (sau hủy modal/lỗi API).
+
+---
+
+## 4. CƠ CHẾ SNAPSHOT CAMERA & BÙ ĐỘ DỊCH TÂM WORLD
+
+1. **Chụp snapshot lúc vào `EXPANSION_SELECTING` (`createCameraSnapshot`):**
+   - Lưu nguyên trạng `pan: { x: Math.round(pan.x), y: Math.round(pan.y) }`, `zoom`, `viewport: { width, height }` (cập nhật qua `ResizeObserver`), và tọa độ tâm world của stage lúc chụp:
+     $$\text{stageCenterWorldX} = \text{renderBox.minX} + \frac{\text{renderBox.width}}{2}, \quad \text{stageCenterWorldY} = \text{renderBox.minY} + \frac{\text{renderBox.height}}{2}$$
+   - Lúc vào `EXPANSION_SELECTING`, hoàn toàn không ghi đè `pan`, `zoom`, hay kích thước khung map.
+2. **Định tâm chunk đang chọn (`computeChunkCenterPan`):**
+   - Tính tâm chunk $4 \times 4$ theo pixel tại `zoom = 1` rồi dịch `pan` để đưa tâm chunk vào chính giữa viewport trong khi **giữ nguyên `zoom`**:
+     $$\text{pan}_x = \text{round}\!\left(-\left((\text{origin}_x + 2 - \text{renderMinX}) \cdot 32 - \frac{\text{mapWidthPx}}{2}\right) \cdot \text{zoom}\right)$$
+   - Trong lúc `CHOPPING` / `TERRAIN_UPDATING`, `useIsomorphicLayoutEffect` tính lại `computeChunkCenterPan` ngay trước paint nếu `renderBox` vừa nở ra (đặc biệt khi mở chunk Tây `(-4, 0)` hay Bắc `(0, -4)`), tránh mọi nháy khung 1 frame.
+3. **Khôi phục snapshot sau mở đất (`computeRestoredPanFromSnapshot`):**
+   - Vì stage luôn căn giữa qua CSS Flex (`flex items-center justify-center` + `transformOrigin: center center`), khi thêm chunk về Tây hoặc Bắc làm tâm `renderBox` dịch đi $(\Delta \text{center}_x, \Delta \text{center}_y)$, hàm khôi phục tự động bù đúng lượng dịch của stage:
+     $$\text{restoredPan}_x = \text{round}(\text{snapshot.pan}_x + \Delta \text{center}_x \cdot 32 \cdot \text{snapshot.zoom})$$
+   - Công thức được `ux51ExpansionCamera.test.ts` chứng minh giữ điểm world dưới tâm màn hình khớp trước và sau mở rộng ở cả 4 hướng Đông/Tây/Nam/Bắc trên các mức zoom `0.75, 1.0, 1.25, 1.5` (sai số `< 0.05` cell, chỉ do làm tròn pixel nguyên).
+
+---
+
+## 5. KẾT QUẢ TEST TỰ ĐỘNG, LINT & BUILD
 
 - **`npm run lint` (`tsc --noEmit`):** **PASS** (Exit code `0`, `0` errors).
-- **`npm run clean && npm run build`:** **PASS** (Exit code `0`, Vite `v8.3.8`, `1,754 modules transformed`, **`696ms`**, **`26` tệp**, **`1,208,670 B`**, `0` file audio).
-- **`npm test` (`tsx --test`) — 3 lần chạy liên tiếp:**
-  - **Lần 1:** **`609 / 609` PASS** (`0` fail, `0` skipped, `0` cancelled, **`17,200.78 ms`**)
-  - **Lần 2:** **`609 / 609` PASS** (`0` fail, `0` skipped, `0` cancelled, **`17,597.02 ms`**)
-  - **Lần 3:** **`609 / 609` PASS** (`0` fail, `0` skipped, `0` cancelled, **`17,271.49 ms`**)
+- **`npm run clean && npm run build`:** **PASS** (Exit code `0`, Vite `v8.3.8`, `1,755 modules transformed`, **`772ms`**, `dist/`: **`26` tệp**, **`1,217,229 B`**, `0` file audio).
+- **`npm test` (`tsx --test`) — 3 lần chạy liên tiếp sau mọi chỉnh sửa:**
+  - **Lần 1:** **`614 / 614` PASS** (`0` fail, `0` skipped, `0` cancelled, **`18,190.25 ms`**)
+  - **Lần 2:** **`614 / 614` PASS** (`0` fail, `0` skipped, `0` cancelled, **`18,323.81 ms`**)
+  - **Lần 3:** **`614 / 614` PASS** (`0` fail, `0` skipped, `0` cancelled, **`18,748.25 ms`**)
+  - Gồm `+5` tests mới tại `__tests__/ui/ux51ExpansionCamera.test.ts` và cập nhật assertion UX-5.1 tại `__tests__/ui/civilizationView.test.ts:334`. Toàn bộ chạy trên Node.js (`renderToString` SSR, tính toán thuần, mock 2D context & mock storage adapters).
 
 ---
 
-## 4. HƯỚNG DẪN KIỂM CHỨNG THỦ CÔNG TRÊN CHROME THẬT (UX-6)
+## 6. KẾT QUẢ CHROME VERIFICATION (TRUNG THỰC TUYỆT ĐỐI)
 
-1. Nạp bản build mới nhất tại `/dist` (`chrome://extensions` → **Reload** extension).
-2. Bắt đầu phiên **Countdown 25 phút**, đợi qua **3–5 phút** (thử cả trường hợp để chạy liên tục lẫn trường hợp đang **Pause**), rồi bấm **Give Up** → xác nhận màn kết thúc hiển thị đúng số phút tập trung (`3m`/`5m`) và `+0` Coin / `+0` XP.
-3. **Không bấm Exit / Thoát**: đóng popup hoặc giữ nguyên, cho máy **Sleep** (hoặc khóa máy ngủ 15–30 phút rồi đánh thức lại).
-4. Mở lại biểu tượng extension **Focus Quest**: xác nhận màn tổng kết vẫn khóa đúng số phút ban đầu (`3m`/`5m`), đồng hồ không chạy thêm, không tự thoát về Bản đồ; sau đó bấm **Exit / Thoát** để xác nhận trở về tab **Map** sạch sẽ.
+- **Chưa kiểm chứng trực quan trên trình duyệt Chrome thật đối với UX-5.1** vì môi trường thực thi hiện tại chỉ có Node.js headless CLI (không có Chrome GUI / DevTools runtime).
+- Không có bất kỳ kết quả giả lập PASS nào cho animation RAF thực tế trên popup Chrome `400×600`, thao tác kéo chuột/scroll wheel thật, hoặc kiểm tra thị giác 60fps.
+- Toàn bộ hành vi DOM/RAF/ResizeObserver thực tế trên Chrome thật cần được nghiệm thu trực tiếp bằng bộ build mới tại `dist/` theo checklist ở Mục 9.
 
 ---
 
-**DỪNG — CHỜ NGƯỜI DÙNG NGHIỆM THU VÀ DUYỆT GIAI ĐOẠN UX-6.**
+## 7. CÁC KỊCH BẢN LIFECYCLE ĐÃ TEST (TỰ ĐỘNG TRÊN NODE / COORDINATOR / SSR)
+
+Đã xác minh qua `__tests__/ui/ux51ExpansionCamera.test.ts`:
+1. **Snapshot & Bù tâm 4 hướng:** Chụp snapshot tại nhiều mức zoom (`0.75..1.5`) và pan lệch tâm (`{48, -32}`), hủy không mở đất (khôi phục đúng `initialPan`), và mở đất cả 4 hướng Đông `(8,0)`, Tây `(-4,0)`, Bắc `(0,-4)`, Nam `(0,8)` đều bù đúng độ lệch stage (world drift `< 0.05` cell).
+2. **Toán học Cinematic Pan & Easing:** `computeChunkCenterPan` đưa tâm chunk `4×4` về đúng tâm màn hình (lệch `<= 1px` do làm tròn nguyên) tại mọi mức zoom `0.75/1.0/1.5` & 4 hướng; `easeInOutCubic` & `interpolatePan` biên `0..1` chính xác.
+3. **State Machine 6 trạng thái & Khóa giao diện:** Cho phép đúng luồng chuẩn và luồng hủy modal/chế độ; từ chối nhảy cóc bất hợp lệ (`NORMAL -> CHOPPING`, `EXPANSION_SELECTING -> TERRAIN_UPDATING`, v.v.); SSR chứng minh `CivilizationHeader` disable cả 3 nút `Expand`, `Build`, `Cancel (Esc)` và `MapGridView` disable cả 4 nút toolbar camera (`Zoom Out`, `Reset`, `Zoom In`, `Recenter`) trong các pha khóa.
+4. **Hủy trước commit & Restart giữa reveal:**
+   - Hủy modal hoặc đóng popup trước commit (`CINEMATIC_MOVING`) giữ nguyên `4` chunks và `200` Coins.
+   - Sau commit thực tế qua `CivilizationCoordinator.expandLand({ origin: { x: 8, y: 0 } })` (`5` chunks, `140` Coins), thao tác đóng/mở lại dữ liệu không mất hay rollback chunk đã mua; gọi trùng transaction trên cùng origin bị từ chối sạch và giữ nguyên `140` Coins.
+5. **Kiểm toán tĩnh tài nguyên & cấm auto-fit:** Xác nhận runtime `MapGridView` gọi `computeExpansionFitZoom(` **`0` lần**; có đủ `observer.disconnect()`, `cancelAnimationFrame(`, `clearRevealTimers()`, `window.removeEventListener('keydown'`, `isConfirmInFlightRef` và `isMountedRef`.
+
+---
+
+## 8. XÁC NHẬN KHÔNG LÀM HỎNG UX-5 & LÕI NGHIỆP VỤ
+
+- **Giữ nguyên 100% lớp render UX-5:** Không chỉnh sửa `TerrainBitmapCanvas.tsx`, `terrainBitmapRenderer.ts`, `terrainDecor.ts`, `TileImage.tsx`, `spriteRegistry.ts`, `SpriteGallery.tsx`. SSR tại `__tests__/ui/ux51ExpansionCamera.test.ts` xác nhận `data-testid="map-terrain-bitmap"` giữ nguyên và vùng lưới `map-interaction-grid` vẫn dùng `0` thẻ `<img>` cho địa hình trong suốt tất cả các trạng thái UX-5.1.
+- **Giữ nguyên 100% lõi nghiệp vụ & schema:** Không sửa `GridMap`, `PlacementValidator`, `landExpansion.ts`, `economy`, `SessionCoordinator`, `QuestCoordinator` hay `StorageSchema`; toàn bộ 614 tests cũ + mới (gồm `ux3MapAndForestUi.test.ts`, `ux5TerrainBitmap.test.ts`, `expansionReveal.test.ts`, `terrainDecor.test.ts`) đều PASS 3/3 lần.
+
+---
+
+## 9. CÁC ĐIỂM CÒN TỒN TẠI / CHECKLIST NGHIỆM THU TRÊN CHROME THẬT
+
+- **Tồn tại kỹ thuật đã biết (không mới từ UX-5.1):**
+  - Chưa test tự động được vòng đời RAF frame-by-frame / mouse drag / wheel thực trong DOM trình duyệt (do bộ test repo chạy Node SSR `renderToString`, không cài `jsdom`/Playwright).
+  - Các mục hậu UX-5 khác đã code xong nhưng vẫn chờ duyệt thực tế cùng đợt: giao diện canvas UX-5 trên các màn hình DPR thật (`100%`/`125%`/`150%`), Stage 5c, Stage 2b SW, Stage 6+7, UX-6 Sleep/Wake.
+- **Checklist nghiệm thu thủ công UX-5.1 trên Chrome thật (`chrome://extensions` → Reload `dist/`):**
+  1. Trên tab **Map**, kéo pan lệch khỏi tâm và zoom tới một mức khác `100%` (ví dụ `125%` hoặc `75%`).
+  2. Bấm **Expand**: xác nhận **không** tự zoom out, **không** giật/dịch vị trí camera, khung map **không** bị đẩy co chiều cao bởi banner overlay, các chunk hợp lệ sáng lên đúng vị trí.
+  3. Bấm chọn một chunk hợp lệ ở mép (thử cả chunk **Tây `(-4,0)`** hoặc **Bắc `(0,-4)`** lẫn **Đông `(8,0)`**): xác nhận không thể pan/zoom/bấm nút toolbar/bấm Cancel (Esc)/chọn chunk khác; camera trượt mượt trong ~`600ms` về tâm chunk đó (giữ nguyên mức zoom), rồi mới mở **LandExpansionModal**.
+  4. Thử bấm **Cancel** trên modal (hoặc phím `Esc`): xác nhận modal đóng, không trừ Coins/không mở đất, camera trượt mượt trở lại vị trí & mức zoom ban đầu ở chế độ **EXPANSION_SELECTING**.
+  5. Chọn lại chunk hợp lệ → bấm **Confirm Expansion**: xác nhận camera giữ yên tại tâm chunk suốt cảnh rìu chém (`680ms`), cảnh đất lộ + rung nhẹ (`680–1150ms`) mà **không bị nhảy khung 1 frame**, sau đó trượt mượt về đúng góc nhìn & mức zoom lúc trước khi bật Expand rồi mở khóa về chế độ bình thường.
+  6. Bật `chrome://flags` hoặc OS **Reduced Motion** (tùy chọn): xác nhận không animation kéo dài mà chuyển vị trí dứt khoát và vẫn trả camera bình thường.
+
+---
+
+**DỪNG — CHỜ NGƯỜI DÙNG NGHIỆM THU TRÊN CHROME THẬT VÀ DUYỆT GIAI ĐOẠN UX-5.1.**

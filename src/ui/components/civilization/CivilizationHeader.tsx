@@ -16,6 +16,8 @@ export interface CivilizationHeaderProps {
   onOpenCatalog: () => void;
   onOpenExpansion: () => void;
   isExpansionMode?: boolean;
+  isExpansionLocked?: boolean;
+  canCancelExpansion?: boolean;
   onCancelExpansion?: () => void;
 }
 
@@ -30,6 +32,8 @@ export const CivilizationHeader: React.FC<CivilizationHeaderProps> = ({
   onOpenCatalog,
   onOpenExpansion,
   isExpansionMode = false,
+  isExpansionLocked = false,
+  canCancelExpansion = isExpansionMode && !isExpansionLocked,
   onCancelExpansion,
 }) => {
   const { locale, t } = useTranslation();
@@ -41,7 +45,7 @@ export const CivilizationHeader: React.FC<CivilizationHeaderProps> = ({
     : '';
 
   return (
-    <div className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/80 shrink-0">
+    <div className="relative z-20 border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/80 shrink-0">
       {/* Main Civilization Status & Action Row */}
       <div className="px-3 py-2 flex items-center justify-between gap-2">
         {/* Era & Metrics */}
@@ -82,10 +86,11 @@ export const CivilizationHeader: React.FC<CivilizationHeaderProps> = ({
         <div className="flex items-center gap-1.5 shrink-0">
           <button
             type="button"
-            onClick={onOpenExpansion}
+            disabled={isExpansionLocked}
+            onClick={isExpansionLocked ? undefined : onOpenExpansion}
             aria-pressed={isExpansionMode}
             title={t('civ.expand.title')}
-            className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-medium border rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+            className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-medium border rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
               isExpansionMode
                 ? 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700 shadow-2xs'
                 : 'text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border-slate-200 dark:border-slate-700'
@@ -101,9 +106,10 @@ export const CivilizationHeader: React.FC<CivilizationHeaderProps> = ({
 
           <button
             type="button"
-            onClick={onOpenCatalog}
+            disabled={isExpansionLocked}
+            onClick={isExpansionLocked ? undefined : onOpenCatalog}
             title={t('civ.header.openCatalogTitle')}
-            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md transition-colors shadow-2xs whitespace-nowrap shrink-0 cursor-pointer"
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 dark:disabled:bg-indigo-800 rounded-md transition-colors shadow-2xs whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
           >
             <Hammer className="w-3.5 h-3.5 shrink-0" />
             <span>{t('civ.header.buildBtn')}</span>
@@ -138,11 +144,11 @@ export const CivilizationHeader: React.FC<CivilizationHeaderProps> = ({
         </div>
       )}
 
-      {/* Expansion Mode Active Banner */}
+      {/* Expansion Mode Active Banner (overlay so map viewport size never changes) */}
       {isExpansionMode && !isPlacementMode && (
         <div
           data-testid="expansion-mode-banner"
-          className="px-3 py-1.5 bg-emerald-50 dark:bg-emerald-950/60 border-t border-emerald-200 dark:border-emerald-800/80 flex items-center justify-between gap-2"
+          className="absolute top-full inset-x-0 z-20 px-3 py-1.5 bg-emerald-50/95 dark:bg-emerald-950/95 backdrop-blur-xs border-b border-emerald-200 dark:border-emerald-800/80 shadow-sm flex items-center justify-between gap-2"
         >
           <div className="min-w-0">
             <div className="text-[11px] font-semibold text-emerald-900 dark:text-emerald-200 truncate">
@@ -155,8 +161,9 @@ export const CivilizationHeader: React.FC<CivilizationHeaderProps> = ({
 
           <button
             type="button"
-            onClick={onCancelExpansion}
-            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-200 bg-white dark:bg-slate-900 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 border border-emerald-200 dark:border-emerald-700 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            disabled={!canCancelExpansion}
+            onClick={canCancelExpansion ? onCancelExpansion : undefined}
+            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-200 bg-white dark:bg-slate-900 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 border border-emerald-200 dark:border-emerald-700 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
           >
             <X className="w-3 h-3 shrink-0" />
             <span>{t('civ.expand.cancelEsc')}</span>

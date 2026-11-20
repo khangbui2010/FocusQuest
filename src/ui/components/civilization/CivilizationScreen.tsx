@@ -6,6 +6,7 @@ import {
   BuildingInstance,
 } from '../../../core/civilization/buildingTypes.ts';
 import { GridCoordinate } from '../../../core/civilization/types.ts';
+import { GridMap } from '../../../core/civilization/gridMap.ts';
 import { extractBuildingCoinBonuses } from '../../../core/civilization/civilizationBonusHelper.ts';
 import { aggregateCoinBonus } from '../../../core/economy/coinBonus.ts';
 import { calculatePlayerLevel } from '../../../core/economy/levelSystem.ts';
@@ -31,8 +32,15 @@ import {
   detectNewlyAddedChunks,
   prefersReducedMotion,
 } from './expansionReveal.ts';
-
-const EXPANSION_CINEMATIC_GRACE_MS = 900;
+import {
+  CameraReturnTarget,
+  ExpansionFlowState,
+  canCancelExpansionMode,
+  canSelectExpansionSlot,
+  isExpansionFlowActive,
+  isManualCameraLocked,
+  transitionExpansionFlow,
+} from './expansionCamera.ts';
 import { useTranslation } from '../../../i18n/I18nContext.tsx';
 import {
   localizeErrorMessage,
@@ -64,7 +72,8 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
   const [errorMsg, setErrorMsg] = useState<UiErrorPayload | null>(null);
 
   const [isCatalogOpen, setIsCatalogOpen] = useState<boolean>(false);
-  const [isExpansionMode, setIsExpansionMode] = useState<boolean>(false);
+  const [flowState, setFlowState] = useState<ExpansionFlowState>('NORMAL');
+  const [isCinematicAnimating, setIsCinematicAnimating] = useState<boolean>(false);
   const [selectedExpansionOrigin, setSelectedExpansionOrigin] = useState<GridCoordinate | null>(
     null
   );
@@ -74,14 +83,23 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
     useState<ActiveExpansionReveal | null>(null);
   const [unrevealedChunkOrigin, setUnrevealedChunkOrigin] = useState<GridCoordinate | null>(null);
   const [expansionAnnouncement, setExpansionAnnouncement] = useState<string>('');
-  const [isCinematicWaiting, setIsCinematicWaiting] = useState<boolean>(false);
-  const [isTerrainUpdating, setIsTerrainUpdating] = useState<boolean>(false);
 
+  const isMountedRef = useRef<boolean>(true);
+  const flowStateRef = useRef<ExpansionFlowState>('NORMAL');
+  const isCinematicAnimatingRef = useRef<boolean>(false);
+  const returnTargetRef = useRef<CameraReturnTarget>('NORMAL');
+  const isConfirmInFlightRef = useRef<boolean>(false);
   const knownChunkOriginsRef = useRef<GridCoordinate[] | null>(null);
   const revealSequenceIdRef = useRef<number>(0);
   const impactTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const completeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cinematicGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const updateFlowState = useCallback((next: ExpansionFlowState) => {
+    const validated = transitionExpansionFlow(flowStateRef.current, next);
+    flowStateRef.current = validated;
+    setFlowState(validated);
+    return validated;
+  }, []);
 
   const clearRevealTimers = useCallback(() => {
     if (impactTimerRef.current !== null) {
@@ -95,15 +113,14 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
   }, []);
 
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
+      isMountedRef.current = false;
       clearRevealTimers();
-      if (cinematicGraceTimerRef.current !== null) {
-        clearTimeout(cinematicGraceTimerRef.current);
-      }
     };
   }, [clearRevealTimers]);
 
-  // Post-commit chunk-set diff detector: never fires on initial hydrate, cleans up on unmount
+  // Post-commit chunk-set diff detector: never fires on initial hydrate, drives CHOPPING -> TERRAIN_UPDATING -> CAMERA_RETURNING
   useEffect(() => {
     if (!civState) return;
     const currentChunks = civState.grid.chunks;
@@ -121,12 +138,26 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
       t('civ.expand.ariaAnnouncement', { x: latestOrigin.x, y: latestOrigin.y })
     );
 
+    const isDrivenByActiveExpansion =
+      flowStateRef.current === 'CINEMATIC_MOVING' || flowStateRef.current === 'CHOPPING';
+
     clearRevealTimers();
     const reduced = prefersReducedMotion();
     if (reduced) {
       setActiveExpansionReveal(null);
       setUnrevealedChunkOrigin(null);
+      if (isDrivenByActiveExpansion) {
+        updateFlowState('CHOPPING');
+        updateFlowState('TERRAIN_UPDATING');
+        returnTargetRef.current = 'NORMAL';
+        setSelectedExpansionOrigin(null);
+        updateFlowState('CAMERA_RETURNING');
+      }
       return;
+    }
+
+    if (isDrivenByActiveExpansion) {
+      updateFlowState('CHOPPING');
     }
 
     const seqId = ++revealSequenceIdRef.current;
@@ -139,20 +170,36 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
     setUnrevealedChunkOrigin(latestOrigin);
 
     impactTimerRef.current = setTimeout(() => {
+      impactTimerRef.current = null;
+      if (!isMountedRef.current || revealSequenceIdRef.current !== seqId) return;
       setUnrevealedChunkOrigin((prev) =>
         prev && prev.x === latestOrigin.x && prev.y === latestOrigin.y ? null : prev
       );
-      impactTimerRef.current = null;
+      if (flowStateRef.current === 'CHOPPING') {
+        updateFlowState('TERRAIN_UPDATING');
+      }
     }, EXPANSION_IMPACT_MS);
 
     completeTimerRef.current = setTimeout(() => {
+      completeTimerRef.current = null;
+      if (!isMountedRef.current || revealSequenceIdRef.current !== seqId) return;
       setActiveExpansionReveal((prev) => (prev && prev.id === seqId ? null : prev));
       setUnrevealedChunkOrigin((prev) =>
         prev && prev.x === latestOrigin.x && prev.y === latestOrigin.y ? null : prev
       );
-      completeTimerRef.current = null;
+      if (
+        flowStateRef.current === 'CHOPPING' ||
+        flowStateRef.current === 'TERRAIN_UPDATING'
+      ) {
+        if (flowStateRef.current === 'CHOPPING') {
+          updateFlowState('TERRAIN_UPDATING');
+        }
+        returnTargetRef.current = 'NORMAL';
+        setSelectedExpansionOrigin(null);
+        updateFlowState('CAMERA_RETURNING');
+      }
     }, EXPANSION_ANIMATION_DURATION_MS);
-  }, [civState, clearRevealTimers, t]);
+  }, [civState, clearRevealTimers, t, updateFlowState]);
 
   const loadCivilizationData = useCallback(async () => {
     try {
@@ -160,6 +207,7 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
         getCivilizationStateClient(),
         sendExtensionMessage<FullSessionStateResponse>({ action: 'GET_SESSION_STATE' }),
       ]);
+      if (!isMountedRef.current) return;
 
       if (civRes.success && civRes.data) {
         setCivState(civRes.data);
@@ -182,9 +230,12 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
         setFetchedLifetimeMinutes(lifetime);
       }
     } catch (err) {
+      if (!isMountedRef.current) return;
       setErrorMsg(toUiErrorPayload(err, 'CIV_LOAD_FAILED', 'Failed to load civilization state.'));
     } finally {
-      setIsLoading(false);
+      if (isMountedRef.current) {
+        setIsLoading(false);
+      }
     }
   }, []);
 
@@ -196,19 +247,44 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
     return unsubscribe;
   }, [loadCivilizationData]);
 
-  // Escape key cancels active modal/confirmation -> expansion mode -> catalog -> placement mode
+  const handleCloseExpansionModal = useCallback(() => {
+    if (
+      isSubmitting ||
+      isConfirmInFlightRef.current ||
+      flowStateRef.current !== 'CINEMATIC_MOVING' ||
+      isCinematicAnimatingRef.current
+    ) {
+      return;
+    }
+    returnTargetRef.current = 'EXPANSION_SELECTING';
+    setSelectedExpansionOrigin(null);
+    updateFlowState('CAMERA_RETURNING');
+  }, [isSubmitting, updateFlowState]);
+
+  const handleCancelExpansionMode = useCallback(() => {
+    if (isSubmitting || !canCancelExpansionMode(flowStateRef.current)) return;
+    returnTargetRef.current = 'NORMAL';
+    setSelectedExpansionOrigin(null);
+    isCinematicAnimatingRef.current = false;
+    setIsCinematicAnimating(false);
+    updateFlowState('CAMERA_RETURNING');
+  }, [isSubmitting, updateFlowState]);
+
+  // Escape key cancels active modal/confirmation -> expansion selecting -> catalog -> placement mode
+  // Strictly disallowed while camera animation / chopping / terrain update / returning is running.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       if (inspectedBuilding) {
         setInspectedBuilding(null);
-      } else if (selectedExpansionOrigin) {
-        if (!isCinematicWaiting) {
-          setSelectedExpansionOrigin(null);
-          setIsCinematicWaiting(false);
-        }
-      } else if (isExpansionMode) {
-        setIsExpansionMode(false);
+      } else if (
+        flowStateRef.current === 'CINEMATIC_MOVING' &&
+        !isCinematicAnimatingRef.current &&
+        selectedExpansionOrigin
+      ) {
+        handleCloseExpansionModal();
+      } else if (canCancelExpansionMode(flowStateRef.current)) {
+        handleCancelExpansionMode();
       } else if (isCatalogOpen) {
         setIsCatalogOpen(false);
       } else if (placementDef) {
@@ -221,9 +297,10 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
   }, [
     inspectedBuilding,
     selectedExpansionOrigin,
-    isExpansionMode,
     isCatalogOpen,
     placementDef,
+    handleCloseExpansionModal,
+    handleCancelExpansionMode,
   ]);
 
   const effectiveLifetimeFocusMinutes =
@@ -244,43 +321,52 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
   );
 
   const chunksCount = civState ? civState.grid.chunks.length : 0;
+  const isExpansionMode = isExpansionFlowActive(flowState);
+  const isExpansionLocked = isManualCameraLocked(flowState) || isSubmitting;
+  const canCancelExpansion = canCancelExpansionMode(flowState) && !isSubmitting;
 
   const handleOpenCatalog = () => {
+    if (isManualCameraLocked(flowStateRef.current) || isSubmitting) return;
     setErrorMsg(null);
-    setIsExpansionMode(false);
+    if (flowStateRef.current === 'EXPANSION_SELECTING') {
+      updateFlowState('NORMAL');
+    }
     setSelectedExpansionOrigin(null);
     setInspectedBuilding(null);
     setIsCatalogOpen(true);
   };
 
   const handleToggleExpansionMode = () => {
-    setErrorMsg(null);
-    setIsCatalogOpen(false);
-    setInspectedBuilding(null);
-    setPlacementDef(null);
-    setSelectedExpansionOrigin(null);
-    setIsCinematicWaiting(false);
-    setIsTerrainUpdating(false);
-    setIsExpansionMode((prev) => !prev);
-  };
-
-  const handleCancelExpansionMode = () => {
-    setSelectedExpansionOrigin(null);
-    setIsCinematicWaiting(false);
-    setIsTerrainUpdating(false);
-    setIsExpansionMode(false);
+    if (isSubmitting) return;
+    if (flowStateRef.current === 'NORMAL') {
+      setErrorMsg(null);
+      setIsCatalogOpen(false);
+      setInspectedBuilding(null);
+      setPlacementDef(null);
+      setSelectedExpansionOrigin(null);
+      isCinematicAnimatingRef.current = false;
+      setIsCinematicAnimating(false);
+      updateFlowState('EXPANSION_SELECTING');
+      return;
+    }
+    if (canCancelExpansionMode(flowStateRef.current)) {
+      handleCancelExpansionMode();
+    }
   };
 
   const handleSelectBuildingForPlacement = (def: BuildingDefinition) => {
+    if (isManualCameraLocked(flowStateRef.current)) return;
     setErrorMsg(null);
     setIsCatalogOpen(false);
-    setIsExpansionMode(false);
+    if (flowStateRef.current === 'EXPANSION_SELECTING') {
+      updateFlowState('NORMAL');
+    }
     setSelectedExpansionOrigin(null);
     setPlacementDef(def);
   };
 
   const handlePlaceBuilding = async (pos: GridCoordinate) => {
-    if (!placementDef || isSubmitting) return;
+    if (!placementDef || isSubmitting || isExpansionFlowActive(flowStateRef.current)) return;
     setIsSubmitting(true);
     setErrorMsg(null);
     try {
@@ -288,6 +374,7 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
         buildingDefinitionId: placementDef.id,
         position: pos,
       });
+      if (!isMountedRef.current) return;
       if (res.success && res.data) {
         setCivState(res.data.civilizationState);
         setEconomy(res.data.economy);
@@ -301,18 +388,22 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
         });
       }
     } catch (err) {
+      if (!isMountedRef.current) return;
       setErrorMsg(toUiErrorPayload(err, 'CIV_PLACE_REQUEST_FAILED', 'Placement request failed.'));
     } finally {
-      setIsSubmitting(false);
+      if (isMountedRef.current) {
+        setIsSubmitting(false);
+      }
     }
   };
 
   const handleRemoveBuilding = async (instanceId: string) => {
-    if (isSubmitting) return;
+    if (isSubmitting || isExpansionFlowActive(flowStateRef.current)) return;
     setIsSubmitting(true);
     setErrorMsg(null);
     try {
       const res = await removeBuildingClient({ buildingInstanceId: instanceId });
+      if (!isMountedRef.current) return;
       if (res.success && res.data) {
         setCivState(res.data.civilizationState);
         setInspectedBuilding(null);
@@ -325,61 +416,119 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
         });
       }
     } catch (err) {
+      if (!isMountedRef.current) return;
       setErrorMsg(toUiErrorPayload(err, 'CIV_REMOVE_REQUEST_FAILED', 'Removal request failed.'));
     } finally {
-      setIsSubmitting(false);
+      if (isMountedRef.current) {
+        setIsSubmitting(false);
+      }
     }
   };
 
-  const handleSelectExpansionSlot = (origin: GridCoordinate) => {
-    setErrorMsg(null);
-    setIsCinematicWaiting(true);
-    setSelectedExpansionOrigin(origin);
-  };
+  const handleSelectExpansionSlot = useCallback(
+    (origin: GridCoordinate) => {
+      if (
+        isSubmitting ||
+        isConfirmInFlightRef.current ||
+        !canSelectExpansionSlot(flowStateRef.current) ||
+        !civState
+      ) {
+        return;
+      }
+      const validSlots = GridMap.fromSnapshot(civState.grid).getAvailableExpansionSlots();
+      const stillValid = validSlots.some((s) => s.x === origin.x && s.y === origin.y);
+      if (!stillValid) {
+        setErrorMsg({ message: t('civ.expand.onlyAdjacentHint') });
+        return;
+      }
+
+      setErrorMsg(null);
+      isCinematicAnimatingRef.current = true;
+      setIsCinematicAnimating(true);
+      setSelectedExpansionOrigin(origin);
+      updateFlowState('CINEMATIC_MOVING');
+    },
+    [civState, isSubmitting, t, updateFlowState]
+  );
 
   const handleCinematicArrived = useCallback(() => {
-    setIsCinematicWaiting(false);
+    if (!isMountedRef.current || flowStateRef.current !== 'CINEMATIC_MOVING') return;
+    isCinematicAnimatingRef.current = false;
+    setIsCinematicAnimating(false);
   }, []);
 
+  const handleCameraReturnArrived = useCallback(() => {
+    if (!isMountedRef.current || flowStateRef.current !== 'CAMERA_RETURNING') return;
+    const nextState: ExpansionFlowState =
+      returnTargetRef.current === 'EXPANSION_SELECTING' ? 'EXPANSION_SELECTING' : 'NORMAL';
+    returnTargetRef.current = 'NORMAL';
+    setSelectedExpansionOrigin(null);
+    isCinematicAnimatingRef.current = false;
+    setIsCinematicAnimating(false);
+    updateFlowState(nextState);
+  }, [updateFlowState]);
+
   const handleConfirmExpandLand = async (origin: GridCoordinate) => {
-    if (isSubmitting || isTerrainUpdating) return;
+    if (
+      isSubmitting ||
+      isConfirmInFlightRef.current ||
+      flowStateRef.current !== 'CINEMATIC_MOVING' ||
+      isCinematicAnimatingRef.current ||
+      !civState
+    ) {
+      return;
+    }
+
+    const validSlots = GridMap.fromSnapshot(civState.grid).getAvailableExpansionSlots();
+    const stillValid = validSlots.some((s) => s.x === origin.x && s.y === origin.y);
+    if (!stillValid) {
+      setErrorMsg({ message: t('civ.expand.onlyAdjacentHint') });
+      returnTargetRef.current = 'EXPANSION_SELECTING';
+      setSelectedExpansionOrigin(null);
+      updateFlowState('CAMERA_RETURNING');
+      return;
+    }
+
+    isConfirmInFlightRef.current = true;
     setIsSubmitting(true);
-    setIsTerrainUpdating(true);
     setErrorMsg(null);
-    let committed = false;
     try {
       const res = await expandLandClient({ origin });
+      if (!isMountedRef.current) return;
+
       if (res.success && res.data) {
-        committed = true;
+        returnTargetRef.current = 'NORMAL';
         setCivState(res.data.civilizationState);
         setEconomy(res.data.economy);
-        setSelectedExpansionOrigin(null);
-        setIsTerrainUpdating(false);
-        setIsExpansionMode(false);
         await onStateMutated?.();
       } else {
-        setIsTerrainUpdating(false);
         setErrorMsg({
           message: res.error || 'Could not expand territory.',
           code: res.errorCode ?? 'CIV_EXPAND_REQUEST_FAILED',
           params: res.errorParams,
         });
+        returnTargetRef.current = 'EXPANSION_SELECTING';
+        setSelectedExpansionOrigin(null);
+        updateFlowState('CAMERA_RETURNING');
       }
     } catch (err) {
-      setIsTerrainUpdating(false);
+      if (!isMountedRef.current) return;
       setErrorMsg(toUiErrorPayload(err, 'CIV_EXPAND_REQUEST_FAILED', 'Expansion request failed.'));
+      returnTargetRef.current = 'EXPANSION_SELECTING';
+      setSelectedExpansionOrigin(null);
+      updateFlowState('CAMERA_RETURNING');
     } finally {
-      if (committed) {
-        if (cinematicGraceTimerRef.current !== null) {
-          clearTimeout(cinematicGraceTimerRef.current);
-        }
-        cinematicGraceTimerRef.current = setTimeout(() => {
-          cinematicGraceTimerRef.current = null;
-        }, EXPANSION_CINEMATIC_GRACE_MS);
+      isConfirmInFlightRef.current = false;
+      if (isMountedRef.current) {
+        setIsSubmitting(false);
       }
-      setIsSubmitting(false);
     }
   };
+
+  const isExpansionModalOpen =
+    flowState === 'CINEMATIC_MOVING' &&
+    !isCinematicAnimating &&
+    Boolean(selectedExpansionOrigin);
 
   return (
     <div className="relative flex-1 min-h-0 w-full flex flex-col overflow-hidden bg-slate-100 dark:bg-slate-950">
@@ -394,6 +543,8 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
         onOpenCatalog={handleOpenCatalog}
         onOpenExpansion={handleToggleExpansionMode}
         isExpansionMode={isExpansionMode}
+        isExpansionLocked={isExpansionLocked}
+        canCancelExpansion={canCancelExpansion}
         onCancelExpansion={handleCancelExpansionMode}
       />
 
@@ -429,18 +580,23 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
           placementDef={placementDef}
           onPlaceBuilding={handlePlaceBuilding}
           onInspectBuilding={(inst) => {
+            if (isExpansionFlowActive(flowStateRef.current)) return;
             setErrorMsg(null);
             setInspectedBuilding(inst);
           }}
           isSubmitting={isSubmitting}
           isExpansionMode={isExpansionMode}
+          expansionFlowState={flowState}
           selectedExpansionOrigin={selectedExpansionOrigin}
           onSelectExpansionSlot={handleSelectExpansionSlot}
-          onInvalidExpansionClick={() => setErrorMsg({ message: t('civ.expand.onlyAdjacentHint') })}
+          onInvalidExpansionClick={() => {
+            if (!canSelectExpansionSlot(flowStateRef.current)) return;
+            setErrorMsg({ message: t('civ.expand.onlyAdjacentHint') });
+          }}
           activeExpansionReveal={activeExpansionReveal}
           unrevealedChunkOrigin={unrevealedChunkOrigin}
-          expansionCommitted={false}
           onCinematicArrived={handleCinematicArrived}
+          onCameraReturnArrived={handleCameraReturnArrived}
         />
       )}
 
@@ -470,16 +626,13 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
       />
 
       <LandExpansionModal
-        isOpen={isExpansionMode && Boolean(selectedExpansionOrigin) && !isCinematicWaiting}
+        isOpen={isExpansionModalOpen}
         selectedOrigin={selectedExpansionOrigin}
         chunksCount={chunksCount}
         playerLevel={playerLevel}
         playerCoins={economy.focusCoins}
         onConfirm={handleConfirmExpandLand}
-        onClose={() => {
-          setSelectedExpansionOrigin(null);
-          setIsCinematicWaiting(false);
-        }}
+        onClose={handleCloseExpansionModal}
         isSubmitting={isSubmitting}
       />
     </div>

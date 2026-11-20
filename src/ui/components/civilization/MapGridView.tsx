@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useCallback, useEffect, useLayoutEffect } from 'react';
 import { ZoomIn, ZoomOut, RotateCcw, MapPin, Plus } from 'lucide-react';
 import { CivilizationState } from '../../../core/civilization/civilizationState.ts';
 import {
@@ -24,10 +24,32 @@ import {
   isCellInChunk,
   prefersReducedMotion,
 } from './expansionReveal.ts';
+import {
+  CameraSnapshot,
+  CameraViewportSize,
+  EXPANSION_CINEMATIC_MS,
+  ExpansionFlowState,
+  canSelectExpansionSlot,
+  computeChunkCenterPan,
+  computeRestoredPanFromSnapshot,
+  createCameraSnapshot,
+  easeInOutCubic,
+  interpolatePan,
+  isExpansionCandidatesVisible,
+  isExpansionFlowActive,
+  isManualCameraLocked,
+} from './expansionCamera.ts';
 import { ExpansionRevealOverlay } from './ExpansionRevealOverlay.tsx';
 import { formatRewardAmount } from '../../utils/formatters.ts';
 import { getLocalizedBuildingName } from '../../utils/buildingI18n.ts';
 import { useTranslation } from '../../../i18n/I18nContext.tsx';
+
+export {
+  EXPANSION_CINEMATIC_MS,
+  computeChunkCenterPan,
+  easeInOutCubic,
+  interpolatePan,
+};
 
 export interface MapGridViewProps {
   civilizationState: CivilizationState;
@@ -36,13 +58,14 @@ export interface MapGridViewProps {
   onInspectBuilding: (inst: BuildingInstance) => void;
   isSubmitting?: boolean;
   isExpansionMode?: boolean;
+  expansionFlowState?: ExpansionFlowState;
   selectedExpansionOrigin?: GridCoordinate | null;
   onSelectExpansionSlot?: (origin: GridCoordinate) => void;
   onInvalidExpansionClick?: () => void;
   activeExpansionReveal?: ActiveExpansionReveal | null;
   unrevealedChunkOrigin?: GridCoordinate | null;
-  expansionCommitted?: boolean;
   onCinematicArrived?: () => void;
+  onCameraReturnArrived?: () => void;
 }
 
 export const CELL_SIZE = 32;
@@ -56,7 +79,8 @@ const MAX_ZOOM = 2.0;
 const ZOOM_STEP = 0.25;
 const WHEEL_ZOOM_STEP = 0.125;
 const DRAG_THRESHOLD_PX = 4;
-export const EXPANSION_CINEMATIC_MS = 600;
+
+const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 
 export function snapZoomToIntegerPixels(rawZoom: number, minZoom = MIN_ZOOM): number {
   const clamped = Math.min(MAX_ZOOM, Math.max(minZoom, rawZoom));
@@ -79,40 +103,6 @@ export function computeExpansionFitZoom(
   return Math.max(EXPANSION_MIN_ZOOM, Math.min(MAX_ZOOM, snapped));
 }
 
-export function computeChunkCenterPan(
-  origin: GridCoordinate,
-  renderMinX: number,
-  renderMinY: number,
-  mapWidthPx: number,
-  mapHeightPx: number,
-  zoom: number
-): { x: number; y: number } {
-  const chunkCenterX = (origin.x + CHUNK_WIDTH / 2 - renderMinX) * CELL_SIZE;
-  const chunkCenterY = (origin.y + CHUNK_HEIGHT / 2 - renderMinY) * CELL_SIZE;
-  return {
-    x: Math.round(-(chunkCenterX - mapWidthPx / 2) * zoom),
-    y: Math.round(-(chunkCenterY - mapHeightPx / 2) * zoom),
-  };
-}
-
-export function easeInOutCubic(t: number): number {
-  if (t <= 0) return 0;
-  if (t >= 1) return 1;
-  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-}
-
-export function interpolatePan(
-  start: { x: number; y: number },
-  end: { x: number; y: number },
-  progress: number
-): { x: number; y: number } {
-  const e = easeInOutCubic(progress);
-  return {
-    x: Math.round(start.x + (end.x - start.x) * e),
-    y: Math.round(start.y + (end.y - start.y) * e),
-  };
-}
-
 export function getPlacementPreviewLabel(
   isValid: boolean,
   reason: PlacementFailureReason | undefined,
@@ -133,12 +123,21 @@ export function getMapStageClassName(
   return 'relative shrink-0 transition-transform duration-150 ease-out';
 }
 
+function scheduleImmediateCallback(cb: () => void): () => void {
+  if (typeof requestAnimationFrame === 'function') {
+    const rafId = requestAnimationFrame(() => cb());
+    return () => cancelAnimationFrame(rafId);
+  }
+  const timerId = setTimeout(cb, 0);
+  return () => clearTimeout(timerId);
+}
+
 interface GridCellProps {
   x: number;
   y: number;
   isUnlocked: boolean;
   isPlacementMode: boolean;
-  isExpansionMode: boolean;
+  isExpansionSelecting: boolean;
   onHover: (coord: GridCoordinate) => void;
   onCellClick: (coord: GridCoordinate, isUnlocked: boolean) => void;
 }
@@ -149,11 +148,11 @@ const GridCell = React.memo<GridCellProps>(
     y,
     isUnlocked,
     isPlacementMode,
-    isExpansionMode,
+    isExpansionSelecting,
     onHover,
     onCellClick,
   }) => {
-    const clickableLocked = isExpansionMode && !isUnlocked;
+    const clickableLocked = isExpansionSelecting && !isUnlocked;
 
     return (
       <div
@@ -194,15 +193,23 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
   onInspectBuilding,
   isSubmitting = false,
   isExpansionMode = false,
+  expansionFlowState,
   selectedExpansionOrigin = null,
   onSelectExpansionSlot,
   onInvalidExpansionClick,
   activeExpansionReveal = null,
   unrevealedChunkOrigin = null,
-  expansionCommitted = false,
   onCinematicArrived,
+  onCameraReturnArrived,
 }) => {
   const { locale, t } = useTranslation();
+
+  const effectiveFlowState: ExpansionFlowState =
+    expansionFlowState ?? (isExpansionMode ? 'EXPANSION_SELECTING' : 'NORMAL');
+  const isExpansionActive = isExpansionFlowActive(effectiveFlowState) || isExpansionMode;
+  const cameraLocked = isManualCameraLocked(effectiveFlowState);
+  const showCandidates = isExpansionCandidatesVisible(effectiveFlowState);
+  const isExpansionSelecting = canSelectExpansionSlot(effectiveFlowState);
 
   const gridMap = useMemo(
     () => GridMap.fromSnapshot(civilizationState.grid),
@@ -211,9 +218,8 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
 
   const boundingBox = useMemo(() => gridMap.getBoundingBox(), [gridMap]);
 
-  const effectiveMargin = isExpansionMode ? EXPANSION_FOREST_MARGIN_CELLS : FOREST_MARGIN_CELLS;
+  const effectiveMargin = isExpansionActive ? EXPANSION_FOREST_MARGIN_CELLS : FOREST_MARGIN_CELLS;
 
-  // Padded display box adds darkened forest border (4 cells wide in expansion mode so all adjacent chunks fit)
   const renderBox = useMemo(
     () => ({
       minX: boundingBox.minX - effectiveMargin,
@@ -231,20 +237,28 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
 
   const [zoom, setZoom] = useState<number>(1.0);
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const [isCinematicMoving, setIsCinematicMoving] = useState(false);
   const [hoverCoord, setHoverCoord] = useState<GridCoordinate | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isZoomTransitionActive, setIsZoomTransitionActive] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const wasExpansionModeRef = useRef<boolean>(isExpansionMode);
-  const savedCameraRef = useRef<{ zoom: number; pan: { x: number; y: number } } | null>(null);
+  const wasExpansionActiveRef = useRef<boolean>(isExpansionActive);
+  const savedCameraRef = useRef<CameraSnapshot | null>(null);
+  const didReturnViaCinematicRef = useRef<boolean>(false);
   const zoomTransitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cinematicRafRef = useRef<number | null>(null);
-  const centeredChunkRef = useRef<GridCoordinate | null>(null);
-  const hadSelectedChunkRef = useRef<boolean>(false);
+  const immediateFinishCancelRef = useRef<(() => void) | null>(null);
+  const viewportSizeRef = useRef<CameraViewportSize>({ width: 0, height: 0 });
   const panRef = useRef(pan);
   panRef.current = pan;
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  const renderBoxRef = useRef(renderBox);
+  renderBoxRef.current = renderBox;
+  const onCinematicArrivedRef = useRef(onCinematicArrived);
+  onCinematicArrivedRef.current = onCinematicArrived;
+  const onCameraReturnArrivedRef = useRef(onCameraReturnArrived);
+  onCameraReturnArrivedRef.current = onCameraReturnArrived;
 
   const clearZoomTransitionTimer = useCallback(() => {
     if (zoomTransitionTimerRef.current !== null) {
@@ -262,19 +276,56 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
     }, 160);
   }, [clearZoomTransitionTimer]);
 
-  const cancelCinematicRaf = useCallback(() => {
+  const cancelCinematicMotion = useCallback(() => {
     if (cinematicRafRef.current !== null) {
-      cancelAnimationFrame(cinematicRafRef.current);
+      if (typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(cinematicRafRef.current);
+      }
       cinematicRafRef.current = null;
+    }
+    if (immediateFinishCancelRef.current) {
+      immediateFinishCancelRef.current();
+      immediateFinishCancelRef.current = null;
     }
   }, []);
 
   useEffect(() => {
     return () => {
       clearZoomTransitionTimer();
-      cancelCinematicRaf();
+      cancelCinematicMotion();
     };
-  }, [clearZoomTransitionTimer, cancelCinematicRaf]);
+  }, [clearZoomTransitionTimer, cancelCinematicMotion]);
+
+  // Track viewport size safely for snapshot completeness and resize resilience
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const updateSize = (width: number, height: number) => {
+      viewportSizeRef.current = {
+        width: Math.max(0, Math.round(width)),
+        height: Math.max(0, Math.round(height)),
+      };
+    };
+
+    const rect = el.getBoundingClientRect();
+    updateSize(rect.width, rect.height);
+
+    if (typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      updateSize(entry.contentRect.width, entry.contentRect.height);
+    });
+    observer.observe(el);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
 
   const hasMovedRef = useRef<boolean>(false);
   const dragStartRef = useRef<{
@@ -284,61 +335,78 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
     panY: number;
   } | null>(null);
 
-  // UX-5.1 Persistent Camera: entering expansion mode snapshots the camera but keeps position and
-  // zoom untouched (no auto-fit). Exiting expansion mode restores the snapshot exactly.
+  // Clear any in-progress drag immediately if camera becomes locked
   useEffect(() => {
-    if (isExpansionMode) {
-      if (!wasExpansionModeRef.current) {
-        savedCameraRef.current = { zoom, pan };
-        wasExpansionModeRef.current = true;
+    if (cameraLocked) {
+      dragStartRef.current = null;
+      setIsDragging(false);
+      clearZoomTransitionTimer();
+      setIsZoomTransitionActive(false);
+    }
+  }, [cameraLocked, clearZoomTransitionTimer]);
+
+  // UX-5.1 Persistent Camera Snapshot: capture without moving camera or changing zoom on entry;
+  // clear cleanly on return to NORMAL without introducing any abrupt jump.
+  useEffect(() => {
+    if (isExpansionActive) {
+      if (!wasExpansionActiveRef.current) {
+        savedCameraRef.current = createCameraSnapshot(
+          panRef.current,
+          zoomRef.current,
+          viewportSizeRef.current,
+          renderBoxRef.current
+        );
+        didReturnViaCinematicRef.current = false;
+        wasExpansionActiveRef.current = true;
       }
-    } else if (wasExpansionModeRef.current) {
+    } else if (wasExpansionActiveRef.current) {
       const restored = savedCameraRef.current;
       savedCameraRef.current = null;
-      wasExpansionModeRef.current = false;
-      setZoom(restored?.zoom ?? 1.0);
-      setPan(restored?.pan ?? { x: 0, y: 0 });
-    }
-    // Intentionally exclude `zoom` and `pan` so only mode transitions touch the snapshot
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isExpansionMode]);
-
-  // UX-5.1 Cinematic Recenter: on chunk selection, animate pan to the chunk center keeping zoom;
-  // on selection cleared, cancel and restore the snapshot pan unless the expansion already committed.
-  useEffect(() => {
-    if (!isExpansionMode || !selectedExpansionOrigin) {
-      cancelCinematicRaf();
-      setIsCinematicMoving(false);
-      centeredChunkRef.current = null;
-      if (hadSelectedChunkRef.current && !expansionCommitted) {
-        const restored = savedCameraRef.current;
-        if (restored) setPan({ x: restored.pan.x, y: restored.pan.y });
+      wasExpansionActiveRef.current = false;
+      if (!didReturnViaCinematicRef.current && restored) {
+        setZoom(restored.zoom);
+        setPan(computeRestoredPanFromSnapshot(restored, renderBoxRef.current, CELL_SIZE));
       }
-      hadSelectedChunkRef.current = false;
+      didReturnViaCinematicRef.current = false;
+    }
+  }, [isExpansionActive]);
+
+  // UX-5.1 Cinematic Recenter: on CINEMATIC_MOVING with selectedExpansionOrigin, glide pan smoothly
+  // to center on the chosen chunk while keeping current zoom untouched.
+  useEffect(() => {
+    if (effectiveFlowState !== 'CINEMATIC_MOVING' || !selectedExpansionOrigin) {
       return;
     }
-    hadSelectedChunkRef.current = true;
-    centeredChunkRef.current = selectedExpansionOrigin;
+    cancelCinematicMotion();
+    clearZoomTransitionTimer();
+    setIsZoomTransitionActive(false);
+
     const startPan = { x: panRef.current.x, y: panRef.current.y };
+    const currentZoom = zoomRef.current;
+    const currentBox = renderBoxRef.current;
     const targetPan = computeChunkCenterPan(
       selectedExpansionOrigin,
-      renderBox.minX,
-      renderBox.minY,
-      mapWidthPx,
-      mapHeightPx,
-      zoom
+      currentBox.minX,
+      currentBox.minY,
+      currentBox.width * CELL_SIZE,
+      currentBox.height * CELL_SIZE,
+      currentZoom
     );
-    if (startPan.x === targetPan.x && startPan.y === targetPan.y) {
+
+    if (
+      (startPan.x === targetPan.x && startPan.y === targetPan.y) ||
+      prefersReducedMotion() ||
+      typeof requestAnimationFrame !== 'function' ||
+      typeof performance === 'undefined'
+    ) {
       setPan(targetPan);
-      onCinematicArrived?.();
-      return;
+      immediateFinishCancelRef.current = scheduleImmediateCallback(() => {
+        immediateFinishCancelRef.current = null;
+        onCinematicArrivedRef.current?.();
+      });
+      return cancelCinematicMotion;
     }
-    if (prefersReducedMotion()) {
-      setPan(targetPan);
-      onCinematicArrived?.();
-      return;
-    }
-    setIsCinematicMoving(true);
+
     const startedAt = performance.now();
     const step = (now: number) => {
       const progress = Math.min(1, (now - startedAt) / EXPANSION_CINEMATIC_MS);
@@ -347,30 +415,113 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
         cinematicRafRef.current = requestAnimationFrame(step);
       } else {
         cinematicRafRef.current = null;
-        setIsCinematicMoving(false);
-        onCinematicArrived?.();
+        onCinematicArrivedRef.current?.();
       }
     };
     cinematicRafRef.current = requestAnimationFrame(step);
-    return () => {
-      cancelCinematicRaf();
-      setIsCinematicMoving(false);
-    };
-    // Recomputed only when the selected chunk or mode changes; camera values read via refs
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isExpansionMode, selectedExpansionOrigin, expansionCommitted]);
 
-  // Keep a centered chunk centered when the padded map grows (e.g. renderBox change) or zoom shifts
+    return cancelCinematicMotion;
+  }, [
+    effectiveFlowState,
+    selectedExpansionOrigin,
+    cancelCinematicMotion,
+    clearZoomTransitionTimer,
+  ]);
+
+  // UX-5.1 Camera Returning: glide pan smoothly from chunk center back to initial snapshot
+  // (compensating for any stage center shift caused by newly unlocked West/North/East/South chunks)
+  // and preserve the original zoom.
   useEffect(() => {
-    const chunk = centeredChunkRef.current;
-    if (!chunk || isCinematicMoving) return;
-    setPan(computeChunkCenterPan(chunk, renderBox.minX, renderBox.minY, mapWidthPx, mapHeightPx, zoom));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapWidthPx, mapHeightPx, zoom, isCinematicMoving]);
+    if (effectiveFlowState !== 'CAMERA_RETURNING') {
+      return;
+    }
+    cancelCinematicMotion();
+    clearZoomTransitionTimer();
+    setIsZoomTransitionActive(false);
+
+    const snapshot = savedCameraRef.current;
+    if (!snapshot) {
+      didReturnViaCinematicRef.current = true;
+      immediateFinishCancelRef.current = scheduleImmediateCallback(() => {
+        immediateFinishCancelRef.current = null;
+        onCameraReturnArrivedRef.current?.();
+      });
+      return cancelCinematicMotion;
+    }
+
+    if (zoomRef.current !== snapshot.zoom) {
+      setZoom(snapshot.zoom);
+    }
+
+    const startPan = { x: panRef.current.x, y: panRef.current.y };
+    const initialTarget = computeRestoredPanFromSnapshot(
+      snapshot,
+      renderBoxRef.current,
+      CELL_SIZE
+    );
+
+    if (
+      (startPan.x === initialTarget.x && startPan.y === initialTarget.y) ||
+      prefersReducedMotion() ||
+      typeof requestAnimationFrame !== 'function' ||
+      typeof performance === 'undefined'
+    ) {
+      setPan(initialTarget);
+      didReturnViaCinematicRef.current = true;
+      immediateFinishCancelRef.current = scheduleImmediateCallback(() => {
+        immediateFinishCancelRef.current = null;
+        onCameraReturnArrivedRef.current?.();
+      });
+      return cancelCinematicMotion;
+    }
+
+    const startedAt = performance.now();
+    const step = (now: number) => {
+      const progress = Math.min(1, (now - startedAt) / EXPANSION_CINEMATIC_MS);
+      const liveTarget = computeRestoredPanFromSnapshot(
+        snapshot,
+        renderBoxRef.current,
+        CELL_SIZE
+      );
+      setPan(interpolatePan(startPan, liveTarget, progress));
+      if (progress < 1) {
+        cinematicRafRef.current = requestAnimationFrame(step);
+      } else {
+        cinematicRafRef.current = null;
+        didReturnViaCinematicRef.current = true;
+        onCameraReturnArrivedRef.current?.();
+      }
+    };
+    cinematicRafRef.current = requestAnimationFrame(step);
+
+    return cancelCinematicMotion;
+  }, [effectiveFlowState, cancelCinematicMotion, clearZoomTransitionTimer]);
+
+  // Synchronously keep target chunk dead-center before paint whenever bounding box changes during
+  // CHOPPING / TERRAIN_UPDATING (zero 1-frame flicker on West/North/East/South growth).
+  useIsomorphicLayoutEffect(() => {
+    if (
+      !selectedExpansionOrigin ||
+      (effectiveFlowState !== 'CHOPPING' && effectiveFlowState !== 'TERRAIN_UPDATING')
+    ) {
+      return;
+    }
+    const targetPan = computeChunkCenterPan(
+      selectedExpansionOrigin,
+      renderBox.minX,
+      renderBox.minY,
+      mapWidthPx,
+      mapHeightPx,
+      zoom
+    );
+    if (panRef.current.x !== targetPan.x || panRef.current.y !== targetPan.y) {
+      setPan(targetPan);
+    }
+  }, [effectiveFlowState, selectedExpansionOrigin, renderBox.minX, renderBox.minY, mapWidthPx, mapHeightPx, zoom]);
 
   const availableExpansionSlots = useMemo(
-    () => (isExpansionMode ? gridMap.getAvailableExpansionSlots() : []),
-    [isExpansionMode, gridMap]
+    () => (showCandidates ? gridMap.getAvailableExpansionSlots() : []),
+    [showCandidates, gridMap]
   );
 
   const isCellUnlockedFn = useCallback(
@@ -410,55 +561,55 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
     return gridMap.canPlaceBuilding(hoverCoord, placementDef.footprint);
   }, [gridMap, placementDef, hoverCoord, unrevealedChunkOrigin]);
 
-  const activeMinZoom = isExpansionMode ? EXPANSION_MIN_ZOOM : MIN_ZOOM;
+  const activeMinZoom = isExpansionActive ? EXPANSION_MIN_ZOOM : MIN_ZOOM;
 
   const clampZoom = (val: number): number => snapZoomToIntegerPixels(val, activeMinZoom);
 
   const handleZoomIn = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      if (isCinematicMoving) return;
+      if (cameraLocked) return;
       triggerButtonZoomTransition();
       setZoom((z) => clampZoom(z + ZOOM_STEP));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeMinZoom, triggerButtonZoomTransition]
+    [activeMinZoom, cameraLocked, triggerButtonZoomTransition]
   );
 
   const handleZoomOut = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      if (isCinematicMoving) return;
+      if (cameraLocked) return;
       triggerButtonZoomTransition();
       setZoom((z) => clampZoom(z - ZOOM_STEP));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeMinZoom, triggerButtonZoomTransition]
+    [activeMinZoom, cameraLocked, triggerButtonZoomTransition]
   );
 
   const handleResetZoom = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      if (isCinematicMoving) return;
+      if (cameraLocked) return;
       triggerButtonZoomTransition();
       setZoom(1.0);
     },
-    [triggerButtonZoomTransition]
+    [cameraLocked, triggerButtonZoomTransition]
   );
 
   const handleRecenter = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      if (isCinematicMoving) return;
+      if (cameraLocked) return;
       triggerButtonZoomTransition();
       setPan({ x: 0, y: 0 });
       setZoom(1.0);
     },
-    [triggerButtonZoomTransition]
+    [cameraLocked, triggerButtonZoomTransition]
   );
 
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (e.button !== 0 || isCinematicMoving) return;
+    if (e.button !== 0 || cameraLocked) return;
     hasMovedRef.current = false;
     clearZoomTransitionTimer();
     setIsZoomTransitionActive(false);
@@ -472,7 +623,7 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!dragStartRef.current) return;
+    if (!dragStartRef.current || cameraLocked) return;
     const dx = e.clientX - dragStartRef.current.clientX;
     const dy = e.clientY - dragStartRef.current.clientY;
     if (Math.hypot(dx, dy) >= DRAG_THRESHOLD_PX) {
@@ -493,7 +644,7 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
 
   const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
     e.stopPropagation();
-    if (isCinematicMoving) return;
+    if (cameraLocked) return;
     const delta = e.deltaY < 0 ? WHEEL_ZOOM_STEP : -WHEEL_ZOOM_STEP;
     setZoom((z) => clampZoom(z + delta));
   };
@@ -516,7 +667,7 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
   const handleCellClick = useCallback(
     (coord: GridCoordinate, isUnlocked: boolean) => {
       if (hasMovedRef.current || isSubmitting) return;
-      if (isExpansionMode && !isUnlocked) {
+      if (isExpansionSelecting && !isUnlocked) {
         onInvalidExpansionClick?.();
         return;
       }
@@ -537,7 +688,7 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
       placementDef,
       isSubmitting,
       onPlaceBuilding,
-      isExpansionMode,
+      isExpansionSelecting,
       onInvalidExpansionClick,
       unrevealedChunkOrigin,
     ]
@@ -564,7 +715,13 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
       }}
       onWheel={handleWheel}
       className={`relative flex-1 min-h-0 w-full overflow-hidden touch-none select-none bg-slate-100 dark:bg-slate-950 flex items-center justify-center ${
-        isDragging ? 'cursor-grabbing' : placementDef ? 'cursor-crosshair' : 'cursor-grab'
+        cameraLocked
+          ? 'cursor-default'
+          : isDragging
+          ? 'cursor-grabbing'
+          : placementDef
+          ? 'cursor-crosshair'
+          : 'cursor-grab'
       }`}
     >
       {/* Interactive Pan/Zoom Stage */}
@@ -573,14 +730,19 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
         data-render-width={renderBox.width}
         data-render-height={renderBox.height}
         data-cell-px={CELL_SIZE * zoom}
-        data-expansion-mode={isExpansionMode ? 'true' : 'false'}
+        data-expansion-mode={isExpansionActive ? 'true' : 'false'}
+        data-expansion-flow-state={effectiveFlowState}
+        data-camera-locked={cameraLocked ? 'true' : 'false'}
+        data-camera-zoom={zoom}
+        data-camera-pan-x={Math.round(pan.x)}
+        data-camera-pan-y={Math.round(pan.y)}
         style={{
           transform: `translate(${Math.round(pan.x)}px, ${Math.round(pan.y)}px) scale(${zoom})`,
           transformOrigin: 'center center',
           width: mapWidthPx,
           height: mapHeightPx,
         }}
-        className={getMapStageClassName(isDragging, isZoomTransitionActive)}
+        className={getMapStageClassName(isDragging || cameraLocked, isZoomTransitionActive)}
       >
         <div
           key={shouldShakeMap ? `shake-${activeExpansionReveal?.id}` : 'shake-idle'}
@@ -623,7 +785,7 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
               y={cell.y}
               isUnlocked={cell.unlocked}
               isPlacementMode={Boolean(placementDef)}
-              isExpansionMode={isExpansionMode}
+              isExpansionSelecting={isExpansionSelecting}
               onHover={handleHoverCell}
               onCellClick={handleCellClick}
             />
@@ -656,8 +818,8 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
           );
         })}
 
-        {/* Expandable Adjacent Candidate 4x4 Chunks (Expansion Mode Only) */}
-        {isExpansionMode &&
+        {/* Expandable Adjacent Candidate 4x4 Chunks */}
+        {showCandidates &&
           availableExpansionSlots.map((slot) => {
             const left = (slot.x - renderBox.minX) * CELL_SIZE;
             const top = (slot.y - renderBox.minY) * CELL_SIZE;
@@ -665,6 +827,7 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
             const height = CHUNK_HEIGHT * CELL_SIZE;
             const isSelected =
               selectedExpansionOrigin?.x === slot.x && selectedExpansionOrigin?.y === slot.y;
+            const slotDisabled = isSubmitting || !isExpansionSelecting || Boolean(selectedExpansionOrigin);
 
             return (
               <button
@@ -672,21 +835,21 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
                 type="button"
                 data-expansion-candidate={`${slot.x},${slot.y}`}
                 aria-label={t('civ.expand.candidateAria', { x: slot.x, y: slot.y })}
-                disabled={isSubmitting || Boolean(selectedExpansionOrigin)}
+                disabled={slotDisabled}
                 onMouseDown={(e) => {
                   hasMovedRef.current = false;
                   e.stopPropagation();
                 }}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (hasMovedRef.current || isSubmitting) return;
+                  if (hasMovedRef.current || slotDisabled) return;
                   onSelectExpansionSlot?.(slot);
                 }}
                 style={{ left, top, width, height }}
-                className={`absolute z-20 box-border rounded-sm flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer ${
+                className={`absolute z-20 box-border rounded-sm flex flex-col items-center justify-center gap-0.5 transition-all ${
                   isSelected
-                    ? 'border-2 border-amber-300 bg-amber-300/30 ring-2 ring-amber-300/80 shadow-lg text-white'
-                    : 'border-2 border-emerald-300/90 bg-emerald-400/20 hover:bg-emerald-300/35 hover:border-emerald-200 animate-pulse text-emerald-50 shadow-md'
+                    ? 'border-2 border-amber-300 bg-amber-300/30 ring-2 ring-amber-300/80 shadow-lg text-white cursor-default'
+                    : 'border-2 border-emerald-300/90 bg-emerald-400/20 hover:bg-emerald-300/35 hover:border-emerald-200 animate-pulse text-emerald-50 shadow-md cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed disabled:animate-none'
                 }`}
               >
                 <span className="w-7 h-7 rounded-full bg-slate-950/65 border border-white/50 flex items-center justify-center shadow-xs">
@@ -743,8 +906,8 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
               }}
               onClick={(e) => {
                 e.stopPropagation();
-                if (hasMovedRef.current || isSubmitting) return;
-                if (placementDef || isExpansionMode) return;
+                if (hasMovedRef.current || isSubmitting || cameraLocked) return;
+                if (placementDef || isExpansionActive) return;
                 onInspectBuilding(inst);
               }}
               style={{ left, top, width, height }}
@@ -823,7 +986,9 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
       <div
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
-        className="absolute top-2 left-2 z-10 px-2 py-1 rounded-md bg-white/85 dark:bg-slate-900/85 backdrop-blur-sm border border-slate-200/80 dark:border-slate-700/80 text-[10px] font-medium text-slate-600 dark:text-slate-300 flex items-center gap-1 tabular-nums pointer-events-auto"
+        className={`absolute ${
+          isExpansionActive && !placementDef ? 'top-12' : 'top-2'
+        } left-2 z-10 px-2 py-1 rounded-md bg-white/85 dark:bg-slate-900/85 backdrop-blur-sm border border-slate-200/80 dark:border-slate-700/80 text-[10px] font-medium text-slate-600 dark:text-slate-300 flex items-center gap-1 tabular-nums pointer-events-auto transition-[top] duration-150`}
       >
         <MapPin className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
         <span>
@@ -844,9 +1009,9 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
           type="button"
           title={t('civ.map.zoomOut')}
           aria-label={t('civ.map.zoomOut')}
-          disabled={zoom <= activeMinZoom}
+          disabled={cameraLocked || zoom <= activeMinZoom}
           onClick={handleZoomOut}
-          className="w-6 h-6 rounded flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 transition-colors cursor-pointer"
+          className="w-6 h-6 rounded flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
         >
           <ZoomOut className="w-3.5 h-3.5" />
         </button>
@@ -854,8 +1019,9 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
         <button
           type="button"
           title={t('civ.map.resetZoom')}
+          disabled={cameraLocked}
           onClick={handleResetZoom}
-          className="px-1.5 h-6 rounded text-[10px] font-mono font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 tabular-nums transition-colors cursor-pointer"
+          className="px-1.5 h-6 rounded text-[10px] font-mono font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed tabular-nums transition-colors cursor-pointer"
         >
           {`${zoomPercent}%`}
         </button>
@@ -864,9 +1030,9 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
           type="button"
           title={t('civ.map.zoomIn')}
           aria-label={t('civ.map.zoomIn')}
-          disabled={zoom >= MAX_ZOOM}
+          disabled={cameraLocked || zoom >= MAX_ZOOM}
           onClick={handleZoomIn}
-          className="w-6 h-6 rounded flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 transition-colors cursor-pointer"
+          className="w-6 h-6 rounded flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
         >
           <ZoomIn className="w-3.5 h-3.5" />
         </button>
@@ -877,8 +1043,9 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
           type="button"
           title={t('civ.map.recenterTitle')}
           aria-label={t('civ.map.recenterTitle')}
+          disabled={cameraLocked}
           onClick={handleRecenter}
-          className="px-1.5 h-6 rounded inline-flex items-center gap-1 text-[10px] font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors whitespace-nowrap cursor-pointer"
+          className="px-1.5 h-6 rounded inline-flex items-center gap-1 text-[10px] font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap cursor-pointer"
         >
           <RotateCcw className="w-3 h-3 shrink-0" />
           <span>{t('civ.map.recenter')}</span>
