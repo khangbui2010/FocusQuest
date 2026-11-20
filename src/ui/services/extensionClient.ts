@@ -634,6 +634,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
             status: 'COMPLETED',
             currentPauseStartedAt: null,
             completedAt: now,
+            finalFocusMinutes: currentSession.targetMinutes,
             rewardProcessed: true,
           };
           mockState.currentSession = completedSession;
@@ -843,6 +844,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
               currentPauseStartedAt: null,
               pauseExpiresAt: null,
               completedAt: now,
+              finalFocusMinutes: plannedFocusMinutes,
               rewardProcessed: true,
               lockedMultiplier: cdMultiplier,
               accumulatedFocusMs: (s.accumulatedFocusMs ?? 0) + focusDuration * 60 * 1000,
@@ -1028,10 +1030,46 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
       if (!mockState.currentSession) {
         return { success: false, error: 'No session to give up.', errorCode: 'NO_SESSION_GIVE_UP' };
       }
+      const s = mockState.currentSession;
+      let totalPauseMs = s.totalPauseMs;
+      let currentPauseDurationMs = 0;
+      const pauseHistory = [...s.pauseHistory];
+      if (s.status === 'PAUSED' && s.currentPauseStartedAt) {
+        const pRecord = TimeCalculator.finalizePause(s.currentPauseStartedAt, now);
+        totalPauseMs += pRecord.durationMs;
+        currentPauseDurationMs = pRecord.durationMs;
+        pauseHistory.push(pRecord);
+      }
+
+      const isPomodoro = s.mode === 'POMODORO_COUNTDOWN' || s.mode === 'POMODORO_STOPWATCH';
+      let focusMinutesToRecord = 0;
+      if (isPomodoro && s.pomodoroState) {
+        focusMinutesToRecord = s.pomodoroState.totalCompletedFocusMinutes;
+        const phasePause = s.pomodoroState.phaseTotalPauseMs + currentPauseDurationMs;
+        if (s.pomodoroState.currentPhase === 'FOCUS') {
+          const rawFocusMs = Math.max(0, now - s.pomodoroState.phaseStartedAt - phasePause);
+          focusMinutesToRecord += Math.floor(rawFocusMs / 60000);
+        }
+      } else {
+        const elapsed = TimeCalculator.calculateElapsedTime({
+          startedAt: s.startedAt,
+          currentTime: now,
+          status: 'RUNNING',
+          currentPauseStartedAt: null,
+          totalCompletedPauseMs: totalPauseMs,
+        });
+        focusMinutesToRecord = elapsed.actualFocusMinutes;
+      }
+
       mockState.currentSession = {
-        ...mockState.currentSession,
+        ...s,
         status: 'ABANDONED',
+        currentPauseStartedAt: null,
+        pauseExpiresAt: null,
+        totalPauseMs,
+        pauseHistory,
         completedAt: now,
+        finalFocusMinutes: focusMinutesToRecord,
         rewardProcessed: true,
       };
       mockState.isBlockingActive = false;
@@ -1170,6 +1208,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         totalPauseMs,
         pauseHistory,
         completedAt: now,
+        finalFocusMinutes: actualFocusMins,
         rewardProcessed: true,
         lockedMultiplier,
         pomodoroState: updatedPomodoroState,

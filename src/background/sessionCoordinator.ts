@@ -819,6 +819,7 @@ export class SessionCoordinator {
         totalPauseMs,
         pauseHistory,
         completedAt: now,
+        finalFocusMinutes: focusMinutesToRecord,
         rewardProcessed: true,
       };
 
@@ -972,6 +973,7 @@ export class SessionCoordinator {
           totalPauseMs,
           pauseHistory,
           completedAt: now,
+          finalFocusMinutes: actualFocusMinutes,
           rewardProcessed: true,
           lockedMultiplier: finalMultiplier,
           pomodoroState: pState
@@ -1070,6 +1072,7 @@ export class SessionCoordinator {
         totalPauseMs,
         pauseHistory,
         completedAt: now,
+        finalFocusMinutes: actualFocusMinutes,
         rewardProcessed: true,
         lockedMultiplier: rewardResult.multiplier,
       };
@@ -1177,6 +1180,7 @@ export class SessionCoordinator {
         status: 'COMPLETED',
         currentPauseStartedAt: null,
         completedAt: now,
+        finalFocusMinutes: session.targetMinutes,
         rewardProcessed: true,
       };
 
@@ -1418,6 +1422,7 @@ export class SessionCoordinator {
               totalPauseMs,
               pauseHistory,
               completedAt: now,
+              finalFocusMinutes: plannedFocusMinutes,
               rewardProcessed: true,
               lockedMultiplier: cdMultiplier,
               pomodoroState: {
@@ -1765,6 +1770,7 @@ export class SessionCoordinator {
           rewardProcessed: true,
           interruptedReason,
           lastKnownValidFocusMinutes: validMinutes,
+          finalFocusMinutes: validMinutes,
           lockedMultiplier: 1.0,
           pomodoroState: current.pomodoroState
             ? {
@@ -1808,6 +1814,7 @@ export class SessionCoordinator {
           rewardProcessed: true,
           interruptedReason,
           lastKnownValidFocusMinutes: validMinutes,
+          finalFocusMinutes: validMinutes,
           pomodoroState: pState
             ? {
                 ...pState,
@@ -1850,6 +1857,7 @@ export class SessionCoordinator {
           rewardProcessed: true,
           interruptedReason,
           lastKnownValidFocusMinutes: validMinutes,
+          finalFocusMinutes: validMinutes,
           lockedMultiplier: reward.multiplier,
         };
 
@@ -2406,6 +2414,7 @@ export class SessionCoordinator {
             rewardProcessed: true,
             interruptedReason: 'BROWSER_CLOSED',
             lastKnownValidFocusMinutes: validMinutes,
+            finalFocusMinutes: validMinutes,
             lockedMultiplier: 1.0,
           };
 
@@ -2485,6 +2494,7 @@ export class SessionCoordinator {
           rewardProcessed: true,
           interruptedReason: 'BROWSER_CLOSED',
           lastKnownValidFocusMinutes: validMinutes,
+          finalFocusMinutes: validMinutes,
           lockedMultiplier: 1.0,
         };
 
@@ -2553,6 +2563,7 @@ export class SessionCoordinator {
           rewardProcessed: true,
           interruptedReason: 'BROWSER_CLOSED',
           lastKnownValidFocusMinutes: totalActualMinutes,
+          finalFocusMinutes: totalActualMinutes,
           pomodoroState: pState
             ? {
                 ...pState,
@@ -2645,6 +2656,7 @@ export class SessionCoordinator {
             rewardProcessed: true,
             interruptedReason: 'BROWSER_CLOSED',
             lastKnownValidFocusMinutes: totalActualMinutes,
+            finalFocusMinutes: totalActualMinutes,
             pomodoroState: latestPState
               ? {
                   ...latestPState,

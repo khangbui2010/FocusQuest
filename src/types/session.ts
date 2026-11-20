@@ -76,6 +76,7 @@ export interface SessionSnapshot {
   pauseExpiresAt?: number | null;  // Unix timestamp (ms) when 5-min pause expires and auto-resumes
   interruptedReason?: 'EXTENSION_DISABLED' | 'EXTENSION_RELOADED' | 'USER_ABANDONED' | 'MANUAL' | 'BROWSER_CLOSED' | 'BROWSER_CRASH' | 'UNKNOWN'; // Diagnostic reason for interruption
   lastKnownValidFocusMinutes?: number; // Focus minutes recorded up to interruption
+  finalFocusMinutes?: number;      // Settled/frozen focus minutes recorded at terminal completion/abandonment/interruption
   lastCheckpointAt?: number;       // Unix timestamp (ms) when focus time was last checkpointed
   accumulatedFocusMs?: number;     // Confirmed focus milliseconds accumulated up to lastCheckpointAt
   pomodoroConfig?: PomodoroConfig; // Configuration if session is in Pomodoro mode

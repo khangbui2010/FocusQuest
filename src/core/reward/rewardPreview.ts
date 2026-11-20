@@ -8,6 +8,10 @@ import {
 } from '../../types/session.ts';
 import { MultiplierRules } from './multiplierRules.ts';
 import { DEFAULT_REWARD_CONFIG } from './rewardEngine.ts';
+import {
+  getFrozenSessionFocusMinutes,
+  isTerminalSessionStatus,
+} from '../timer/timeCalculator.ts';
 
 export interface SessionRewardPreviewInput {
   mode: SessionMode;
@@ -407,11 +411,18 @@ export function getSessionRewardPreviewFromSnapshot(
     coinBonusRate?: number;
   }
 ): SessionRewardPreviewResult {
+  const resolvedActualFocusMinutes =
+    options?.actualFocusMinutes !== undefined
+      ? options.actualFocusMinutes
+      : isTerminalSessionStatus(session.status)
+      ? getFrozenSessionFocusMinutes(session)
+      : undefined;
+
   return getSessionRewardPreview({
     mode: session.mode,
     status: session.status,
     targetMinutes: session.targetMinutes,
-    actualFocusMinutes: options?.actualFocusMinutes,
+    actualFocusMinutes: resolvedActualFocusMinutes,
     lockedMultiplier: session.lockedMultiplier,
     coinBonusRate: options?.coinBonusRate,
     pomodoroConfig: session.pomodoroConfig,

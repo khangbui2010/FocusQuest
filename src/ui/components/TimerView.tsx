@@ -28,7 +28,13 @@ import {
   DEFAULT_POMODORO_CONFIG,
 } from '../../types/session.ts';
 import { FocusProfile } from '../../types/profiles.ts';
-import { TimeCalculator, MAX_PAUSE_DURATION_MS } from '../../core/timer/timeCalculator.ts';
+import {
+  TimeCalculator,
+  MAX_PAUSE_DURATION_MS,
+  getFrozenSessionFocusMinutes,
+  isTerminalSessionStatus,
+  resolveSessionEndTimestamp,
+} from '../../core/timer/timeCalculator.ts';
 import { DEFAULT_REWARD_CONFIG } from '../../core/reward/rewardEngine.ts';
 import {
   getSessionRewardPreview,
@@ -286,15 +292,24 @@ export const TimerView: React.FC<TimerViewProps> = ({
     setActionError(initialActionError ? { message: initialActionError } : null);
   }, [initialActionError, session?.id, session?.status]);
 
-  // Periodic 1-second tick for timestamp-based live countdowns
-  const [currentTime, setCurrentTime] = useState<number>(Date.now());
+  // Periodic 1-second tick ONLY while session is active (RUNNING or PAUSED).
+  // Terminal outcomes (COMPLETED / ABANDONED / INTERRUPTED) and IDLE never run a live clock ticker.
+  const isActiveTimer = Boolean(
+    session && (session.status === 'RUNNING' || session.status === 'PAUSED')
+  );
+  const isTerminalSession = Boolean(session && isTerminalSessionStatus(session.status));
+  const [currentTime, setCurrentTime] = useState<number>(() => Date.now());
 
   useEffect(() => {
+    if (!isActiveTimer) {
+      return;
+    }
+    setCurrentTime(Date.now());
     const timer = setInterval(() => {
       setCurrentTime(Date.now());
     }, 1000);
     return () => clearInterval(timer);
-  }, []);
+  }, [isActiveTimer, session?.id, session?.status]);
 
   // Track phase transitions for audio cues
   const lastPhaseRef = useRef<PomodoroPhase | null>(null);
@@ -310,33 +325,44 @@ export const TimerView: React.FC<TimerViewProps> = ({
     lastPhaseRef.current = currentPhase;
   }, [session?.pomodoroState?.currentPhase, effectiveChimeEnabled]);
 
-  // Compute live wall-clock elapsed time
+  const effectiveCurrentTime = useMemo(() => {
+    if (!session || session.status === 'IDLE') {
+      return 0;
+    }
+    if (isTerminalSession) {
+      return resolveSessionEndTimestamp(session);
+    }
+    return currentTime;
+  }, [session, isTerminalSession, currentTime]);
+
+  // Compute wall-clock elapsed time (live when active, frozen at completion timestamp when terminal)
   const elapsed = useMemo(() => {
     if (!session || session.status === 'IDLE') {
       return null;
     }
     return TimeCalculator.calculateElapsedTime({
       startedAt: session.startedAt,
-      currentTime,
+      currentTime: effectiveCurrentTime,
       status: session.status,
-      currentPauseStartedAt: session.currentPauseStartedAt,
+      currentPauseStartedAt: isTerminalSession ? null : session.currentPauseStartedAt,
       totalCompletedPauseMs: session.totalPauseMs,
+      completedAt: session.completedAt,
     });
-  }, [session, currentTime]);
+  }, [session, effectiveCurrentTime, isTerminalSession]);
 
-  // Pomodoro phase time calculation
+  // Pomodoro phase time calculation (active phases only)
   const pomodoroPhaseCalc = useMemo(() => {
-    if (!session || !session.pomodoroState || !session.pomodoroConfig) {
+    if (!session || !session.pomodoroState || !session.pomodoroConfig || isTerminalSession) {
       return null;
     }
     return TimeCalculator.calculatePomodoroPhaseTime({
       phaseStartedAt: session.pomodoroState.phaseStartedAt,
-      currentTime,
+      currentTime: effectiveCurrentTime,
       phaseTargetMinutes: session.pomodoroState.phaseTargetDurationMinutes,
       phaseTotalPauseMs: session.pomodoroState.phaseTotalPauseMs,
       currentPauseStartedAt: session.currentPauseStartedAt,
     });
-  }, [session, currentTime]);
+  }, [session, effectiveCurrentTime, isTerminalSession]);
 
   // Authoritative background sync when countdown target or break target is reached
   useEffect(() => {
@@ -424,12 +450,7 @@ export const TimerView: React.FC<TimerViewProps> = ({
     const isPomoCountdown = session.mode === 'POMODORO_COUNTDOWN';
     const isPomoStopwatch = session.mode === 'POMODORO_STOPWATCH';
     const isPomodoro = isPomoCountdown || isPomoStopwatch;
-    const focusMinutes =
-      isInterrupted && typeof session.lastKnownValidFocusMinutes === 'number'
-        ? session.lastKnownValidFocusMinutes
-        : elapsed
-        ? elapsed.actualFocusMinutes
-        : 0;
+    const focusMinutes = getFrozenSessionFocusMinutes(session);
 
     const outcomePreview = getSessionRewardPreviewFromSnapshot(session, {
       actualFocusMinutes: focusMinutes,

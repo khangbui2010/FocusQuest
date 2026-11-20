@@ -1,7 +1,7 @@
 # FOCUS QUEST — PROJECT STATUS
 Cập nhật lần cuối: 2026-11-19
-Giai đoạn hiện tại: **Milestone 5B.5 — Giai đoạn 6 + 7 (ĐÓNG Milestone 5B.5)** *(Hoàn thiện i18n, `98` `ErrorCode`, `RewardHelpModal` động, Backlog 4a/4b & đồng bộ tài liệu — **ĐÃ HOÀN TẤT, DỪNG chờ duyệt đóng Milestone 5B.5**)* + **Milestone UX — Giai đoạn UX-5** *(Composite Terrain Canvas Một Tấm trên `MapGridView` — ĐÃ HOÀN TẤT, chờ nghiệm thu trực quan Chrome thật)* *(toàn bộ các giai đoạn trước: UX-1..UX-4, LOFI-1/1b/2, 5B.5 Giai đoạn 1a..5c & 3 đều **ĐÃ DUYỆT**)*.
-Trạng thái: Verified (605/605 Tests PASS 3/3 lần | Build PASS | Lint PASS — test tự động chạy qua Node.js, React SSR `renderToString`, mock 2D canvas context & mock Chrome adapters; **giao diện Stage 5c, canvas UX-5, Service Worker Stage 2b & Stage 6+7 chưa kiểm chứng trực quan trên Chrome thật**; các luồng trước UX-5 gồm popup `400×600`, thanh 5 tab, rìu chém, `blocked.html` DNR, `chrome.i18n`, `manifest`, Offscreen Audio kể cả Pause > 30s và fetch catalog nhạc đã được người dùng nghiệm thu thủ công trên Chrome thật)
+Giai đoạn hiện tại: **Milestone UX — Giai đoạn UX-6** *(Đóng băng số phút & phần thưởng trên màn kết thúc phiên đã xong trước Sleep/Wake — **ĐÃ HOÀN TẤT, DỪNG CHỜ DUYỆT**)* + **Milestone 5B.5 — Giai đoạn 6 + 7** *(ĐÃ HOÀN TẤT, chờ duyệt đóng Milestone 5B.5)* + **Milestone UX — Giai đoạn UX-5** *(Composite Terrain Canvas Một Tấm — ĐÃ HOÀN TẤT, chờ nghiệm thu trực quan Chrome thật)* *(toàn bộ các giai đoạn trước: UX-1..UX-4, LOFI-1/1b/2, 5B.5 Giai đoạn 1a..5c & 3 đều **ĐÃ DUYỆT**)*.
+Trạng thái: Verified (609/609 Tests PASS 3/3 lần | Build PASS | Lint PASS — test tự động chạy qua Node.js, React SSR `renderToString`, mock 2D canvas context & mock Chrome adapters; **giao diện Stage 5c, canvas UX-5, Service Worker Stage 2b, Stage 6+7 và kịch bản Sleep/Wake UX-6 trên Chrome thật chưa kiểm chứng trực quan**; các luồng trước UX-5 gồm popup `400×600`, thanh 5 tab, rìu chém, `blocked.html` DNR, `chrome.i18n`, `manifest`, Offscreen Audio kể cả Pause > 30s và fetch catalog nhạc đã được người dùng nghiệm thu thủ công trên Chrome thật)
 
 ---
 
@@ -82,6 +82,12 @@ Trạng thái: Verified (605/605 Tests PASS 3/3 lần | Build PASS | Lint PASS �
   - **Lưới ô tương tác trong suốt & Camera sạch (`MapGridView.tsx`):** Gỡ bỏ toàn bộ `<img>` / `<TerrainCellLayers>` từng ô trong `MapGridView`, thay bằng `<div data-testid="map-interaction-grid">` rỗng giữ nguyên `hover:after:bg-emerald-300/35`, placement ghost, công trình, viền chunk, Expansion Mode candidates & hoạt ảnh rìu chém mở đất (`unrevealedChunkOrigin` làm canvas lật đúng mốc `680ms`). Gỡ `shadow-sm`; thêm `getMapStageClassName` tắt `transition-transform` khi kéo/tĩnh/wheel (chỉ giữ `160ms` ngắn khi bấm nút zoom).
   - **So sánh song song trong `#sprites` (`SpriteGallery.tsx`):** Giữ toàn bộ preview DOM cũ (`gallery-locked_forest_16x11`, v.v.) và bổ sung khối `"Map terrain bitmap"` (`gallery-terrain_bitmap_16x11`) dùng chung `TerrainBitmapCanvas` cho mẫu `16×11` `(-8,-8)`.
   - **Kiểm thử:** Thêm `__tests__/ui/ux5TerrainBitmap.test.ts` (5 tests: kiểm chứng lệnh canvas 2D giả lập, cache guard & fallback, SSR + drag stage class, chứng minh số học DPR `1..3`/zoom/pan, tích hợp `GridMap` expand) và cập nhật 4 test DOM map cũ (`ux3MapAndForestUi.test.ts`, `terrainDecor.test.ts`, `spriteRegistry.test.ts`, `civilizationView.test.ts`) → `579/579 PASS` 3/3 lần.
+- **Milestone UX *(KHÔNG thuộc Phase 5 / 5B.5 / LOFI)* — Giai đoạn UX-6 (`2026-11-19` — ĐÃ HOÀN TẤT, DỪNG CHỜ DUYỆT):**
+  - **Sửa lỗi gốc (Freeze Terminal Duration & Rewards trước Machine Sleep):** Sửa triệt để lỗi sau khi Give Up (`ABANDONED`) hoặc kết thúc phiên mà chưa bấm `Exit`/`Thoát`, cho máy Sleep rồi mở lại popup thấy số phút tập trung phình to theo đồng hồ thật `Date.now()`.
+  - **Không sửa lõi kinh tế & quy tắc quyết toán:** Giữ nguyên 100% `RewardEngine`, `MultiplierRules`, công thức thưởng, `economy`, thời điểm quyết toán, All-or-Nothing Pomodoro Countdown, LOFI hooks, atomic commit và `CURRENT_SCHEMA_VERSION = 3` (chỉ thêm trường OPTIONAL tương thích ngược `finalFocusMinutes?: number` vào `SessionSnapshot` trong `src/types/session.ts`).
+  - **Một Nguồn Chân Lý Đóng Băng (`timeCalculator.ts`, `rewardPreview.ts`):** Bổ sung `isTerminalSessionStatus`, `resolveSessionEndTimestamp` (neo chặt `completedAt` rồi `lastCheckpointAt`/`lastHeartbeatAt`/`startedAt`, tuyệt đối không rơi về `Date.now()`), và `getFrozenSessionFocusMinutes` (ưu tiên `finalFocusMinutes` → `lastKnownValidFocusMinutes` khi `INTERRUPTED` bảo toàn downtime `BROWSER_CLOSED` → `targetMinutes` khi `COUNTDOWN COMPLETED` → tính fallback tại `completedAt` có trừ pause chưa finalize). Cập nhật `TimeCalculator.calculateElapsedTime` nhận `completedAt?: number | null` và `getSessionRewardPreviewFromSnapshot` tự dùng `getFrozenSessionFocusMinutes` khi ở trạng thái kết thúc.
+  - **Ngừng Đồng Hồ UI & Đồng bộ Coordinator / Simulator (`TimerView.tsx`, `sessionCoordinator.ts`, `extensionClient.ts`):** `TimerView.tsx` chỉ chạy `setInterval(..., 1000)` khi `RUNNING`/`PAUSED` (dừng hẳn khi `IDLE` hoặc terminal), truyền `effectiveCurrentTime` đóng băng vào `calculateElapsedTime`, bỏ qua `pomodoroPhaseCalc`, và dùng `getFrozenSessionFocusMinutes(session)` cho màn kết thúc (giữ nguyên `pomodoroState.totalCompletedFocusMinutes` cho `"Số pha hoàn thành"` ở Pomodoro theo UX-2 & Backlog 4a). `SessionCoordinator` ghi `finalFocusMinutes` tại mọi nhánh `COMPLETED`/`ABANDONED`/`INTERRUPTED`; simulator `extensionClient.ts` bổ sung `finalFocusMinutes` và sửa `GIVE_UP_SESSION` khi đang `PAUSED` (finalize + xóa `currentPauseStartedAt`).
+  - **Kiểm thử:** Thêm `__tests__/ui/ux6TerminalOutcomeFreeze.test.ts` (4 tests: repro Give Up `RUNNING` & `PAUSED` + 4–5h Sleep + `PopupShell` ẩn `Navbar`/`Exit`, đủ 4 mode qua +6h Sleep, `INTERRUPTED` `BROWSER_CLOSED` downtime & fallback snapshot cũ thiếu `finalFocusMinutes`/`completedAt` hoặc còn `currentPauseStartedAt`, idempotency `SERVICE_WORKER_WAKE`/`BROWSER_STARTUP`/`getFullState` + simulator `GIVE_UP_SESSION` từ `PAUSED`) → **`609/609 PASS`** 3/3 lần.
 - **Milestone LOFI *(KHÔNG thuộc Phase 5 / 5B.5)* — Giai đoạn LOFI-1 + LOFI-1b (`2026-11-17` — ĐÃ DUYỆT):**
   - **Chuyển nguồn nhạc từ đóng gói cục bộ sang Online Archive (`FocusQuest-LOFI-archive`):** Gỡ bỏ toàn bộ `MUSIC_CATALOG` hard-code, `public/assets/music/`, file audio cục bộ (`0` file `.mp3/.ogg/.wav/.m4a/.flac` trong `public/` & `dist/`), chuyển thông tin bản quyền về `/CREDITS.md`.
   - **Offscreen Document (`Chrome >= 116`) & Khôi phục qua mốc 30s:** `manifest.json` nâng `"minimum_chrome_version": "116"` để dùng `chrome.runtime.getContexts` chính thức cùng `"offscreen"`; `public/offscreen.html` + `src/offscreen/offscreen.ts` (CSP-safe) phát `<audio>` theo giao thức `target: 'offscreen' | 'background'` (`MUSIC_PLAY`, `MUSIC_PAUSE`, `MUSIC_STOP`, `MUSIC_SEEK`, `MUSIC_SET_VOLUME`, `MUSIC_GET_STATUS`), lưu `positionSec` bền vững qua `MUSIC_POSITION` để tái tạo và tua đúng vị trí khi Chrome đóng Offscreen lúc Pause > 30s (không dùng âm thanh im lặng giữ sống).
@@ -187,12 +193,12 @@ Trạng thái: Verified (605/605 Tests PASS 3/3 lần | Build PASS | Lint PASS �
 
 ## 3. KẾT QUẢ KIỂM ĐỊNH THỰC TẾ (VERIFIED REAL VERIFICATION RESULTS)
 
-*Lưu ý: Các số liệu dưới đây được xác minh trực tiếp bằng việc chạy lệnh thực tế trên repository sau khi hoàn tất **Giai đoạn 6 + 7 (Đóng Milestone 5B.5)** (`2026-11-19`). Toàn bộ test tự động chạy trên Node.js (`UI tests` qua React SSR `renderToString` & mock 2D canvas context, `backend tests` qua mock Chrome adapters). Các luồng trước UX-5 (**popup `400×600` thanh 5 tab, bản đồ/rừng/lớp tối bản DOM, hoạt ảnh rìu chém, `blocked.html` DNR, `chrome.i18n`, `manifest`, Offscreen Audio kể cả Pause > 30 giây và fetch catalog nhạc**) đã được người dùng **nghiệm thu thủ công trên Chrome thật**; **riêng giao diện Stage 5c (`QuestView`/`StatsView`), bản vẽ canvas UX-5, Service Worker Stage 2b và luồng Stage 6+7 chưa kiểm chứng trực quan trên Chrome thật**.*
+*Lưu ý: Các số liệu dưới đây được xác minh trực tiếp bằng việc chạy lệnh thực tế trên repository sau khi hoàn tất **Milestone UX — Giai đoạn UX-6** (`2026-11-19`). Toàn bộ test tự động chạy trên Node.js (`UI tests` qua React SSR `renderToString` & mock 2D canvas context, `backend tests` qua mock Chrome adapters & fake clock). Các luồng trước UX-5 (**popup `400×600` thanh 5 tab, bản đồ/rừng/lớp tối bản DOM, hoạt ảnh rìu chém, `blocked.html` DNR, `chrome.i18n`, `manifest`, Offscreen Audio kể cả Pause > 30 giây và fetch catalog nhạc**) đã được người dùng **nghiệm thu thủ công trên Chrome thật**; **giao diện Stage 5c (`QuestView`/`StatsView`), bản vẽ canvas UX-5, Service Worker Stage 2b, Stage 6+7 và kịch bản Sleep/Wake UX-6 chưa kiểm chứng trực quan trên Chrome thật**.*
 
 ### 3.1. Production Build (`npm run clean && npm run build`)
-- **Trạng thái:** **PASS (Exit code 0)** — Vite `v8.3.8`, `1,754 modules transformed`, thời gian **`789ms`**.
-- **Kiểm tra Artifacts thư mục `dist/` (`26` tệp, Tổng dung lượng tệp thực tế: `1,205,283 B`):**
-  - `dist/background.js`: **CÓ (`98,215 B` / `98.21 kB`, gzip: `21.72 kB`)** *(0 `react-dom` trong background)*.
+- **Trạng thái:** **PASS (Exit code 0)** — Vite `v8.3.8`, `1,754 modules transformed`, thời gian **`696ms`**.
+- **Kiểm tra Artifacts thư mục `dist/` (`26` tệp, Tổng dung lượng tệp thực tế: `1,208,670 B`):**
+  - `dist/background.js`: **CÓ (`98,469 B` / `98.46 kB`, gzip: `21.76 kB`)** *(0 `react-dom` trong background)*.
   - `dist/offscreen.js`: **CÓ (`3,878 B` / `3.87 kB`, gzip: `1.48 kB`)** — Audio engine MV3 chạy trong Offscreen Document.
   - `dist/offscreen.html`: **CÓ (`264 B`)** — CSP-safe (0 inline script).
   - `dist/blocked.js`: **CÓ (`1,321 B` / `1.32 kB`, gzip: `0.60 kB`)** — Module CSP-safe điều khiển đa ngôn ngữ `blocked.html`.
@@ -201,19 +207,19 @@ Trạng thái: Verified (605/605 Tests PASS 3/3 lần | Build PASS | Lint PASS �
   - `dist/manifest.json`: **CÓ (`984 B`)** — Chrome MV3 Manifest (`"minimum_chrome_version": "116"`, `"default_locale": "en"`, `"offscreen"`).
   - `dist/_locales/`: **CÓ** — `en/messages.json` (`382 B`) và `vi/messages.json` (`440 B`).
   - `dist/icons/`: **CÓ** — Bộ icon đầy đủ (`icon16.png` `749 B`, `icon32.png` `1,283 B`, `icon48.png` `1,751 B`, `icon128.png` `4,517 B`, `icon.svg` `874 B`).
-  - `dist/assets/popup-Bl0ohACp.js`: **CÓ (`846,554 B` / `846.55 kB`, gzip: `217.75 kB`)** *(chủ ý hoãn tách chunk)*.
+  - `dist/assets/popup-Bmvui8Hs.js`: **CÓ (`847,660 B` / `847.66 kB`, gzip: `217.93 kB`)** *(chủ ý hoãn tách chunk)*.
   - `dist/assets/popup-DcexGFhy.css`: **CÓ (`91,821 B` / `91.82 kB`, gzip: `14.18 kB`)**.
-  - `dist/assets/questEngine-C4eZ1Cf9.js`: **CÓ (`67,378 B` / `67.37 kB`, gzip: `18.68 kB`)** *(shared pure chunk dùng chung cho popup và background)*.
+  - `dist/assets/questEngine-f8BXGI3U.js`: **CÓ (`69,405 B` / `69.40 kB`, gzip: `19.07 kB`)** *(shared pure chunk dùng chung cho popup và background)*.
   - `dist/assets/translator-CXd5AzTc.js`: **CÓ (`65,741 B` / `65.74 kB`, gzip: `18.39 kB`)**.
   - `dist/assets/storageKeys-C4hhw6ET.js`: **CÓ (`398 B` / `0.39 kB`, gzip: `0.27 kB`)**.
   - `dist/assets/sprites/`: **CÓ** — Đủ `CREDITS.md` (`4,262 B`), `kenney-tiny-town` và `kenney-tiny-dungeon`.
   - `dist/assets/music/` & file audio cục bộ: **KHÔNG TỒN TẠI (`0` file audio trong `public/` & `dist/`)**.
 
 ### 3.2. Automated Tests (`npm test`)
-- **Trạng thái:** **PASS (Exit code 0) — 3/3 lần chạy liên tiếp** — **605 / 605 tests PASS (100%)** *(gồm các kiểm thử mới & cập nhật Stage 6 / Backlog 4a–4b: `rewardHelpModal.test.ts`, `sessionNotifications.test.ts`, `fullBilingual.test.ts`, `ux2PomodoroOutcomeDisplay.test.ts` và cập nhật `role="img"` tại `statsBarChart.test.ts:105`; toàn bộ chạy trên Node.js qua React SSR `renderToString`, mock 2D context & mock Chrome adapters)*.
-  - Lần 1: `605` Passed | `0` Failed | `0` Skipped | `0` Cancelled (`17,973.72 ms`).
-  - Lần 2: `605` Passed | `0` Failed | `0` Skipped | `0` Cancelled (`17,590.95 ms`).
-  - Lần 3: `605` Passed | `0` Failed | `0` Skipped | `0` Cancelled (`17,680.29 ms`).
+- **Trạng thái:** **PASS (Exit code 0) — 3/3 lần chạy liên tiếp** — **609 / 609 tests PASS (100%)** *(bổ sung `+4` test mới tại `__tests__/ui/ux6TerminalOutcomeFreeze.test.ts`; toàn bộ chạy trên Node.js qua React SSR `renderToString`, mock 2D context & mock Chrome adapters)*.
+  - Lần 1: `609` Passed | `0` Failed | `0` Skipped | `0` Cancelled (`17,200.78 ms`).
+  - Lần 2: `609` Passed | `0` Failed | `0` Skipped | `0` Cancelled (`17,597.02 ms`).
+  - Lần 3: `609` Passed | `0` Failed | `0` Skipped | `0` Cancelled (`17,271.49 ms`).
 
 ### 3.3. Typecheck & Lint (`npm run lint` — `tsc --noEmit`)
 - **Trạng thái:** **PASS (Exit code 0)** — **0 errors, 0 warnings**.
@@ -223,19 +229,19 @@ Trạng thái: Verified (605/605 Tests PASS 3/3 lần | Build PASS | Lint PASS �
 ## 4. ĐỐI CHIẾU TÀI LIỆU & KIỂM SOÁT RÀNG BUỘC
 
 1. **Các bất biến kinh tế & nghiệp vụ tiếp tục được bảo toàn:**
-   - **Zero Passive Income & Economy:** Coins/XP/Multiplier/CoinBonus của mọi phiên Focus giữ nguyên 100%; không sửa lõi `RewardEngine`, `MultiplierRules`, `SessionCoordinator` (công thức/quyết toán), `StorageManager` hay `QuestCoordinator`; thưởng Quest phẳng chỉ cộng vào ví khi bấm Claim thủ công via `CLAIM_QUEST_REWARD` và **không ghi vào `fq_daily_stats`**.
-   - **All-or-Nothing Pomodoro Countdown & Allowlist Lock:** Giữ nguyên toàn bộ khóa bảo vệ trong phiên chạy/tạm dừng (`Navbar` và tab `Quests` ẩn trong phiên Focus tới khi bấm `Exit`), `Give Up` / `INTERRUPTED` không tạo tiến độ Quest; Backlog 4a chỉ sửa đồng bộ **hiển thị UI** trên `getSessionRewardPreview` khớp quy tắc hủy thưởng khi `POMODORO_STOPWATCH` bị `EXTENSION_DISABLED`/`EXTENSION_RELOADED`.
-   - **Mở rộng đất, Schema & Placeholder:** Giữ nguyên công thức `cost(k)`, `Player Level >= k + 2`, `fq_civilization` v2, Schema v3 `CURRENT_SCHEMA_VERSION = 3`, DNR blocking (`main_frame`), nút Upgrade khóa `"Milestone 5C"`, và tab `Awards` giữ nguyên khung tạm `"Coming soon"` (`awards-placeholder-view`).
+   - **Zero Passive Income & Economy:** Coins/XP/Multiplier/CoinBonus của mọi phiên Focus giữ nguyên 100%; không sửa lõi `RewardEngine`, `MultiplierRules`, công thức tính thưởng/thời điểm quyết toán, `StorageManager` hay `QuestCoordinator`; thưởng Quest phẳng chỉ cộng vào ví khi bấm Claim thủ công via `CLAIM_QUEST_REWARD` và **không ghi vào `fq_daily_stats`**.
+   - **All-or-Nothing Pomodoro Countdown & Allowlist Lock:** Giữ nguyên toàn bộ khóa bảo vệ trong phiên chạy/tạm dừng (`Navbar` và tab `Quests` ẩn trong phiên Focus tới khi bấm `Exit`), `Give Up` / `INTERRUPTED` không tạo tiến độ Quest; UX-6 chỉ đóng băng dữ liệu hiển thị của phiên đã kết thúc tại mốc `completedAt`/`finalFocusMinutes`, giữ nguyên nút `Exit`/`Thoát` (`UX-1`) và hiển thị Pomodoro (`UX-2` & `Backlog 4a`).
+   - **Mở rộng đất, Schema & Placeholder:** Giữ nguyên công thức `cost(k)`, `Player Level >= k + 2`, `fq_civilization` v2, Schema v3 `CURRENT_SCHEMA_VERSION = 3` (trường `finalFocusMinutes?: number` trên `SessionSnapshot` chỉ là OPTIONAL), DNR blocking (`main_frame`), nút Upgrade khóa `"Milestone 5C"`, và tab `Awards` giữ nguyên khung tạm `"Coming soon"` (`awards-placeholder-view`).
    - **Cảnh quan Canvas Một Tấm (`UX-5`) & Animation (Chặng B–C):** Thuần lớp hiển thị UI, giữ nguyên 100% `getCellDecor` / M1–M6 trong `terrainDecor.ts`.
 2. **Tình trạng nghiệm thu thực tế trên Chrome thật (`>= 116`):**
    - **Đã nghiệm thu trên Chrome thật trước UX-5 theo xác nhận của người dùng:** Popup `400×600` (thanh điều hướng 5 tab, kiến trúc bản đồ, rừng, lớp tối), hoạt ảnh rìu chém rừng `1150ms`, `blocked.html` với DNR, `chrome.i18n`, `manifest.json`, Offscreen Audio (kể cả Pause > 30 giây) và fetch catalog nhạc từ `khangbui2010.github.io`.
-   - **Chưa kiểm chứng trực quan / DevTools trên Chrome thật:** Giao diện tương tác **Giai đoạn 5c** (`QuestView`, huy hiệu `Navbar`, `StatsView` `Day/Month/Year` + `Focus Streak`), lớp render canvas `<TerrainBitmapCanvas>` của **UX-5**, luồng Service Worker thực tế của **Giai đoạn 2b**, và thông báo/lỗi/hộp thoại **Giai đoạn 6+7**.
+   - **Chưa kiểm chứng trực quan / DevTools trên Chrome thật:** Giao diện tương tác **Giai đoạn 5c** (`QuestView`, huy hiệu `Navbar`, `StatsView` `Day/Month/Year` + `Focus Streak`), lớp render canvas `<TerrainBitmapCanvas>` của **UX-5**, luồng Service Worker thực tế của **Giai đoạn 2b**, thông báo/lỗi/hộp thoại **Giai đoạn 6+7**, và kịch bản Give Up → Machine Sleep → mở lại popup của **UX-6**.
 
 ---
 
 ## 5. BƯỚC TIẾP THEO (NEXT STEPS)
 
-1. **Nghiệm thu & Duyệt Giai đoạn 6 + 7 (Đóng Milestone 5B.5):** Xem báo cáo tổng kết tại `respond.md` và kiểm tra trực quan các mục chưa kiểm trên Chrome thật (5c, UX-5, 2b SW, 6+7 notifications/modals). **DỪNG chờ duyệt đóng Milestone 5B.5.**
+1. **Nghiệm thu & Duyệt Giai đoạn UX-6 + Đóng Milestone 5B.5:** Xem báo cáo chi tiết UX-6 tại `respond.md`, thử kịch bản thực tế trên Chrome (Give Up `COUNTDOWN`/`POMODORO` hoặc hoàn thành `STOPWATCH` → không bấm Thoát → Sleep máy / đổi đồng hồ → mở lại popup) rồi xác nhận duyệt UX-6, UX-5 và đóng Milestone 5B.5. **DỪNG chờ người dùng duyệt UX-6.**
 2. **Hệ thống `Awards` thật:** Thiết kế và triển khai thành tựu thay cho khung giữ chỗ `"Coming soon"` trên tab `Awards`.
 3. **CWS Hardening & Tối ưu Gói:** Thống nhất 1 lockfile (`package-lock.json` vs `bun.lock`), xem xét tách chunk Vite (`popup-*.js` > `500 kB`), và chuẩn bị thuyết minh quyền `web_accessible_resources` (`<all_urls>`) + `host_permissions` + `"offscreen"` khi lên Chrome Web Store.
 4. **Milestone 5C:** `UPGRADE_BUILDING`, chuyển kỷ nguyên sang Bronze Age và mở khóa nút nâng cấp trong `BuildingDetailsModal`.

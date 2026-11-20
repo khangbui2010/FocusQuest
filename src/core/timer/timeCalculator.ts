@@ -1,4 +1,10 @@
-import { PauseRecord, PomodoroConfig, DEFAULT_POMODORO_CONFIG } from '../../types/session.ts';
+import {
+  PauseRecord,
+  PomodoroConfig,
+  DEFAULT_POMODORO_CONFIG,
+  SessionSnapshot,
+  SessionStatus,
+} from '../../types/session.ts';
 
 export const MAX_PAUSE_DURATION_MS = 5 * 60 * 1000; // 5 minutes in milliseconds
 export const MAX_PAUSES_ALLOWED = 2;
@@ -16,6 +22,112 @@ export interface PomodoroPhaseTimeCalculation {
   remainingPhaseMs: number;
   actualPhaseMinutes: number;
   isPhaseCompleted: boolean;
+}
+
+export function isTerminalSessionStatus(status: SessionStatus): boolean {
+  return status === 'COMPLETED' || status === 'ABANDONED' || status === 'INTERRUPTED';
+}
+
+/**
+ * Resolve the effective end timestamp for a session.
+ * Terminal sessions (COMPLETED / ABANDONED / INTERRUPTED) MUST NEVER evaluate against live Date.now();
+ * they freeze at completedAt, falling back safely to lastCheckpointAt / lastHeartbeatAt / startedAt.
+ */
+export function resolveSessionEndTimestamp(
+  session: Pick<
+    SessionSnapshot,
+    'status' | 'startedAt' | 'completedAt' | 'lastCheckpointAt' | 'lastHeartbeatAt'
+  >,
+  liveCurrentTime?: number
+): number {
+  const safeStartedAt = Number.isFinite(session.startedAt) ? session.startedAt : 0;
+  if (session.status === 'IDLE' || safeStartedAt <= 0) {
+    return safeStartedAt;
+  }
+
+  if (isTerminalSessionStatus(session.status)) {
+    if (typeof session.completedAt === 'number' && Number.isFinite(session.completedAt)) {
+      return Math.max(safeStartedAt, session.completedAt);
+    }
+    const checkpoint =
+      typeof session.lastCheckpointAt === 'number' && Number.isFinite(session.lastCheckpointAt)
+        ? session.lastCheckpointAt
+        : 0;
+    const heartbeat =
+      typeof session.lastHeartbeatAt === 'number' && Number.isFinite(session.lastHeartbeatAt)
+        ? session.lastHeartbeatAt
+        : 0;
+    return Math.max(safeStartedAt, checkpoint, heartbeat);
+  }
+
+  if (typeof liveCurrentTime === 'number' && Number.isFinite(liveCurrentTime)) {
+    return Math.max(safeStartedAt, liveCurrentTime);
+  }
+
+  const heartbeat =
+    typeof session.lastHeartbeatAt === 'number' && Number.isFinite(session.lastHeartbeatAt)
+      ? session.lastHeartbeatAt
+      : 0;
+  return Math.max(safeStartedAt, heartbeat);
+}
+
+/**
+ * Pure Single Source of Truth for terminal session focus minutes (COMPLETED / ABANDONED / INTERRUPTED).
+ * Strictly frozen at completion/interruption time and never grows with wall-clock Date.now().
+ */
+export function getFrozenSessionFocusMinutes(session: SessionSnapshot): number {
+  if (!isTerminalSessionStatus(session.status) || !Number.isFinite(session.startedAt) || session.startedAt <= 0) {
+    return 0;
+  }
+
+  if (typeof session.finalFocusMinutes === 'number' && Number.isFinite(session.finalFocusMinutes)) {
+    return Math.floor(Math.max(0, session.finalFocusMinutes));
+  }
+
+  if (
+    session.status === 'INTERRUPTED' &&
+    typeof session.lastKnownValidFocusMinutes === 'number' &&
+    Number.isFinite(session.lastKnownValidFocusMinutes)
+  ) {
+    return Math.floor(Math.max(0, session.lastKnownValidFocusMinutes));
+  }
+
+  if (session.mode === 'COUNTDOWN' && session.status === 'COMPLETED') {
+    const safeTarget = Number.isFinite(session.targetMinutes) ? session.targetMinutes : 0;
+    return Math.floor(Math.max(0, safeTarget));
+  }
+
+  if (
+    typeof session.lastKnownValidFocusMinutes === 'number' &&
+    Number.isFinite(session.lastKnownValidFocusMinutes)
+  ) {
+    return Math.floor(Math.max(0, session.lastKnownValidFocusMinutes));
+  }
+
+  const hasCompletedAt =
+    typeof session.completedAt === 'number' && Number.isFinite(session.completedAt);
+  const frozenEndTime = resolveSessionEndTimestamp(session);
+
+  // Guard for legacy snapshots that persisted a terminal status while currentPauseStartedAt remained set.
+  const unfinalizedPauseMs =
+    session.currentPauseStartedAt !== null && Number.isFinite(session.currentPauseStartedAt)
+      ? Math.min(Math.max(0, frozenEndTime - session.currentPauseStartedAt), MAX_PAUSE_DURATION_MS)
+      : 0;
+
+  const basePauseMs = Number.isFinite(session.totalPauseMs) ? Math.max(0, session.totalPauseMs) : 0;
+  const elapsed = TimeCalculator.calculateElapsedTime({
+    startedAt: session.startedAt,
+    currentTime: frozenEndTime,
+    status: session.status,
+    currentPauseStartedAt: null,
+    totalCompletedPauseMs: basePauseMs + unfinalizedPauseMs,
+  });
+
+  if (!hasCompletedAt && session.mode === 'COUNTDOWN' && session.targetMinutes > 0) {
+    return Math.min(elapsed.actualFocusMinutes, Math.floor(session.targetMinutes));
+  }
+
+  return elapsed.actualFocusMinutes;
 }
 
 export class TimeCalculator {
@@ -187,9 +299,10 @@ export class TimeCalculator {
   static calculateElapsedTime(params: {
     startedAt: number;
     currentTime: number;
-    status: 'RUNNING' | 'PAUSED' | 'COMPLETED' | 'ABANDONED' | 'INTERRUPTED' | 'IDLE';
+    status: SessionStatus;
     currentPauseStartedAt: number | null;
     totalCompletedPauseMs: number;
+    completedAt?: number | null;
   }): ElapsedTimeCalculation {
     const {
       startedAt,
@@ -197,6 +310,7 @@ export class TimeCalculator {
       status,
       currentPauseStartedAt,
       totalCompletedPauseMs,
+      completedAt,
     } = params;
 
     if (status === 'IDLE' || startedAt <= 0) {
@@ -209,16 +323,22 @@ export class TimeCalculator {
       };
     }
 
-    const safeCurrentTime = Math.max(startedAt, currentTime);
+    const isTerminal = isTerminalSessionStatus(status);
+    const effectiveEndTime =
+      isTerminal && typeof completedAt === 'number' && Number.isFinite(completedAt)
+        ? completedAt
+        : currentTime;
+
+    const safeCurrentTime = Math.max(startedAt, effectiveEndTime);
     let activePauseMs = 0;
     let isAutoResumeDue = false;
 
-    if (status === 'PAUSED' && currentPauseStartedAt !== null) {
+    if ((status === 'PAUSED' || isTerminal) && currentPauseStartedAt !== null) {
       const rawPauseMs = Math.max(0, safeCurrentTime - currentPauseStartedAt);
       if (rawPauseMs >= MAX_PAUSE_DURATION_MS) {
-        // Capped at 5 minutes; auto-resume is triggered
+        // Capped at 5 minutes; auto-resume is triggered (for PAUSED)
         activePauseMs = MAX_PAUSE_DURATION_MS;
-        isAutoResumeDue = true;
+        isAutoResumeDue = status === 'PAUSED';
       } else {
         activePauseMs = rawPauseMs;
       }
