@@ -29,3 +29,10 @@ export const BUILDING_UPGRADE_PLAYER_LEVEL_STEP = 1;
 export const BUILDING_DEMOLISH_REFUND_RATE = 0.5;
 export const MAX_ECONOMY_EFFECT_BUILDINGS = 4;
 
+// Milestone Villager V2: Recruitment, Capacity & Cave limits
+export const VILLAGER_BASE_RECRUIT_COST = 40;
+export const VILLAGER_RECRUIT_COST_RATIO = 1.35;
+export const VILLAGER_CAPACITY_PER_CAVE_LEVEL = 2;
+export const MAX_VILLAGE_CAVES = 1;
+
+

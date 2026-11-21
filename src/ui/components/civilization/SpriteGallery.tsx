@@ -7,6 +7,8 @@ import {
   TileImage,
   getBuildingSprite,
   getTerrainTile,
+  VillagerSprite,
+  VILLAGER_ROLES,
 } from './spriteRegistry.ts';
 import {
   TERRAIN_DECOR_SEED,
@@ -667,6 +669,79 @@ export const SpriteGallery: React.FC<SpriteGalleryProps> = ({ onBack }) => {
                 emptyLabel={t('stats.chart.empty')}
               />
             </div>
+          </div>
+        </section>
+
+        {/* Section 5: Villager Sprites (Milestone Villager V1) */}
+        <section
+          data-testid="gallery-villagers-section"
+          className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 space-y-4"
+        >
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-bold">
+                Villager Sprites &amp; Animations (Kenney Tiny Dungeon CC0)
+              </h2>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Elder (#100), Crafter (#88), Woodworker (#86) · 4 rows: idle (2 frames, 1200ms), walk down/right/left (4 frames, 600ms). Up direction intentionally maps to idle.
+              </p>
+            </div>
+            <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
+              64×64 PNG · 16×16 Native Cell · CSS steps()
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {VILLAGER_ROLES.map((role) => (
+              <div
+                key={role}
+                data-testid={`gallery-villager-card-${role}`}
+                className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-3 bg-slate-50/50 dark:bg-slate-800/30"
+              >
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold capitalize text-slate-900 dark:text-slate-100">
+                    {role}
+                  </h3>
+                  <span className="text-[10px] font-mono text-slate-500">
+                    {role === 'elder' ? 'Tile #100' : role === 'crafter' ? 'Tile #88' : 'Tile #86'}
+                  </span>
+                </div>
+
+                <div className="space-y-2">
+                  {(['idle', 'walk_down', 'walk_right', 'walk_left'] as const).map((animName) => (
+                    <div
+                      key={animName}
+                      className="flex items-center justify-between p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800"
+                    >
+                      <div>
+                        <span className="text-[11px] font-mono font-medium text-slate-700 dark:text-slate-300">
+                          {animName}
+                        </span>
+                        <div className="text-[9px] text-slate-400 font-mono">
+                          {animName === 'idle' ? '2 frames · 1200ms' : '4 frames · 600ms'}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <div className="flex flex-col items-center">
+                          <span className="text-[8px] font-mono text-slate-400">2× (32px)</span>
+                          <div className="w-8 h-8 rounded bg-[#84c669] flex items-center justify-center overflow-hidden border border-slate-300 dark:border-slate-700">
+                            <VillagerSprite role={role} animation={animName} scale={2} />
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col items-center">
+                          <span className="text-[8px] font-mono text-slate-400">4× (64px)</span>
+                          <div className="w-16 h-16 rounded bg-[#84c669] flex items-center justify-center overflow-hidden border border-slate-300 dark:border-slate-700">
+                            <VillagerSprite role={role} animation={animName} scale={4} />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         </section>
       </div>

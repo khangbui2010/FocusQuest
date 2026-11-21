@@ -8,9 +8,79 @@ import {
 import { PixelSprite } from './PixelSprite.tsx';
 import { TileImage, SpriteSheetPack } from './TileImage.tsx';
 import { CellDecor, TERRAIN_DECOR_SEED, getCellDecor } from './terrainDecor.ts';
+import { VillagerSprite, VillagerSpriteProps } from './VillagerSprite.tsx';
 
-export { PixelSprite, TileImage, getCellDecor, TERRAIN_DECOR_SEED };
-export type { PixelSpriteMatrix, SpriteSheetPack, CellDecor };
+export { PixelSprite, TileImage, getCellDecor, TERRAIN_DECOR_SEED, VillagerSprite };
+export type { PixelSpriteMatrix, SpriteSheetPack, CellDecor, VillagerSpriteProps };
+
+export const VILLAGER_CELL_PX = 16;
+export const VILLAGER_SHEET_COLUMNS = 4;
+export const VILLAGER_ROLES = ['elder', 'crafter', 'woodworker'] as const;
+export type VillagerRole = (typeof VILLAGER_ROLES)[number];
+
+export interface VillagerAnimationConfig {
+  readonly row: number;
+  readonly frames: number;
+  readonly frameMs: number;
+  readonly durationMs: number;
+}
+
+export const VILLAGER_ANIMATIONS: Record<VillagerAnimationName, VillagerAnimationConfig> = {
+  idle: { row: 0, frames: 2, frameMs: 600, durationMs: 1200 },
+  walk_down: { row: 1, frames: 4, frameMs: 150, durationMs: 600 },
+  walk_right: { row: 2, frames: 4, frameMs: 150, durationMs: 600 },
+  walk_left: { row: 3, frames: 4, frameMs: 150, durationMs: 600 },
+};
+
+export type VillagerAnimationName = 'idle' | 'walk_down' | 'walk_right' | 'walk_left';
+export type VillagerDirection = 'up' | 'down' | 'left' | 'right';
+
+export function isVillagerRole(role: unknown): role is VillagerRole {
+  return typeof role === 'string' && (VILLAGER_ROLES as readonly string[]).includes(role);
+}
+
+export function getVillagerSheetUrl(role: string): string | null {
+  if (!isVillagerRole(role)) {
+    return null;
+  }
+  return `/assets/sprites/villagers/${role}.png`;
+}
+
+export function getVillagerAnimation(name: VillagerAnimationName): VillagerAnimationConfig {
+  return VILLAGER_ANIMATIONS[name] ?? VILLAGER_ANIMATIONS.idle;
+}
+
+/**
+ * Maps standard 4-way movement direction to villager sprite animation.
+ *
+ * NOTE: The native Tiny Dungeon villager atlas contains animations for:
+ * row 0 (idle), row 1 (walk_down), row 2 (walk_right), and row 3 (walk_left).
+ * No 'walk_up' frames exist in the asset sheet.
+ * Therefore, direction 'up' strictly falls back to 'idle' (facing the viewer),
+ * never to 'walk_down' or inverted sprite frames.
+ */
+export function getVillagerAnimationForDirection(
+  direction: VillagerDirection,
+  isMoving: boolean
+): VillagerAnimationName {
+  if (!isMoving) {
+    return 'idle';
+  }
+  switch (direction) {
+    case 'down':
+      return 'walk_down';
+    case 'right':
+      return 'walk_right';
+    case 'left':
+      return 'walk_left';
+    case 'up':
+      // Intentional fallback: native asset lacks walk_up; face idle rather than walk_down
+      return 'idle';
+    default:
+      return 'idle';
+  }
+}
+
 
 export type TerrainTileKind = 'grass';
 

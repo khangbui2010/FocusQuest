@@ -15,6 +15,7 @@ import {
   BUILDING_DEMOLISH_REFUND_RATE,
   BUILDING_UPGRADE_PLAYER_LEVEL_STEP,
   MAX_ECONOMY_EFFECT_BUILDINGS,
+  MAX_VILLAGE_CAVES,
 } from './constants.ts';
 import {
   BuildingCategory,
@@ -56,6 +57,18 @@ export interface EconomyPlacementLimitCheck {
 }
 
 /**
+ * Checks whether a building definition can be upgraded.
+ * - ECONOMY_EFFECT buildings scale via upgrades in Milestone 5C-1.
+ * - Meditation Cave (stone_age_study_cave) scales to increase villager capacity in Milestone Villager V2.
+ * - DECORATIVE (Campfire, Totem) and other FOCUS_SUPPORT (Elder's Hut) keep their non-upgradable behavior.
+ */
+export function isBuildingDefinitionUpgradeable(
+  definition: Pick<BuildingDefinition, 'id' | 'category'>
+): boolean {
+  return definition.category === 'ECONOMY_EFFECT' || definition.id === 'stone_age_study_cave';
+}
+
+/**
  * Only ECONOMY_EFFECT buildings scale via upgrades in Milestone 5C-1.
  * DECORATIVE and FOCUS_SUPPORT buildings do not upgrade.
  */
@@ -64,12 +77,17 @@ export function isBuildingCategoryUpgradeable(category: BuildingCategory): boole
 }
 
 /**
- * Returns the maximum number of active instances allowed per building type of this category,
+ * Returns the maximum number of active instances allowed per building type,
  * or null when unlimited.
+ * - Cave: max 1
+ * - ECONOMY_EFFECT buildings: max 4
  */
 export function getBuildingPlacementLimit(
-  definition: Pick<BuildingDefinition, 'category'>
+  definition: Pick<BuildingDefinition, 'id' | 'category'>
 ): number | null {
+  if (definition.id === 'stone_age_study_cave') {
+    return MAX_VILLAGE_CAVES;
+  }
   return definition.category === 'ECONOMY_EFFECT' ? MAX_ECONOMY_EFFECT_BUILDINGS : null;
 }
 
@@ -238,7 +256,7 @@ export function evaluateBuildingUpgrade(
     };
   }
 
-  const isCategoryUpgradeable = isBuildingCategoryUpgradeable(definition.category);
+  const isCategoryUpgradeable = isBuildingDefinitionUpgradeable(definition);
   const currentCoinBonusRate = getBuildingCoinBonusRateAtLevel(definition, instance.level);
 
   if (!Number.isInteger(instance.level) || instance.level < 1) {

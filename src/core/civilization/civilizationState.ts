@@ -15,7 +15,10 @@ import {
   CIVILIZATION_ERAS,
 } from './buildingTypes.ts';
 import { getBuildingDefinition } from './buildingCatalog.ts';
+import { Villager } from './villager.ts';
+import { isVillagerRole } from '../../ui/components/civilization/spriteRegistry.ts';
 
+export type { Villager };
 export const CURRENT_CIVILIZATION_SCHEMA_VERSION = 2;
 
 /**
@@ -27,6 +30,7 @@ export interface CivilizationState {
   readonly grid: GridMapSnapshot;
   readonly buildings: readonly BuildingInstance[];
   readonly lastUpdated: number;
+  readonly villagers?: readonly Villager[];
 }
 
 /**
@@ -42,6 +46,7 @@ export interface CivilizationStateValidationResult {
  * - Initial Era: STONE_AGE
  * - Initial Grid: 8x8 cells (4 chunks of 4x4, 64 unlocked cells)
  * - Buildings: Empty list (0 buildings automatically constructed)
+ * - Villagers: Empty list
  */
 export function createInitialCivilizationState(): CivilizationState {
   const initialMap = new GridMap();
@@ -50,6 +55,7 @@ export function createInitialCivilizationState(): CivilizationState {
     era: 'STONE_AGE',
     grid: initialMap.toSnapshot(),
     buildings: [],
+    villagers: [],
     lastUpdated: Date.now(),
   };
 }
@@ -186,6 +192,32 @@ export function validateCivilizationState(state: unknown): CivilizationStateVali
     errors.push(
       `GridMap total occupied cells (${reconstructedMap.getOccupiedCellCount()}) does not match total building footprint area (${totalExpectedOccupiedCells})`
     );
+  }
+
+  // 6. Villagers array validation (if present)
+  if (s.villagers !== undefined) {
+    if (!Array.isArray(s.villagers)) {
+      errors.push('Villagers must be an array when defined');
+    } else {
+      const seenVillagerIds = new Set<string>();
+      for (let i = 0; i < s.villagers.length; i++) {
+        const v = s.villagers[i] as Partial<Villager>;
+        if (typeof v.id !== 'string' || v.id.length === 0) {
+          errors.push(`Villager[${i}] has invalid or empty id`);
+        } else if (seenVillagerIds.has(v.id)) {
+          errors.push(`Duplicate villager id detected: "${v.id}"`);
+        } else {
+          seenVillagerIds.add(v.id);
+        }
+
+        if (!isVillagerRole(v.role)) {
+          errors.push(`Villager[${i}] has invalid role "${String(v.role)}"`);
+        }
+        if (typeof v.recruitedAt !== 'number' || !Number.isFinite(v.recruitedAt) || v.recruitedAt <= 0) {
+          errors.push(`Villager[${i}] has invalid recruitedAt timestamp`);
+        }
+      }
+    }
   }
 
   return {

@@ -63,7 +63,7 @@ export const STONE_AGE_BUILDING_DEFINITIONS: readonly BuildingDefinition[] = Obj
     description: 'A quiet shelter shielded from wind and distractions, fostering uninterrupted study.',
     era: 'STONE_AGE',
     category: 'FOCUS_SUPPORT',
-    footprint: { width: 2, height: 2 },
+    footprint: { width: 3, height: 3 },
     baseCost: 50,
     upgradeCostMultiplier: 1.75,
     maxLevel: 5,

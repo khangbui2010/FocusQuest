@@ -27,6 +27,10 @@
   - CC0 `kenney-tiny-dungeon/tilemap_packed.png`: Villager characters `86` (bearded craftsman), `88` (settler), `100` (tribal elder) and handheld tools `117` (hammer), `119` (axe) during active focus.
   - CC0 `kenney-tiny-town/tilemap_packed.png` & project `STONE_AGE_SPRITE_DATA`: Trees `3`/`15`, `4`/`16`, bush `5`, sprout `17`, mushrooms `29`, wood log `106`, alongside `stone_age_study_cave` and `stone_age_campfire` (`PixelSprite`).
 
+- **Milestone Villager — Animated Villager Sprite Sheets (`public/assets/sprites/villagers/`):**
+  - Character sprite sheets (`elder.png`, `crafter.png`, `woodworker.png`) are 64×64 pixel sheets (16×16 cell, 4 columns × 4 rows) procedurally generated from CC0 `kenney-tiny-dungeon/tilemap_packed.png`: tile `100` (tribal elder), tile `88` (crafter/settler), tile `86` (woodworker/craftsman).
+  - Row 0: `idle` (2 frames, 600ms/frame), Row 1: `walk_down` (4 frames, 150ms/frame), Row 2: `walk_right` (4 frames, 150ms/frame), Row 3: `walk_left` (4 frames, 150ms/frame).
+
 ## Rule for adding new assets
 
 Only add assets that ship with an explicit license file (CC0, MIT, or CC-BY with credit added here). Do NOT add assets with unclear terms, "free for personal use", NC/SA licenses, or anything taken from commercial games. Keep a copy of each pack's license file next to the assets.
