@@ -34,7 +34,7 @@ test('Civilization Client: getCivilizationState returns initial Stone Age state'
 });
 
 test('Civilization Client: placeBuildingClient validates placement, deducts coins and updates grid', async () => {
-  // 1. Place campfire (8 coins, 1x1 footprint) at (2, 2)
+  // 1. Place campfire (4 coins, 1x1 footprint) at (2, 2)
   const placeRes = await placeBuildingClient({
     buildingDefinitionId: 'stone_age_campfire',
     position: { x: 2, y: 2 },
@@ -64,13 +64,13 @@ test('Civilization Client: placeBuildingClient validates placement, deducts coin
   });
   assert.equal(oobRes.success, false);
 
-  // 4. Removing the building frees the cell and refunds 50% (4 Coins)
+  // 4. Removing the building frees the cell and refunds 50% (2 Coins)
   const removeRes = await removeBuildingClient({
     buildingInstanceId: placedId,
   });
   assert.equal(removeRes.success, true);
   assert.equal(removeRes.data?.removedBuildingId, placedId);
-  assert.equal(removeRes.data?.refundedCoins, 4);
+  assert.equal(removeRes.data?.refundedCoins, 2);
 
   // 5. Placing at (2, 2) succeeds again now that cell is freed
   const replaceRes = await placeBuildingClient({
@@ -96,12 +96,12 @@ test('Civilization Client: expandLandClient requires origin, deducts Coins, enfo
   assert.equal(rejectedDir.success, false);
 
   // Expand adjacent East chunk (8, 0): k=1 requires Lv. 3 and costs 60 Coins
-  // (mockState starts at 120, two campfires placed & demolished with 50% refund => 112 Coins before expand -> 52 after)
+  // (mockState starts at 120, two campfires placed & demolished with 50% refund => 116 Coins before expand -> 56 after)
   const expandEast = await expandLandClient({ origin: { x: 8, y: 0 } });
   assert.equal(expandEast.success, true, `Expected expandEast success, got ${expandEast.error}`);
   assert.ok(expandEast.data);
   assert.equal(expandEast.data.cost, 60);
-  assert.equal(expandEast.data.economy.focusCoins, 52);
+  assert.equal(expandEast.data.economy.focusCoins, 56);
   assert.equal(expandEast.data.civilizationState.grid.chunks.length, initialChunks + 1);
 
   // Second expansion k=2 (0, -4) requires Lv. 4 -> fails at default Lv. 3 without deducting Coins
@@ -257,7 +257,7 @@ test('Civilization UI: BuildingDetailsModal renders building information, Stage 
     })
   );
 
-  assert.ok(htmlEcon.includes('Next Lv. 2 · Cost: 48 Coins'), 'must display next level and cost');
+  assert.ok(htmlEcon.includes('Next Lv. 2 · Cost: 24 Coins'), 'must display next level and cost');
   assert.ok(htmlEcon.includes('+2% → +4% CoinBonus'), 'must preview CoinBonus delta');
   assert.ok(htmlEcon.includes('>Upgrade<'), 'must display enabled Upgrade button');
 });

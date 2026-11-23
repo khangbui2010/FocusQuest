@@ -87,7 +87,7 @@ test('Test A: Concurrent placement at non-overlapping positions preserves both b
   await h.seedPrerequisites(200, 3, 300);
 
   // Send two placement requests concurrently
-  // Campfire costs 8 coins each.
+  // Campfire costs 4 coins each.
   const [res1, res2] = await Promise.all([
     h.handler.handleMessage({
       action: 'PLACE_BUILDING',
@@ -125,31 +125,31 @@ test('Test A: Concurrent placement at non-overlapping positions preserves both b
   assert.strictEqual(gridMap.getOccupyingBuilding(0, 0), b1?.id);
   assert.strictEqual(gridMap.getOccupyingBuilding(5, 5), b2?.id);
 
-  // Coins must be deducted accurately: 200 - 8 - 8 = 184
+  // Coins must be deducted accurately: 200 - 4 - 4 = 192
   const economy = await h.storage.getEconomy();
-  assert.strictEqual(economy.focusCoins, 184, 'Coins must be deducted for both transactions');
+  assert.strictEqual(economy.focusCoins, 192, 'Coins must be deducted for both transactions');
 });
 
 // -----------------------------------------------------------------------------
 // Test B — Concurrent purchase with insufficient combined balance
 // -----------------------------------------------------------------------------
 test('Test B: Concurrent purchase with insufficient combined balance serializes safely without negative balance', async () => {
-  const h = createHarness(45, 3, 300);
-  // Foraging post costs 30 Coins. Seed exactly 45 Coins.
-  await h.seedPrerequisites(45, 3, 300);
+  const h = createHarness(20, 3, 300);
+  // Foraging post costs 15 Coins. Seed exactly 20 Coins.
+  await h.seedPrerequisites(20, 3, 300);
 
   const [res1, res2] = await Promise.all([
     h.handler.handleMessage({
       action: 'PLACE_BUILDING',
       payload: {
-        buildingDefinitionId: 'stone_age_foraging_post', // costs 30
+        buildingDefinitionId: 'stone_age_foraging_post', // costs 15
         position: { x: 0, y: 0 },
       },
     }),
     h.handler.handleMessage({
       action: 'PLACE_BUILDING',
       payload: {
-        buildingDefinitionId: 'stone_age_foraging_post', // costs 30
+        buildingDefinitionId: 'stone_age_foraging_post', // costs 15
         position: { x: 4, y: 4 },
       },
     }),
@@ -162,9 +162,9 @@ test('Test B: Concurrent purchase with insufficient combined balance serializes 
   assert.strictEqual(failures.length, 1, 'Second purchase must fail');
   assert.ok(failures[0].error?.includes('Insufficient coins'), 'Error must specify insufficient coins');
 
-  // Ending balance must be exactly 45 - 30 = 15 (non-negative)
+  // Ending balance must be exactly 20 - 15 = 5 (non-negative)
   const economy = await h.storage.getEconomy();
-  assert.strictEqual(economy.focusCoins, 15);
+  assert.strictEqual(economy.focusCoins, 5);
 
   // Exactly 1 building exists
   const civState = await h.storage.getCivilizationState();
@@ -227,7 +227,7 @@ test('Test D: Concurrent building placement and land expansion preserves both mu
   const h = createHarness(300, 3, 300);
   await h.seedPrerequisites(300, 3, 300);
 
-  // Dispatch PLACE_BUILDING (8 Coins) and EXPAND_LAND (k=1 -> 60 Coins) concurrently
+  // Dispatch PLACE_BUILDING (4 Coins) and EXPAND_LAND (k=1 -> 60 Coins) concurrently
   const [resPlace, resExpand] = await Promise.all([
     h.handler.handleMessage({
       action: 'PLACE_BUILDING',
@@ -257,9 +257,9 @@ test('Test D: Concurrent building placement and land expansion preserves both mu
   assert.strictEqual(gridMap.getOccupiedCellCount(), 1);
   assert.strictEqual(gridMap.getOccupyingBuilding(2, 2), civState.buildings[0].id);
 
-  // Coins deducted accurately for both: 300 - 8 - 60 = 232
+  // Coins deducted accurately for both: 300 - 4 - 60 = 236
   const finalEcon = await h.storage.getEconomy();
-  assert.strictEqual(finalEcon.focusCoins, 232);
+  assert.strictEqual(finalEcon.focusCoins, 236);
 });
 
 // -----------------------------------------------------------------------------
@@ -364,14 +364,14 @@ test('Test G: Concurrent placement on the exact same coordinate rejects collisio
     h.handler.handleMessage({
       action: 'PLACE_BUILDING',
       payload: {
-        buildingDefinitionId: 'stone_age_campfire', // costs 8
+        buildingDefinitionId: 'stone_age_campfire', // costs 4
         position: { x: 4, y: 4 },
       },
     }),
     h.handler.handleMessage({
       action: 'PLACE_BUILDING',
       payload: {
-        buildingDefinitionId: 'stone_age_campfire', // costs 8
+        buildingDefinitionId: 'stone_age_campfire', // costs 4
         position: { x: 4, y: 4 },
       },
     }),
@@ -384,9 +384,9 @@ test('Test G: Concurrent placement on the exact same coordinate rejects collisio
   assert.strictEqual(failures.length, 1, 'Colliding placement must fail');
   assert.ok(failures[0].error?.includes('Cannot place building'));
 
-  // Coins deducted once: 200 - 8 = 192
+  // Coins deducted once: 200 - 4 = 196
   const economy = await h.storage.getEconomy();
-  assert.strictEqual(economy.focusCoins, 192);
+  assert.strictEqual(economy.focusCoins, 196);
 
   const civState = await h.storage.getCivilizationState();
   assert.strictEqual(civState.buildings.length, 1);
@@ -407,15 +407,15 @@ test('Test H: CoinBonus cache updates immediately reflect on active focus sessio
   const placeResp = await h.handler.handleMessage({
     action: 'PLACE_BUILDING',
     payload: {
-      buildingDefinitionId: 'stone_age_foraging_post', // costs 30
+      buildingDefinitionId: 'stone_age_foraging_post', // costs 15
       position: { x: 0, y: 0 },
     },
   });
   assert.strictEqual(placeResp.success, true);
 
-  // Current balance after build: 300 - 30 = 270 Coins
+  // Current balance after build: 300 - 15 = 285 Coins
   const econMid = await h.storage.getEconomy();
-  assert.strictEqual(econMid.focusCoins, 270);
+  assert.strictEqual(econMid.focusCoins, 285);
 
   // 3. Session completes: settlement calls coinBonusProvider() dynamically
   await h.sessionCoordinator.completeCountdown();
@@ -423,11 +423,11 @@ test('Test H: CoinBonus cache updates immediately reflect on active focus sessio
   // Base reward: 25 * 1.5 = 37.5 Coins
   // Multiplier with +2% bonus: 1.02
   // Earned: 37.5 * 1.02 = 38.25 Coins
-  // Final balance: 270 + 38.25 = 308.25 Coins
+  // Final balance: 285 + 38.25 = 323.25 Coins
   const econFinal = await h.storage.getEconomy();
   assert.ok(
-    Math.abs(econFinal.focusCoins - 308.25) < EPSILON,
-    `expected 308.25, got ${econFinal.focusCoins}`
+    Math.abs(econFinal.focusCoins - 323.25) < EPSILON,
+    `expected 323.25, got ${econFinal.focusCoins}`
   );
 
   // XP is completely unchanged by CoinBonus: 500 initial + 125 earned = 625

@@ -91,7 +91,7 @@ test('Villager V2 Integration: 1-Cave cap, Lv1->5 upgrade capacity, exponential 
   assert.equal(badRoleRes.success, false);
   assert.equal(badRoleRes.errorCode, 'CIV_INVALID_VILLAGER_ROLE');
 
-  // 1. Place 1st Cave (3x3 at (1,1), baseCost 25) -> coins 4975
+  // 1. Place 1st Cave (3x3 at (1,1), baseCost 12) -> coins 4988
   const placeRes = await h.handler.handleMessage({
     action: 'PLACE_BUILDING',
     payload: { buildingDefinitionId: 'stone_age_study_cave', position: { x: 1, y: 1 } },
@@ -107,13 +107,13 @@ test('Villager V2 Integration: 1-Cave cap, Lv1->5 upgrade capacity, exponential 
   assert.equal(secondCaveRes.success, false);
   assert.equal(secondCaveRes.errorCode, 'CIV_VILLAGE_CAVE_LIMIT_REACHED');
 
-  // 2. Recruit 2 villagers at Lv.1 -> costs [40, 54] = 94 (coins 4975 - 94 = 4881)
+  // 2. Recruit 2 villagers at Lv.1 -> costs [25, 34] = 59 (coins 4988 - 59 = 4929)
   const r1 = await h.handler.handleMessage({ action: 'RECRUIT_VILLAGER', payload: { role: 'elder' } });
   const r2 = await h.handler.handleMessage({ action: 'RECRUIT_VILLAGER', payload: { role: 'crafter' } });
   assert.equal(r1.success, true);
   assert.equal(r2.success, true);
-  assert.equal((r1.data as RecruitVillagerResponseData).cost, 40);
-  assert.equal((r2.data as RecruitVillagerResponseData).cost, 54);
+  assert.equal((r1.data as RecruitVillagerResponseData).cost, 25);
+  assert.equal((r2.data as RecruitVillagerResponseData).cost, 34);
 
   // 3rd villager at Lv.1 blocked by CIV_VILLAGER_CAPACITY_REACHED
   const fullLv1Res = await h.handler.handleMessage({
@@ -147,7 +147,7 @@ test('Villager V2 Integration: 1-Cave cap, Lv1->5 upgrade capacity, exponential 
     assert.equal((upRes.data as UpgradeBuildingResponseData).newLevel, lv + 1);
   }
 
-  const remainingCosts = [73, 98, 133, 179, 242, 327, 441, 596];
+  const remainingCosts = [46, 62, 83, 112, 151, 204, 276, 372];
   const roles = ['woodworker', 'elder', 'crafter', 'woodworker', 'elder', 'crafter', 'woodworker', 'elder'] as const;
   for (let i = 0; i < remainingCosts.length; i++) {
     const recRes = await h.handler.handleMessage({
@@ -171,18 +171,18 @@ test('Villager V2 Integration: 1-Cave cap, Lv1->5 upgrade capacity, exponential 
   assert.equal(capLv5.errorParams?.currentCount, 10);
   assert.equal(capLv5.errorParams?.capacity, 10);
 
-  // Zero side effects on XP, DailyStats, or Quests; Villager CoinBonus reflects 3 Crafters (+9%) + Complete Tribe (+5%) = +14%
+  // Zero side effects on XP, DailyStats, or Quests; Villager CoinBonus reflects 3 Crafters (+15%) + Complete Tribe (+10%) = +25%
   assert.equal((await h.storage.getEconomy()).totalXP, beforeXp);
-  assert.ok(Math.abs(aggregateCoinBonus(h.civCoordinator.getActiveCoinBonuses()) - 0.14) < 1e-9);
+  assert.ok(Math.abs(aggregateCoinBonus(h.civCoordinator.getActiveCoinBonuses()) - 0.25) < 1e-9);
   assert.deepEqual(await h.storage.getDailyStats(), beforeStats);
   assert.deepEqual(await h.storage.getQuests(), beforeQuests);
 
-  // Focus Session applies +14% CoinBonus to Coins only (10m Countdown = 15 * 1.14 = 17.1 Coins, XP unchanged at +50)
+  // Focus Session applies +25% CoinBonus to Coins only (10m Countdown = 15 * 1.25 = 18.75 Coins, XP unchanged at +50)
   const coinsBeforeSession = (await h.storage.getEconomy()).focusCoins;
   await h.sessionCoordinator.startSession('COUNTDOWN', 10, profile.id);
   await h.sessionCoordinator.completeCountdown();
   const afterSessionEcon = await h.storage.getEconomy();
-  assert.ok(Math.abs(afterSessionEcon.focusCoins - (coinsBeforeSession + 17.1)) < 1e-9);
+  assert.ok(Math.abs(afterSessionEcon.focusCoins - (coinsBeforeSession + 18.75)) < 1e-9);
   assert.equal(afterSessionEcon.totalXP, beforeXp + 50);
 });
 
@@ -190,30 +190,30 @@ test('Villager V2 Demolish Empty Cave & Concurrency Mutex + Storage Rollback', a
   const h = createVillagerHarness();
   await h.seed(200, 1000, 5, 500);
 
-  // Empty Cave can be demolished for 50% refund (25 -> 12.5 Coins)
+  // Empty Cave can be demolished for 50% refund (12 -> 6 Coins)
   const cavePlace = await h.handler.handleMessage({
     action: 'PLACE_BUILDING',
     payload: { buildingDefinitionId: 'stone_age_study_cave', position: { x: 0, y: 0 } },
   });
   const caveId = (cavePlace.data as PlaceBuildingResponseData).building.id;
-  // Coins now 175
+  // Coins now 188
   const removeEmptyRes = await h.handler.handleMessage({
     action: 'REMOVE_BUILDING',
     payload: { buildingInstanceId: caveId },
   });
   assert.equal(removeEmptyRes.success, true);
-  assert.equal((removeEmptyRes.data as RemoveBuildingResponseData).refundedCoins, 12.5);
-  assert.equal((await h.storage.getEconomy()).focusCoins, 187.5);
+  assert.equal((removeEmptyRes.data as RemoveBuildingResponseData).refundedCoins, 6);
+  assert.equal((await h.storage.getEconomy()).focusCoins, 194);
 
-  // Re-place Cave (25 Coins -> 162.5 Coins left; capacity = 2; seed 80 Coins so ONLY 1 of 2 concurrent recruitments can succeed)
+  // Re-place Cave (12 Coins -> 182 Coins left; capacity = 2; seed 50 Coins so ONLY 1 of 2 concurrent recruitments can succeed)
   const cave2Place = await h.handler.handleMessage({
     action: 'PLACE_BUILDING',
     payload: { buildingDefinitionId: 'stone_age_study_cave', position: { x: 0, y: 0 } },
   });
   assert.equal(cave2Place.success, true);
-  await h.storage.setEconomy({ focusCoins: 80, totalXP: 1000, level: 5 });
+  await h.storage.setEconomy({ focusCoins: 50, totalXP: 1000, level: 5 });
 
-  // Concurrent double-click recruitment under StorageMutex: 1st costs 40 (40 left), 2nd costs 54 -> fails!
+  // Concurrent double-click recruitment under StorageMutex: 1st costs 25 (25 left), 2nd costs 34 -> fails!
   const [c1, c2] = await Promise.all([
     h.handler.handleMessage({ action: 'RECRUIT_VILLAGER', payload: { role: 'elder' } }),
     h.handler.handleMessage({ action: 'RECRUIT_VILLAGER', payload: { role: 'crafter' } }),
@@ -223,7 +223,7 @@ test('Villager V2 Demolish Empty Cave & Concurrency Mutex + Storage Rollback', a
   assert.equal(okList.length, 1);
   assert.equal(failList.length, 1);
   assert.equal(failList[0].errorCode, 'CIV_VILLAGER_INSUFFICIENT_COINS');
-  assert.equal((await h.storage.getEconomy()).focusCoins, 40);
+  assert.equal((await h.storage.getEconomy()).focusCoins, 25);
   assert.equal((await h.storage.getCivilizationState()).villagers?.length, 1);
 
   // Storage failure during 2nd recruitment triggers atomic rollback of both economy and villagers

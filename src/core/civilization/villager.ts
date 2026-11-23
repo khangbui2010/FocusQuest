@@ -5,7 +5,7 @@
  * Rules:
  * - Strictly pure deterministic functions (zero Date.now(), zero Math.random(), zero I/O).
  * - Cave capacity = 2 * caveLevel (0 if no cave exists).
- * - Recruitment cost = round(40 * 1.35^currentCount).
+ * - Recruitment cost = round(25 * 1.35^currentCount).
  * - Placement limit: at most 1 Cave (MAX_VILLAGE_CAVES = 1).
  * - Deterministic idle spots around Cave entrance for MapGridView rendering.
  */
@@ -94,8 +94,8 @@ export function getVillagerCapacity(
 
 /**
  * Calculates the Focus Coins cost to recruit the next villager given the current count:
- * Cost = Math.round(40 * 1.35^currentVillagerCount)
- * Examples: 0 -> 40, 1 -> 54, 2 -> 73, 3 -> 98, 4 -> 133, ..., 9 -> 596.
+ * Cost = Math.round(25 * 1.35^currentVillagerCount)
+ * Examples: 0 -> 25, 1 -> 34, 2 -> 46, 3 -> 62, 4 -> 83, ..., 9 -> 372.
  */
 export function getVillagerRecruitCost(currentVillagerCount: number): number {
   const count =

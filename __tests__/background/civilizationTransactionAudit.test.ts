@@ -312,14 +312,14 @@ test('Audit 6: Concurrent mutation arriving while prior transaction is handling 
     h.handler.handleMessage({
       action: 'PLACE_BUILDING',
       payload: {
-        buildingDefinitionId: 'stone_age_campfire', // costs 8
+        buildingDefinitionId: 'stone_age_campfire', // costs 4
         position: { x: 0, y: 0 },
       },
     }),
     h.handler.handleMessage({
       action: 'PLACE_BUILDING',
       payload: {
-        buildingDefinitionId: 'stone_age_campfire', // costs 8
+        buildingDefinitionId: 'stone_age_campfire', // costs 4
         position: { x: 5, y: 5 },
       },
     }),
@@ -335,13 +335,13 @@ test('Audit 6: Concurrent mutation arriving while prior transaction is handling 
   assert.strictEqual(succCount, 1, 'Second mutation must succeed after first rollback finishes');
   assert.strictEqual(failCount, 1, 'First mutation must report failure');
 
-  // Storage must contain exactly 1 building at (5, 5) and deducted 8 coins
+  // Storage must contain exactly 1 building at (5, 5) and deducted 4 coins
   const civ = await h.storage.getCivilizationState();
   assert.strictEqual(civ.buildings.length, 1);
   assert.strictEqual(civ.buildings[0].position.x, 5);
 
   const econ = await h.storage.getEconomy();
-  assert.strictEqual(econ.focusCoins, 292);
+  assert.strictEqual(econ.focusCoins, 296);
 });
 
 // -----------------------------------------------------------------------------
@@ -355,7 +355,7 @@ test('Audit 7: Settlement occurring concurrently with building placement receive
   // 1. Start a 20-minute Countdown session
   await h.sessionCoordinator.startSession('COUNTDOWN', 20, profile.id);
 
-  // 2. Dispatch PLACE_BUILDING (costs 30, gives +2% bonus) and completeCountdown concurrently
+  // 2. Dispatch PLACE_BUILDING (costs 15, gives +2% bonus) and completeCountdown concurrently
   const [placeResp, compResp] = await Promise.all([
     h.handler.handleMessage({
       action: 'PLACE_BUILDING',
@@ -373,21 +373,21 @@ test('Audit 7: Settlement occurring concurrently with building placement receive
   // Both operations were serialized under StorageMutex.
   // Whichever ran first, because onCommitted runs INSIDE the mutex lock before release:
   // If placeBuilding committed first:
-  //   - Balance was 300 - 30 = 270
+  //   - Balance was 300 - 15 = 285
   //   - completeCountdown ran second, saw +2% bonus
   //   - Coins earned: 20 * 1.5 * 1.02 = 30.6
-  //   - Final balance: 270 + 30.6 = 300.6
+  //   - Final balance: 285 + 30.6 = 315.6
   // If completeCountdown committed first:
   //   - Coins earned: 20 * 1.5 * 1.0 = 30
   //   - Balance became 300 + 30 = 330
-  //   - placeBuilding ran second: balance = 330 - 30 = 300.0
-  // Crucially, coins must be either 300.6 or 300.0 (strictly serialized, no lost update or negative balance)
+  //   - placeBuilding ran second: balance = 330 - 15 = 315.0
+  // Crucially, coins must be either 315.6 or 315.0 (strictly serialized, no lost update or negative balance)
   const finalEcon = await h.storage.getEconomy();
-  const validBalances = [300.6, 300.0];
+  const validBalances = [315.6, 315.0];
   const matched = validBalances.some((b) => Math.abs(finalEcon.focusCoins - b) < EPSILON);
   assert.ok(
     matched,
-    `Final balance ${finalEcon.focusCoins} must be strictly serialized (either 300.6 or 300.0)`
+    `Final balance ${finalEcon.focusCoins} must be strictly serialized (either 315.6 or 315.0)`
   );
 
   // XP is completely unchanged by CoinBonus: 500 initial + 100 earned = 600
@@ -434,15 +434,15 @@ test('Audit 8: Settlement occurring concurrently with building removal immediate
   // Active bonuses must now be empty
   assert.strictEqual(h.civilizationCoordinator.getActiveCoinBonuses().length, 0);
 
-  // Final economy must be serialized accurately (Stage 5C-1 includes 50% demolish refund = +15 Coins)
+  // Final economy must be serialized accurately (Stage 5C-1 includes 50% demolish refund = +7.5 Coins)
   const econ = await h.storage.getEconomy();
-  // Initial 300 -> place Foraging Post (-30) = 270.
-  // Remove refunds 50% (+15 Coins -> 285).
-  // If remove ran first: 270 + 15 + (20 * 1.5 * 1.0) = 315.0
-  // If complete ran first: 270 + (20 * 1.5 * 1.02) + 15 = 315.6
-  const validBalances = [315.0, 315.6];
+  // Initial 300 -> place Foraging Post (-15) = 285.
+  // Remove refunds 50% (+7.5 Coins -> 292.5).
+  // If remove ran first: 285 + 7.5 + (20 * 1.5 * 1.0) = 322.5
+  // If complete ran first: 285 + (20 * 1.5 * 1.02) + 7.5 = 323.1
+  const validBalances = [322.5, 323.1];
   const matched = validBalances.some((b) => Math.abs(econ.focusCoins - b) < EPSILON);
-  assert.ok(matched, `Final balance ${econ.focusCoins} must be either 315.0 or 315.6`);
+  assert.ok(matched, `Final balance ${econ.focusCoins} must be either 322.5 or 323.1`);
 });
 
 // -----------------------------------------------------------------------------

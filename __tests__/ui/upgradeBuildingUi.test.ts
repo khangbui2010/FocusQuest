@@ -46,7 +46,7 @@ test('Stage 5C-1 Simulator Parity: upgradeBuildingClient, L1->L2 CoinBonus sessi
     const econBeforePlace = await sendExtensionMessage<PlayerEconomy>({ action: 'GET_ECONOMY' });
     assert.equal(econBeforePlace.data?.focusCoins, 174);
 
-    // Place Foraging Post (cost 30 -> 144 Coins left, +2% bonus)
+    // Place Foraging Post (cost 15 -> 159 Coins left, +2% bonus)
     const p1 = await placeBuildingClient({
       buildingDefinitionId: 'stone_age_foraging_post',
       position: { x: 0, y: 0 },
@@ -54,26 +54,41 @@ test('Stage 5C-1 Simulator Parity: upgradeBuildingClient, L1->L2 CoinBonus sessi
     assert.equal(p1.success, true, `Expected placement to succeed, got ${p1.error}`);
     const b1 = p1.data!.building;
 
-    // Upgrade Lv.1 -> Lv.2 via upgradeBuildingClient (cost 48 -> 96 Coins left, +4% bonus)
+    // Upgrade Lv.1 -> Lv.2 via upgradeBuildingClient (cost 24 -> 135 Coins left, +4% bonus)
     const upRes = await upgradeBuildingClient({ buildingId: b1.id, expectedLevel: 1 });
     assert.equal(upRes.success, true, `Expected upgrade L1->L2 to succeed, got ${upRes.error}`);
     assert.equal(upRes.data!.newLevel, 2);
-    assert.equal(upRes.data!.cost, 48);
-    assert.equal(upRes.data!.economy.focusCoins, 96);
+    assert.equal(upRes.data!.cost, 24);
+    assert.equal(upRes.data!.economy.focusCoins, 135);
 
-    // Upgrade Lv.2 -> Lv.3 via upgradeBuildingClient (cost 77 -> 19 Coins left, +6% bonus)
+    // Upgrade Lv.2 -> Lv.3 via upgradeBuildingClient (cost 38 -> 97 Coins left, +6% bonus)
     const upRes3 = await upgradeBuildingClient({ buildingId: b1.id, expectedLevel: 2 });
     assert.equal(upRes3.success, true, `Expected upgrade L2->L3 to succeed, got ${upRes3.error}`);
     assert.equal(upRes3.data!.newLevel, 3);
-    assert.equal(upRes3.data!.cost, 77);
-    assert.equal(upRes3.data!.economy.focusCoins, 19);
+    assert.equal(upRes3.data!.cost, 38);
+    assert.equal(upRes3.data!.economy.focusCoins, 97);
 
-    // Lv.3 -> Lv.4 costs 123 Coins, only 19 Coins left -> fails with CIV_INSUFFICIENT_BUILDING_COINS
-    const lowCoinsRes = await upgradeBuildingClient({ buildingId: b1.id, expectedLevel: 3 });
+    // Upgrade Lv.3 -> Lv.4 via upgradeBuildingClient (cost 61 -> 36 Coins left, +8% bonus)
+    const upRes4 = await upgradeBuildingClient({ buildingId: b1.id, expectedLevel: 3 });
+    assert.equal(upRes4.success, true, `Expected upgrade L3->L4 to succeed, got ${upRes4.error}`);
+    assert.equal(upRes4.data!.newLevel, 4);
+    assert.equal(upRes4.data!.cost, 61);
+    assert.equal(upRes4.data!.economy.focusCoins, 36);
+
+    // Place temporary Foraging Post (cost 15 -> 21 Coins left, 2/4 Build Limit), L1->L2 costs 24 Coins (Lv.2 required <= Lv.4) -> fails with CIV_INSUFFICIENT_BUILDING_COINS, then demolish (+7.5 -> 28.5 Coins)
+    const pTemp = await placeBuildingClient({
+      buildingDefinitionId: 'stone_age_foraging_post',
+      position: { x: 2, y: 0 },
+    });
+    assert.equal(pTemp.success, true, `Expected temporary Foraging Post placement to succeed, got ${pTemp.error}`);
+    const lowCoinsRes = await upgradeBuildingClient({ buildingId: pTemp.data!.building.id, expectedLevel: 1 });
     assert.equal(lowCoinsRes.success, false);
     assert.equal(lowCoinsRes.errorCode, 'CIV_INSUFFICIENT_BUILDING_COINS');
+    const remTemp = await removeBuildingClient({ buildingInstanceId: pTemp.data!.building.id });
+    assert.equal(remTemp.success, true);
+    assert.equal(remTemp.data?.economy?.focusCoins, 28.5);
 
-    // Next 25m Countdown session earns 25 * 1.5 * 1.0 * 1.06 (+6% from Lv.3 Foraging Post) = 39.75 Coins -> 58.75 Coins
+    // Next 25m Countdown session earns 25 * 1.5 * 1.0 * 1.08 (+8% from Lv.4 Foraging Post) = 40.5 Coins -> 69 Coins
     await sendExtensionMessage({
       action: 'START_SESSION',
       payload: { mode: 'COUNTDOWN', targetMinutes: 25, profileId: 'profile-study-research' },
@@ -83,15 +98,15 @@ test('Stage 5C-1 Simulator Parity: upgradeBuildingClient, L1->L2 CoinBonus sessi
     await sendExtensionMessage({ action: 'RESET_SESSION' });
 
     const econAfterSession = await sendExtensionMessage<PlayerEconomy>({ action: 'GET_ECONOMY' });
-    assert.equal(econAfterSession.data?.focusCoins, 58.75);
+    assert.equal(econAfterSession.data?.focusCoins, 69);
 
-    // Remove Lv.3 Foraging Post -> 50% refund of (30 + 48 + 77) = +77.5 Coins -> 136.25 Coins
+    // Remove Lv.4 Foraging Post -> 50% refund of (15 + 24 + 38 + 61) = +69 Coins -> 138 Coins
     const rem1 = await removeBuildingClient({ buildingInstanceId: b1.id });
     assert.equal(rem1.success, true);
-    assert.equal(rem1.data?.refundedCoins, 77.5);
-    assert.equal(rem1.data?.economy?.focusCoins, 136.25);
+    assert.equal(rem1.data?.refundedCoins, 69);
+    assert.equal(rem1.data?.economy?.focusCoins, 138);
 
-    // Place campfire (8 -> 128.25 Coins left), verify decorative upgrade returns CIV_UPGRADE_NOT_SUPPORTED
+    // Place campfire (4 -> 134 Coins left), verify decorative upgrade returns CIV_UPGRADE_NOT_SUPPORTED
     const camp = await placeBuildingClient({
       buildingDefinitionId: 'stone_age_campfire',
       position: { x: 0, y: 0 },
@@ -104,7 +119,7 @@ test('Stage 5C-1 Simulator Parity: upgradeBuildingClient, L1->L2 CoinBonus sessi
     assert.equal(campUp.success, false);
     assert.equal(campUp.errorCode, 'CIV_UPGRADE_NOT_SUPPORTED');
 
-    // Earn Coins via 2 x 60m Countdown sessions (+252 -> 380.25 Coins), place 4 Foraging Posts, verify 5th Foraging Post hits CIV_ECONOMY_BUILDING_LIMIT_REACHED while Granary still succeeds
+    // Earn Coins via 2 x 60m Countdown sessions (+252 -> 386 Coins), place 4 Foraging Posts, verify 5th Foraging Post hits CIV_ECONOMY_BUILDING_LIMIT_REACHED while Granary still succeeds
     for (let i = 0; i < 2; i += 1) {
       await sendExtensionMessage({
         action: 'START_SESSION',
@@ -169,7 +184,7 @@ test('Stage 5C-1 UI SSR (BuildingDetailsModal): renders all upgrade states, inli
       onUpgrade: async () => {},
     })
   );
-  assert.ok(okEn.includes('Next Lv. 3 · Cost: 77 Coins'));
+  assert.ok(okEn.includes('Next Lv. 3 · Cost: 38 Coins'));
   assert.ok(okEn.includes('+4% → +6% CoinBonus'));
   assert.ok(okEn.includes('data-testid="building-upgrade-success"'));
   assert.ok(okEn.includes('Upgraded to Lv. 2!'));
@@ -180,14 +195,14 @@ test('Stage 5C-1 UI SSR (BuildingDetailsModal): renders all upgrade states, inli
     React.createElement(BuildingDetailsModal, {
       building: foragingLv1,
       playerLevel: 3,
-      playerCoins: 40,
+      playerCoins: 16,
       onClose: () => {},
       onRemove: async () => {},
       onUpgrade: async () => {},
     })
   );
   assert.ok(lowCoinsVi.includes('Thiếu 8 Coin'));
-  assert.ok(lowCoinsVi.includes('Cần 48 Coin'));
+  assert.ok(lowCoinsVi.includes('Cần 24 Coin'));
 
   // 3. Player Level gate
   const lowLvEn = renderLocale(

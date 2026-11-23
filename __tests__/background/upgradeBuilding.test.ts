@@ -178,7 +178,7 @@ test('Stage 5C-1 Reward Integration: upgrading L1->L5 deducts exact Coins, updat
   const beforeStats = await h.storage.getDailyStats();
   const beforeQuests = await h.storage.getQuests();
 
-  // Place Foraging Post (cost 30 -> 1970 Coins left, +2% bonus)
+  // Place Foraging Post (cost 15 -> 1985 Coins left, +2% bonus)
   const placeRes = await h.handler.handleMessage({
     action: 'PLACE_BUILDING',
     payload: { buildingDefinitionId: 'stone_age_foraging_post', position: { x: 0, y: 0 } },
@@ -187,9 +187,9 @@ test('Stage 5C-1 Reward Integration: upgrading L1->L5 deducts exact Coins, updat
   const bldId = (placeRes.data as PlaceBuildingResponseData).building.id;
   assert.ok(Math.abs(aggregateCoinBonus(h.civCoordinator.getActiveCoinBonuses()) - 0.02) < EPSILON);
 
-  // Upgrade sequentially L1 -> L5: costs [48, 77, 123, 197] (total = 445)
-  const expectedCosts = [48, 77, 123, 197];
-  let expectedCoins = 1970;
+  // Upgrade sequentially L1 -> L5: costs [24, 38, 61, 98] (total = 221)
+  const expectedCosts = [24, 38, 61, 98];
+  let expectedCoins = 1985;
   for (let idx = 0; idx < expectedCosts.length; idx += 1) {
     const expectedLevel = idx + 1;
     const upRes = await h.handler.handleMessage({
@@ -239,7 +239,7 @@ test('Stage 5C-1 Concurrency & Rollback: concurrent upgrades enforce expectedLev
   });
   assert.equal(placeRes.success, true);
   const bldId = (placeRes.data as PlaceBuildingResponseData).building.id;
-  // Remaining Coins = 970
+  // Remaining Coins = 985
 
   // 1. Two concurrent upgrade requests with same expectedLevel: 1
   const [r1, r2] = await Promise.all([
@@ -260,7 +260,7 @@ test('Stage 5C-1 Concurrency & Rollback: concurrent upgrades enforce expectedLev
   assert.equal(failures[0].errorCode, 'BUILDING_LEVEL_MISMATCH');
 
   const econAfterRace = await h.storage.getEconomy();
-  assert.equal(econAfterRace.focusCoins, 970 - 48, 'Coins must only be deducted once');
+  assert.equal(econAfterRace.focusCoins, 985 - 24, 'Coins must only be deducted once');
   assert.ok(Math.abs(aggregateCoinBonus(h.civCoordinator.getActiveCoinBonuses()) - 0.04) < EPSILON);
 
   // 2. Partial storage write failure during L2->L3 must rollback economy & civilization and preserve +4% cache
@@ -283,7 +283,7 @@ test('Stage 5C-1 Concurrency & Rollback: concurrent upgrades enforce expectedLev
 
   const rolledEcon = await h.storage.getEconomy();
   const rolledCiv = await h.storage.getCivilizationState();
-  assert.equal(rolledEcon.focusCoins, 922);
+  assert.equal(rolledEcon.focusCoins, 961);
   assert.equal(rolledCiv.buildings[0].level, 2);
   assert.ok(Math.abs(aggregateCoinBonus(h.civCoordinator.getActiveCoinBonuses()) - 0.04) < EPSILON);
 });
@@ -343,7 +343,7 @@ test('Stage 5C-1 Placement Cap & 50% Demolish Refund: enforces 4 Economy max, re
   assert.equal(decorRes.success, true);
   const decorData = decorRes.data as PlaceBuildingResponseData;
 
-  // Upgrade first Foraging Post to Lv.3 (total spent: 30 + 48 + 77 = 155 -> 50% refund = 77.5)
+  // Upgrade first Foraging Post to Lv.3 (total spent: 15 + 24 + 38 = 77 -> 50% refund = 38.5)
   const firstId = placedIds[0];
   await h.handler.handleMessage({
     action: 'UPGRADE_BUILDING',
@@ -361,8 +361,8 @@ test('Stage 5C-1 Placement Cap & 50% Demolish Refund: enforces 4 Economy max, re
   });
   assert.equal(removeRes.success, true);
   const removeData = removeRes.data as RemoveBuildingResponseData;
-  assert.equal(removeData.refundedCoins, 77.5);
-  assert.equal(removeData.economy!.focusCoins, econBeforeDemolish.focusCoins + 77.5);
+  assert.equal(removeData.refundedCoins, 38.5);
+  assert.equal(removeData.economy!.focusCoins, econBeforeDemolish.focusCoins + 38.5);
 
   // Removing 1 Foraging Post frees a Foraging Post slot while Granary remains capped
   const replacementRes = await h.handler.handleMessage({
@@ -371,7 +371,7 @@ test('Stage 5C-1 Placement Cap & 50% Demolish Refund: enforces 4 Economy max, re
   });
   assert.equal(replacementRes.success, true);
 
-  // Rollback check on REMOVE_BUILDING partial storage failure (e.g. Campfire 7.5 refund)
+  // Rollback check on REMOVE_BUILDING partial storage failure (e.g. Campfire 2 refund)
   const originalSetMultiple = h.adapter.setMultiple.bind(h.adapter);
   const econBeforeFailRemove = await h.storage.getEconomy();
   let failRemoveOnce = true;

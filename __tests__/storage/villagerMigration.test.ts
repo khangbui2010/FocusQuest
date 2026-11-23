@@ -111,9 +111,9 @@ test('Migration v4: keeps highest-level Cave across multiple legacy Caves and re
   assert.equal(migrated?.buildings.length, 1);
   assert.equal(migrated?.buildings[0].id, 'cave-high-newer', 'Must keep highest level, tie-broken by earliest placedAt');
 
-  // Removed caves: cave-low-older (Lv1: 25) + cave-tie-later (Lv3: 25 + 44 + 77 = 146) => 171 Coins refund
+  // Removed caves: cave-low-older (Lv1: 12) + cave-tie-later (Lv3: 12 + 21 + 37 = 70) => 82 Coins refund
   const econ = await storage.get<PlayerEconomy>(STORAGE_KEYS.ECONOMY);
-  assert.equal(econ?.focusCoins, 10 + 25 + 146);
+  assert.equal(econ?.focusCoins, 10 + 12 + 70);
 });
 
 test('Migration v4: colliding 2x2->3x3 Cave is removed cleanly with 100% refund of base + upgrades', async () => {
@@ -139,7 +139,7 @@ test('Migration v4: colliding 2x2->3x3 Cave is removed cleanly with 100% refund 
   assert.equal(migrated?.buildings[0].id, 'granary-block');
   assert.deepEqual(migrated?.villagers, []);
 
-  // Refund for Lv2 Cave = 25 (base) + 44 (L1->L2 at 1.75x) = 69 Coins (100% full refund)
+  // Refund for Lv2 Cave = 12 (base) + 21 (L1->L2 at 1.75x) = 33 Coins (100% full refund)
   const econ = await storage.get<PlayerEconomy>(STORAGE_KEYS.ECONOMY);
-  assert.equal(econ?.focusCoins, 25 + 69);
+  assert.equal(econ?.focusCoins, 25 + 33);
 });

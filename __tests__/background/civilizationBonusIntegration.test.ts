@@ -96,15 +96,15 @@ test('Civilization Bonus Integration: Active economy building boosts session coi
   const placeResp = await h.handler.handleMessage({
     action: 'PLACE_BUILDING',
     payload: {
-      buildingDefinitionId: 'stone_age_foraging_post', // costs 30
+      buildingDefinitionId: 'stone_age_foraging_post', // costs 15
       position: { x: 2, y: 2 },
     },
   });
   assert.strictEqual(placeResp.success, true);
 
-  // Balance before session: 200 - 30 = 170 Coins
+  // Balance before session: 200 - 15 = 185 Coins
   const economyBefore = await h.storage.getEconomy();
-  assert.strictEqual(economyBefore.focusCoins, 170);
+  assert.strictEqual(economyBefore.focusCoins, 185);
   const xpBefore = economyBefore.totalXP;
 
   // Run 25-minute countdown session
@@ -115,11 +115,11 @@ test('Civilization Bonus Integration: Active economy building boosts session coi
   // Base: 25 * 1.5 = 37.5
   // Multiplier: 1.0 + 0.02 = 1.02
   // Reward: 37.5 * 1.02 = 38.25 Coins
-  // Final Coins: 170 + 38.25 = 208.25
+  // Final Coins: 185 + 38.25 = 223.25
   const economyAfter = await h.storage.getEconomy();
   assert.ok(
-    Math.abs(economyAfter.focusCoins - 208.25) < EPSILON,
-    `expected 208.25, got ${economyAfter.focusCoins}`
+    Math.abs(economyAfter.focusCoins - 223.25) < EPSILON,
+    `expected 223.25, got ${economyAfter.focusCoins}`
   );
 
   // XP is completely uninfluenced by CoinBonus

@@ -57,39 +57,39 @@ test('Core 5C-1 (Policy & Constants): category upgradeability, refund rate, and 
 
 test('Core 5C-1 (Catalog & Refunds): exact cumulative Coins spent & IEEE-754 50% demolish refund across all 6 Stone Age buildings', () => {
   const campfire = getBuildingDefinition('stone_age_campfire')!;
-  assert.equal(calculateTotalBuildingCoinsSpent(campfire, 1), 8);
-  assert.equal(calculateBuildingDemolishRefund(campfire, 1), 4);
-  assert.equal(calculateTotalBuildingCoinsSpent(campfire, 3), 8 + 12 + 18);
-  assert.equal(calculateBuildingDemolishRefund(campfire, 3), 19);
+  assert.equal(calculateTotalBuildingCoinsSpent(campfire, 1), 4);
+  assert.equal(calculateBuildingDemolishRefund(campfire, 1), 2);
+  assert.equal(calculateTotalBuildingCoinsSpent(campfire, 3), 4 + 6 + 9);
+  assert.equal(calculateBuildingDemolishRefund(campfire, 3), 9.5);
 
   const totem = getBuildingDefinition('stone_age_totem')!;
-  assert.equal(calculateBuildingDemolishRefund(totem, 1), 7.5);
-  assert.equal(calculateTotalBuildingCoinsSpent(totem, 3), 15 + 24 + 38);
-  assert.equal(calculateBuildingDemolishRefund(totem, 3), 38.5);
+  assert.equal(calculateBuildingDemolishRefund(totem, 1), 4);
+  assert.equal(calculateTotalBuildingCoinsSpent(totem, 3), 8 + 13 + 20);
+  assert.equal(calculateBuildingDemolishRefund(totem, 3), 20.5);
 
   const foraging = getBuildingDefinition('stone_age_foraging_post')!;
-  const foragingCosts = [30, 48, 77, 123, 197]; // base + L1->2, L2->3, L3->4, L4->5
-  assert.equal(calculateUpgradeCost(foraging, 1), 48);
-  assert.equal(calculateUpgradeCost(foraging, 2), 77);
-  assert.equal(calculateUpgradeCost(foraging, 3), 123);
-  assert.equal(calculateUpgradeCost(foraging, 4), 197);
-  assert.equal(calculateTotalBuildingCoinsSpent(foraging, 1), 30);
-  assert.equal(calculateBuildingDemolishRefund(foraging, 1), 15);
-  assert.equal(calculateTotalBuildingCoinsSpent(foraging, 3), 30 + 48 + 77);
-  assert.equal(calculateBuildingDemolishRefund(foraging, 3), 77.5);
+  const foragingCosts = [15, 24, 38, 61, 98]; // base + L1->2, L2->3, L3->4, L4->5
+  assert.equal(calculateUpgradeCost(foraging, 1), 24);
+  assert.equal(calculateUpgradeCost(foraging, 2), 38);
+  assert.equal(calculateUpgradeCost(foraging, 3), 61);
+  assert.equal(calculateUpgradeCost(foraging, 4), 98);
+  assert.equal(calculateTotalBuildingCoinsSpent(foraging, 1), 15);
+  assert.equal(calculateBuildingDemolishRefund(foraging, 1), 7.5);
+  assert.equal(calculateTotalBuildingCoinsSpent(foraging, 3), 15 + 24 + 38);
+  assert.equal(calculateBuildingDemolishRefund(foraging, 3), 38.5);
   assert.equal(
     calculateTotalBuildingCoinsSpent(foraging, 5),
     foragingCosts.reduce((sum, n) => sum + n, 0)
   );
-  assert.equal(calculateBuildingDemolishRefund(foraging, 5), 237.5);
+  assert.equal(calculateBuildingDemolishRefund(foraging, 5), 118);
 
   const granary = getBuildingDefinition('stone_age_food_cache')!;
-  assert.equal(calculateUpgradeCost(granary, 1), 108);
-  assert.equal(calculateUpgradeCost(granary, 2), 194);
-  assert.equal(calculateUpgradeCost(granary, 3), 350);
-  assert.equal(calculateUpgradeCost(granary, 4), 630);
-  assert.equal(calculateTotalBuildingCoinsSpent(granary, 5), 60 + 108 + 194 + 350 + 630);
-  assert.equal(calculateBuildingDemolishRefund(granary, 5), 671);
+  assert.equal(calculateUpgradeCost(granary, 1), 54);
+  assert.equal(calculateUpgradeCost(granary, 2), 97);
+  assert.equal(calculateUpgradeCost(granary, 3), 175);
+  assert.equal(calculateUpgradeCost(granary, 4), 315);
+  assert.equal(calculateTotalBuildingCoinsSpent(granary, 5), 30 + 54 + 97 + 175 + 315);
+  assert.equal(calculateBuildingDemolishRefund(granary, 5), 335.5);
 
   // Unknown definition or invalid level must degrade safely to 0
   assert.equal(calculateBuildingDemolishRefund(undefined, 2), 0);
@@ -189,7 +189,7 @@ test('Core 5C-1 (Evaluator & Level Gates): verifies every gate precedence, CoinB
   assert.equal(lvGate.canUpgrade, false);
   assert.equal(lvGate.reason, 'PLAYER_LEVEL_REQUIRED');
   assert.equal(lvGate.requiredPlayerLevel, 3);
-  assert.equal(lvGate.cost, 108);
+  assert.equal(lvGate.cost, 54);
 
   // Coins gate check
   const coinGate = evaluateBuildingUpgrade({
@@ -197,12 +197,12 @@ test('Core 5C-1 (Evaluator & Level Gates): verifies every gate precedence, CoinB
     definition: foraging,
     currentEra: 'STONE_AGE',
     playerLevel: 2,
-    playerCoins: 30,
+    playerCoins: 15,
   });
   assert.equal(coinGate.canUpgrade, false);
   assert.equal(coinGate.reason, 'INSUFFICIENT_COINS');
-  assert.equal(coinGate.cost, 48);
-  assert.equal(coinGate.shortfallCoins, 18);
+  assert.equal(coinGate.cost, 24);
+  assert.equal(coinGate.shortfallCoins, 9);
 
   // Happy path + pure immutability of applyBuildingUpgrade
   const orig = makeInstance('stone_age_foraging_post', 1);
@@ -211,14 +211,14 @@ test('Core 5C-1 (Evaluator & Level Gates): verifies every gate precedence, CoinB
     definition: foraging,
     currentEra: 'STONE_AGE',
     playerLevel: 2,
-    playerCoins: 48,
+    playerCoins: 24,
     expectedLevel: 1,
   });
   assert.equal(okEval.canUpgrade, true);
   assert.equal(okEval.reason, null);
   assert.equal(okEval.nextLevel, 2);
-  assert.equal(okEval.cost, 48);
-  assert.equal(okEval.baseCost, 48);
+  assert.equal(okEval.cost, 24);
+  assert.equal(okEval.baseCost, 24);
   assert.equal(okEval.discountRate, 0);
   assert.ok(Math.abs(okEval.currentCoinBonusRate - 0.02) < EPSILON);
   assert.ok(Math.abs(okEval.nextCoinBonusRate - 0.04) < EPSILON);
@@ -229,13 +229,13 @@ test('Core 5C-1 (Evaluator & Level Gates): verifies every gate precedence, CoinB
     definition: foraging,
     currentEra: 'STONE_AGE',
     playerLevel: 2,
-    playerCoins: 40,
+    playerCoins: 24,
     upgradeDiscountRate: 0.2,
   });
   assert.equal(discountedEval.canUpgrade, true);
-  assert.equal(discountedEval.baseCost, 48);
+  assert.equal(discountedEval.baseCost, 24);
   assert.equal(discountedEval.discountRate, 0.2);
-  assert.equal(discountedEval.cost, 38); // Math.round(48 * 0.8) = 38
+  assert.equal(discountedEval.cost, 19); // Math.round(24 * 0.8) = 19
 
   const upgraded = applyBuildingUpgrade(orig);
   assert.equal(orig.level, 1, 'original instance must remain immutable');

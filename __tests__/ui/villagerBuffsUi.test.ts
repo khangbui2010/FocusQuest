@@ -61,15 +61,15 @@ test('VillagerBuffs UI (BuildingDetailsModal): Cave buff summary, At cap badges,
     })
   );
   assert.ok(cavePartialEn.includes('data-testid="selected-role-buff-preview"'));
-  assert.ok(cavePartialEn.includes('-4% building upgrade cost'));
+  assert.ok(cavePartialEn.includes('-6% building upgrade cost'));
   assert.ok(cavePartialEn.includes('data-testid="villager-buff-summary"'));
-  assert.ok(cavePartialEn.includes('Crafters (1): +3% CoinBonus'));
-  assert.ok(cavePartialEn.includes('Elders (2): -8% Upgrade Cost'));
-  assert.ok(cavePartialEn.includes('Complete Tribe Synergy: Need all 3 roles (+5% CoinBonus)'));
+  assert.ok(cavePartialEn.includes('Crafters (1): +5% CoinBonus'));
+  assert.ok(cavePartialEn.includes('Elders (2): -12% Upgrade Cost'));
+  assert.ok(cavePartialEn.includes('Complete Tribe Synergy: Need all 3 roles (+10% CoinBonus)'));
   assert.ok(!cavePartialEn.includes('>At cap<'));
 
-  // Capped roster: 10 crafters, 8 woodworkers, 8 elders -> "At cap" / "Đạt trần" + Complete Tribe active
-  const cappedRoster = makeVillagers({ crafter: 10, woodworker: 8, elder: 8 });
+  // Capped roster: 8 crafters, 8 woodworkers, 5 elders -> "At cap" / "Đạt trần" + Complete Tribe active
+  const cappedRoster = makeVillagers({ crafter: 8, woodworker: 8, elder: 5 });
   const caveCappedEn = renderLocale(
     'en',
     React.createElement(BuildingDetailsModal, {
@@ -79,11 +79,12 @@ test('VillagerBuffs UI (BuildingDetailsModal): Cave buff summary, At cap badges,
       playerCoins: 1000,
       onClose: () => {},
       onRemove: async () => {},
+      onUpgrade: async () => {},
       onRecruitVillager: async () => {},
     })
   );
   assert.strictEqual((caveCappedEn.match(/>At cap</g) ?? []).length, 3);
-  assert.ok(caveCappedEn.includes('Complete Tribe Synergy: Active (+5% CoinBonus)'));
+  assert.ok(caveCappedEn.includes('Complete Tribe Synergy: Active (+10% CoinBonus)'));
 
   const caveCappedVi = renderLocale(
     'vi',
@@ -94,13 +95,14 @@ test('VillagerBuffs UI (BuildingDetailsModal): Cave buff summary, At cap badges,
       playerCoins: 1000,
       onClose: () => {},
       onRemove: async () => {},
+      onUpgrade: async () => {},
       onRecruitVillager: async () => {},
     })
   );
   assert.strictEqual((caveCappedVi.match(/>Đạt trần</g) ?? []).length, 3);
-  assert.ok(caveCappedVi.includes('Hiệp lực Bộ tộc: Đang bật (+5% CoinBonus)'));
+  assert.ok(caveCappedVi.includes('Hiệp lực Bộ tộc: Đang bật (+10% CoinBonus)'));
 
-  // Elder discount strikethrough & badge on upgradeable building (5 elders = -20% on baseCost 48 -> 38)
+  // Elder discount strikethrough & badge on upgradeable building (5 elders = -30% on baseCost 24 -> 17)
   const discountedEn = renderLocale(
     'en',
     React.createElement(BuildingDetailsModal, {
@@ -113,11 +115,11 @@ test('VillagerBuffs UI (BuildingDetailsModal): Cave buff summary, At cap badges,
       onUpgrade: async () => {},
     })
   );
-  assert.ok(discountedEn.includes('Next Lv. 2 · Cost: 38 Coins'));
+  assert.ok(discountedEn.includes('Next Lv. 2 · Cost: 17 Coins'));
   assert.ok(discountedEn.includes('data-testid="upgrade-base-cost-strike"'));
-  assert.ok(discountedEn.includes('>48<'));
+  assert.ok(discountedEn.includes('>24<'));
   assert.ok(discountedEn.includes('data-testid="upgrade-discount-badge"'));
-  assert.ok(discountedEn.includes('-20% Elder'));
+  assert.ok(discountedEn.includes('-30% Elder'));
 
   const discountedVi = renderLocale(
     'vi',
@@ -131,8 +133,8 @@ test('VillagerBuffs UI (BuildingDetailsModal): Cave buff summary, At cap badges,
       onUpgrade: async () => {},
     })
   );
-  assert.ok(discountedVi.includes('Cấp kế Lv. 2 · Chi phí: 38 Coin'));
-  assert.ok(discountedVi.includes('-20% Trưởng lão'));
+  assert.ok(discountedVi.includes('Cấp kế Lv. 2 · Chi phí: 17 Coin'));
+  assert.ok(discountedVi.includes('-30% Trưởng lão'));
 });
 
 test('VillagerBuffs UI (LandExpansionModal): Woodworker discount strikethrough & badge in EN/VI', () => {
@@ -196,10 +198,10 @@ test('VillagerBuffs UI (RewardHelpModal, CivilizationHeader, BuildingCatalogPane
   );
   assert.ok(helpEn.includes('data-testid="help-villager-buffs"'));
   assert.ok(helpEn.includes('Villager Role Buffs &amp; Tribe Synergy'));
-  assert.ok(helpEn.includes('Crafter: +3% additive Focus CoinBonus per villager (cap +30%). Focus Coins only.'));
+  assert.ok(helpEn.includes('Crafter: +5% additive Focus CoinBonus per villager (cap +40%). Focus Coins only.'));
   assert.ok(helpEn.includes('Woodworker: -5% land expansion Coin cost per villager (cap -40%). Player Level gate unchanged.'));
-  assert.ok(helpEn.includes('Elder: -4% building upgrade Coin cost per villager (cap -30%). Upgrades only.'));
-  assert.ok(helpEn.includes('Complete Tribe: having at least 1 Elder, 1 Crafter, and 1 Woodworker grants +5% additive CoinBonus.'));
+  assert.ok(helpEn.includes('Elder: -6% building upgrade Coin cost per villager (cap -30%). Upgrades only.'));
+  assert.ok(helpEn.includes('Complete Tribe: having at least 1 Elder, 1 Crafter, and 1 Woodworker grants +10% additive CoinBonus.'));
 
   const helpVi = renderLocale(
     'vi',
@@ -207,10 +209,10 @@ test('VillagerBuffs UI (RewardHelpModal, CivilizationHeader, BuildingCatalogPane
   );
   assert.ok(helpVi.includes('data-testid="help-villager-buffs"'));
   assert.ok(helpVi.includes('Hiệu ứng Dân làng &amp; Hiệp lực Bộ tộc'));
-  assert.ok(helpVi.includes('Thợ thủ công: +3% CoinBonus cộng dồn mỗi dân (trần +30%). Chỉ áp dụng cho Focus Coin.'));
+  assert.ok(helpVi.includes('Thợ thủ công: +5% CoinBonus cộng dồn mỗi dân (trần +40%). Chỉ áp dụng cho Focus Coin.'));
   assert.ok(helpVi.includes('Tiều phu: giảm 5% chi phí Coin mở đất mỗi dân (trần -40%). Giữ nguyên mốc Level.'));
-  assert.ok(helpVi.includes('Trưởng lão: giảm 4% chi phí Coin nâng cấp công trình mỗi dân (trần -30%). Chỉ áp dụng cho nâng cấp.'));
-  assert.ok(helpVi.includes('Đủ 3 vai trò: có ít nhất 1 Trưởng lão, 1 Thợ thủ công và 1 Tiều phu tặng thêm +5% CoinBonus.'));
+  assert.ok(helpVi.includes('Trưởng lão: giảm 6% chi phí Coin nâng cấp công trình mỗi dân (trần -30%). Chỉ áp dụng cho nâng cấp.'));
+  assert.ok(helpVi.includes('Đủ 3 vai trò: có ít nhất 1 Trưởng lão, 1 Thợ thủ công và 1 Tiều phu tặng thêm +10% CoinBonus.'));
 
   // CivilizationHeader reflects combined building + villager CoinBonus (+14%)
   const headerHtml = renderLocale(

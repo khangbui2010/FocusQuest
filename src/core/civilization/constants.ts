@@ -29,17 +29,17 @@ export const BUILDING_UPGRADE_PLAYER_LEVEL_STEP = 1;
 export const BUILDING_DEMOLISH_REFUND_RATE = 0.5;
 export const MAX_ECONOMY_EFFECT_BUILDINGS = 4;
 
-// Milestone Villager V2: Villager recruitment, Cave capacity, and 1-Cave cap constants
-export const VILLAGER_BASE_RECRUIT_COST = 40;
+// Milestone Villager V5.2: Villager recruitment, Cave capacity, and 1-Cave cap constants
+export const VILLAGER_BASE_RECRUIT_COST = 25;
 export const VILLAGER_RECRUIT_COST_RATIO = 1.35;
 export const VILLAGER_CAPACITY_PER_CAVE_LEVEL = 2;
 export const MAX_VILLAGE_CAVES = 1;
 
-// Milestone Villager V5: Villager role buff rates, caps & complete tribe synergy
-export const VILLAGER_CRAFTER_COIN_BONUS_RATE = 0.03;
-export const VILLAGER_CRAFTER_COIN_BONUS_CAP = 0.3;
+// Milestone Villager V5.2: Villager role buff rates, caps & complete tribe synergy
+export const VILLAGER_CRAFTER_COIN_BONUS_RATE = 0.05;
+export const VILLAGER_CRAFTER_COIN_BONUS_CAP = 0.4;
 export const VILLAGER_WOODWORKER_EXPANSION_DISCOUNT_RATE = 0.05;
 export const VILLAGER_WOODWORKER_EXPANSION_DISCOUNT_CAP = 0.4;
-export const VILLAGER_ELDER_UPGRADE_DISCOUNT_RATE = 0.04;
+export const VILLAGER_ELDER_UPGRADE_DISCOUNT_RATE = 0.06;
 export const VILLAGER_ELDER_UPGRADE_DISCOUNT_CAP = 0.3;
-export const VILLAGER_COMPLETE_TRIBE_COIN_BONUS = 0.05;
+export const VILLAGER_COMPLETE_TRIBE_COIN_BONUS = 0.1;

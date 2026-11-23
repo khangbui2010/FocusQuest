@@ -1,10 +1,10 @@
 /**
  * Pure Villager Role Buff Engine for Focus Quest Civilization.
- * Milestone Villager V5:
- * - Crafter: +3% additive CoinBonus per villager (cap +30% at 10). Focus Coins only.
+ * Milestone Villager V5.2:
+ * - Crafter: +5% additive CoinBonus per villager (cap +40% at 8). Focus Coins only.
  * - Woodworker: -5% land expansion Coin cost per villager (cap -40% at 8). Level gate unchanged.
- * - Elder: -4% building upgrade Coin cost per villager (cap -30% at 8). Upgrades only.
- * - Complete Tribe Synergy: >= 1 elder, >= 1 crafter, >= 1 woodworker -> flat +5% CoinBonus.
+ * - Elder: -6% building upgrade Coin cost per villager (cap -30% at 5). Upgrades only.
+ * - Complete Tribe Synergy: >= 1 elder, >= 1 crafter, >= 1 woodworker -> flat +10% CoinBonus.
  * - Strictly pure, deterministic, non-mutating, defensive against malformed inputs.
  */
 

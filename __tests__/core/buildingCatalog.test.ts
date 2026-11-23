@@ -112,22 +112,22 @@ test('BuildingCatalog: master list is frozen and cannot be mutated externally', 
 test('calculateUpgradeCost: computes progressive integer costs and returns 0 at max level', () => {
   const granary = getBuildingDefinition('stone_age_food_cache')!;
   assert.ok(granary);
-  assert.strictEqual(granary.baseCost, 60);
+  assert.strictEqual(granary.baseCost, 30);
   assert.strictEqual(granary.upgradeCostMultiplier, 1.8);
   assert.strictEqual(granary.maxLevel, 5);
 
-  // Level 1 -> 2: 60 * (1.8^1) = 108
+  // Level 1 -> 2: 30 * (1.8^1) = 54
   const costL1 = calculateUpgradeCost(granary, 1);
-  assert.strictEqual(costL1, 108);
+  assert.strictEqual(costL1, 54);
 
-  // Level 2 -> 3: 60 * (1.8^2) = 194.4 -> 194
+  // Level 2 -> 3: 30 * (1.8^2) = 97.2 -> 97
   const costL2 = calculateUpgradeCost(granary, 2);
-  assert.strictEqual(costL2, 194);
+  assert.strictEqual(costL2, 97);
   assert.ok(costL2 > costL1, 'Cost must scale monotonically');
 
-  // Level 4 -> 5: 60 * (1.8^4) = 629.856 -> 630
+  // Level 4 -> 5: 30 * (1.8^4) = 314.928 -> 315
   const costL4 = calculateUpgradeCost(granary, 4);
-  assert.strictEqual(costL4, 630);
+  assert.strictEqual(costL4, 315);
 
   // At or above maxLevel: returns 0 (cannot upgrade)
   assert.strictEqual(calculateUpgradeCost(granary, 5), 0);

@@ -49,9 +49,9 @@ test('Cave Catalog & Upgrade Metadata (V2): 3x3 footprint, 1-Cave cap, upgradeab
   assert.equal(isBuildingDefinitionUpgradeable(elderDef), false);
 });
 
-test('Villager Capacity & Recruit Cost Curves (V2): exact Lv1..5 capacities and exponential rounded costs 0..9', () => {
+test('Villager Capacity & Recruit Cost Curves (V5.2): exact Lv1..5 capacities and exponential rounded costs 0..9', () => {
   assert.equal(VILLAGER_CAPACITY_PER_CAVE_LEVEL, 2);
-  assert.equal(VILLAGER_BASE_RECRUIT_COST, 40);
+  assert.equal(VILLAGER_BASE_RECRUIT_COST, 25);
   assert.equal(VILLAGER_RECRUIT_COST_RATIO, 1.35);
 
   assert.equal(getVillagerCapacity(undefined), 0);
@@ -62,9 +62,13 @@ test('Villager Capacity & Recruit Cost Curves (V2): exact Lv1..5 capacities and 
     assert.equal(getVillagerCapacity({ level: lv }), lv * 2);
   }
 
-  const expectedCosts = [40, 54, 73, 98, 133, 179, 242, 327, 441, 596];
+  const expectedCosts = [25, 34, 46, 62, 83, 112, 151, 204, 276, 372];
   expectedCosts.forEach((expectedCost, idx) => {
     assert.equal(getVillagerRecruitCost(idx), expectedCost, `Mismatch at count=${idx}`);
+    assert.equal(
+      getVillagerRecruitCost(idx),
+      Math.round(VILLAGER_BASE_RECRUIT_COST * Math.pow(VILLAGER_RECRUIT_COST_RATIO, idx))
+    );
   });
 });
 
@@ -97,23 +101,23 @@ test('evaluateRecruitment & applyRecruitment (V2): enforces role, cave, capacity
   const lowCoins = evaluateRecruitment({
     caveBuilding: caveLv1,
     villagers: emptyList,
-    playerCoins: 39,
+    playerCoins: VILLAGER_BASE_RECRUIT_COST - 1,
     role: 'crafter',
   });
   assert.equal(lowCoins.canRecruit, false);
   assert.equal(lowCoins.reason, 'CIV_VILLAGER_INSUFFICIENT_COINS');
-  assert.equal(lowCoins.cost, 40);
+  assert.equal(lowCoins.cost, VILLAGER_BASE_RECRUIT_COST);
   assert.equal(lowCoins.shortfallCoins, 1);
 
-  // 4. Valid first recruitment -> cost 40
+  // 4. Valid first recruitment -> cost 25
   const ok1 = evaluateRecruitment({
     caveBuilding: caveLv1,
     villagers: emptyList,
-    playerCoins: 40,
+    playerCoins: VILLAGER_BASE_RECRUIT_COST,
     role: 'elder',
   });
   assert.equal(ok1.canRecruit, true);
-  assert.equal(ok1.cost, 40);
+  assert.equal(ok1.cost, VILLAGER_BASE_RECRUIT_COST);
 
   const v1: Villager = { id: 'vil-1', role: 'elder', recruitedAt: 100 };
   const after1 = applyRecruitment(emptyList, v1);
@@ -134,15 +138,16 @@ test('evaluateRecruitment & applyRecruitment (V2): enforces role, cave, capacity
   assert.equal(fullEval.currentCount, 2);
   assert.equal(fullEval.capacity, 2);
 
-  // 6. Upgrading Cave to Lv.2 unlocks capacity 4; 3rd recruit costs 73
+  // 6. Upgrading Cave to Lv.2 unlocks capacity 4; 3rd recruit costs 46
+  const thirdCost = getVillagerRecruitCost(2);
   const okAfterUpgrade = evaluateRecruitment({
     caveBuilding: makeCave(2),
     villagers: fullLv1,
-    playerCoins: 73,
+    playerCoins: thirdCost,
     role: 'crafter',
   });
   assert.equal(okAfterUpgrade.canRecruit, true);
-  assert.equal(okAfterUpgrade.cost, 73);
+  assert.equal(okAfterUpgrade.cost, 46);
   assert.equal(okAfterUpgrade.capacity, 4);
 });
 

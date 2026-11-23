@@ -155,8 +155,8 @@ test('Civilization Messages: PLACE_BUILDING enforces unlock requirements (level 
 
 test('Civilization Messages: PLACE_BUILDING rejects when player has insufficient coins', async () => {
   const { handler, seedEconomy, seedFocusMinutes } = createCivilizationTestHarness();
-  // stone_age_campfire costs 8 Coins. Seed 5 Coins.
-  await seedEconomy(5, 2);
+  // stone_age_campfire costs 4 Coins. Seed 3 Coins.
+  await seedEconomy(3, 2);
   await seedFocusMinutes(100);
 
   const response = await handler.handleMessage({
@@ -173,7 +173,7 @@ test('Civilization Messages: PLACE_BUILDING rejects when player has insufficient
 
 test('Civilization Messages: PLACE_BUILDING atomic transaction deducts coins and commits state', async () => {
   const { handler, storage, seedEconomy, seedFocusMinutes } = createCivilizationTestHarness();
-  // Campfire costs 8 coins. Seed 100 coins.
+  // Campfire costs 4 coins. Seed 100 coins.
   await seedEconomy(100, 2);
   await seedFocusMinutes(100);
 
@@ -194,12 +194,12 @@ test('Civilization Messages: PLACE_BUILDING atomic transaction deducts coins and
 
   assert.strictEqual(data.building.definitionId, 'stone_age_campfire');
   assert.deepStrictEqual(data.building.position, { x: 3, y: 3 });
-  assert.strictEqual(data.economy.focusCoins, 92); // 100 - 8 = 92
+  assert.strictEqual(data.economy.focusCoins, 96); // 100 - 4 = 96
   assert.strictEqual(data.civilizationState.buildings.length, 1);
 
   // Verify persistence in storage
   const storedEconomy = await storage.getEconomy();
-  assert.strictEqual(storedEconomy.focusCoins, 92);
+  assert.strictEqual(storedEconomy.focusCoins, 96);
 
   const storedCiv = await storage.getCivilizationState();
   assert.strictEqual(storedCiv.buildings.length, 1);
@@ -221,7 +221,7 @@ test('Civilization Messages: PLACE_BUILDING rejects collision and preserves play
   });
   assert.strictEqual(first.success, true);
   const econAfterFirst = await storage.getEconomy();
-  assert.strictEqual(econAfterFirst.focusCoins, 92);
+  assert.strictEqual(econAfterFirst.focusCoins, 96);
 
   // 2. Attempt to place another building overlapping (4, 4)
   const collision = await handler.handleMessage({
@@ -234,9 +234,9 @@ test('Civilization Messages: PLACE_BUILDING rejects collision and preserves play
   assert.strictEqual(collision.success, false);
   assert.ok(collision.error?.includes('Cannot place building'));
 
-  // 3. Balance must remain exactly 92 (no coins deducted for failed placement)
+  // 3. Balance must remain exactly 96 (no coins deducted for failed placement)
   const econAfterFailed = await storage.getEconomy();
-  assert.strictEqual(econAfterFailed.focusCoins, 92);
+  assert.strictEqual(econAfterFailed.focusCoins, 96);
 
   const civAfterFailed = await storage.getCivilizationState();
   assert.strictEqual(civAfterFailed.buildings.length, 1);
@@ -244,23 +244,23 @@ test('Civilization Messages: PLACE_BUILDING rejects collision and preserves play
 
 test('Civilization Messages: Concurrent purchases serialize safely without negative balance', async () => {
   const { handler, storage, seedEconomy, seedFocusMinutes } = createCivilizationTestHarness();
-  // Foraging post costs 30 Coins. Seed exactly 45 Coins.
-  // Two concurrent purchases of 30 coins each (60 total) would overdraw without atomic mutex.
-  await seedEconomy(45, 2);
+  // Foraging post costs 15 Coins. Seed exactly 20 Coins.
+  // Two concurrent purchases of 15 coins each (30 total) would overdraw without atomic mutex.
+  await seedEconomy(20, 2);
   await seedFocusMinutes(100);
 
   const [res1, res2] = await Promise.all([
     handler.handleMessage({
       action: 'PLACE_BUILDING',
       payload: {
-        buildingDefinitionId: 'stone_age_foraging_post', // costs 30
+        buildingDefinitionId: 'stone_age_foraging_post', // costs 15
         position: { x: 0, y: 0 },
       },
     }),
     handler.handleMessage({
       action: 'PLACE_BUILDING',
       payload: {
-        buildingDefinitionId: 'stone_age_foraging_post', // costs 30
+        buildingDefinitionId: 'stone_age_foraging_post', // costs 15
         position: { x: 6, y: 6 },
       },
     }),
@@ -274,9 +274,9 @@ test('Civilization Messages: Concurrent purchases serialize safely without negat
   assert.strictEqual(failures.length, 1);
   assert.ok(failures[0].error?.includes('Insufficient coins'));
 
-  // Ending balance must be exactly 45 - 30 = 15 Coins
+  // Ending balance must be exactly 20 - 15 = 5 Coins
   const finalEcon = await storage.getEconomy();
-  assert.strictEqual(finalEcon.focusCoins, 15);
+  assert.strictEqual(finalEcon.focusCoins, 5);
 
   const finalCiv = await storage.getCivilizationState();
   assert.strictEqual(finalCiv.buildings.length, 1);

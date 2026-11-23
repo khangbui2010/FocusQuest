@@ -8,6 +8,15 @@ import {
   getVillagerRoleCounts,
   hasCompleteTribeSynergy,
 } from '../../src/core/civilization/villagerBuffs.ts';
+import {
+  VILLAGER_COMPLETE_TRIBE_COIN_BONUS,
+  VILLAGER_CRAFTER_COIN_BONUS_CAP,
+  VILLAGER_CRAFTER_COIN_BONUS_RATE,
+  VILLAGER_ELDER_UPGRADE_DISCOUNT_CAP,
+  VILLAGER_ELDER_UPGRADE_DISCOUNT_RATE,
+  VILLAGER_WOODWORKER_EXPANSION_DISCOUNT_CAP,
+  VILLAGER_WOODWORKER_EXPANSION_DISCOUNT_RATE,
+} from '../../src/core/civilization/constants.ts';
 import { extractCivilizationCoinBonuses } from '../../src/core/civilization/civilizationBonusHelper.ts';
 import { aggregateCoinBonus } from '../../src/core/economy/coinBonus.ts';
 import { Villager } from '../../src/core/civilization/villager.ts';
@@ -56,29 +65,38 @@ test('VillagerBuffs: getVillagerRoleCounts handles empty, null, undefined, malfo
   });
 });
 
-test('VillagerBuffs: Crafter scales +3% per villager and caps strictly at +30% (10 crafters)', () => {
-  for (let c = 0; c <= 12; c += 1) {
+test('VillagerBuffs: Crafter scales +5% per villager and caps strictly at +40% (8 crafters)', () => {
+  assert.strictEqual(VILLAGER_CRAFTER_COIN_BONUS_RATE, 0.05);
+  assert.strictEqual(VILLAGER_CRAFTER_COIN_BONUS_CAP, 0.4);
+
+  for (let c = 0; c <= 10; c += 1) {
     const villagers = makeVillagers({ crafter: c });
     const summary = getVillagerBuffSummary(villagers);
-    const expected = Math.min(0.3, c * 0.03);
+    const expected = Math.min(VILLAGER_CRAFTER_COIN_BONUS_CAP, c * VILLAGER_CRAFTER_COIN_BONUS_RATE);
     assert.ok(Math.abs(summary.crafterCoinBonus - expected) < EPSILON, `c=${c}: got ${summary.crafterCoinBonus}`);
-    assert.strictEqual(summary.crafterAtCap, c >= 10);
+    assert.strictEqual(summary.crafterAtCap, c >= 8);
     assert.strictEqual(summary.hasCompleteTribe, false);
     assert.strictEqual(summary.tribeCoinBonus, 0);
     assert.ok(Math.abs(summary.totalCoinBonus - expected) < EPSILON);
   }
 
-  // 11th crafter adds 0 extra CoinBonus
-  const s10 = getVillagerBuffSummary(makeVillagers({ crafter: 10 }));
-  const s11 = getVillagerBuffSummary(makeVillagers({ crafter: 11 }));
-  assert.strictEqual(s10.crafterCoinBonus, 0.3);
-  assert.strictEqual(s11.crafterCoinBonus, 0.3);
+  // 9th crafter adds 0 extra CoinBonus
+  const s8 = getVillagerBuffSummary(makeVillagers({ crafter: 8 }));
+  const s9 = getVillagerBuffSummary(makeVillagers({ crafter: 9 }));
+  assert.strictEqual(s8.crafterCoinBonus, 0.4);
+  assert.strictEqual(s9.crafterCoinBonus, 0.4);
 });
 
 test('VillagerBuffs: Woodworker scales -5% expansion discount and caps strictly at -40% (8 woodworkers)', () => {
+  assert.strictEqual(VILLAGER_WOODWORKER_EXPANSION_DISCOUNT_RATE, 0.05);
+  assert.strictEqual(VILLAGER_WOODWORKER_EXPANSION_DISCOUNT_CAP, 0.4);
+
   for (let w = 0; w <= 10; w += 1) {
     const summary = getVillagerBuffSummary(makeVillagers({ woodworker: w }));
-    const expected = Math.min(0.4, w * 0.05);
+    const expected = Math.min(
+      VILLAGER_WOODWORKER_EXPANSION_DISCOUNT_CAP,
+      w * VILLAGER_WOODWORKER_EXPANSION_DISCOUNT_RATE
+    );
     assert.ok(
       Math.abs(summary.expansionDiscountRate - expected) < EPSILON,
       `w=${w}: got ${summary.expansionDiscountRate}`
@@ -87,21 +105,25 @@ test('VillagerBuffs: Woodworker scales -5% expansion discount and caps strictly 
   }
 });
 
-test('VillagerBuffs: Elder scales -4% upgrade discount (7 -> 28%, 8 -> 30% cap, 9 -> 30% cap)', () => {
-  const s7 = getVillagerBuffSummary(makeVillagers({ elder: 7 }));
-  assert.ok(Math.abs(s7.upgradeDiscountRate - 0.28) < EPSILON);
-  assert.strictEqual(s7.upgradeAtCap, false);
+test('VillagerBuffs: Elder scales -6% upgrade discount (4 -> 24%, 5 -> 30% cap, 6 -> 30% cap)', () => {
+  assert.strictEqual(VILLAGER_ELDER_UPGRADE_DISCOUNT_RATE, 0.06);
+  assert.strictEqual(VILLAGER_ELDER_UPGRADE_DISCOUNT_CAP, 0.3);
 
-  const s8 = getVillagerBuffSummary(makeVillagers({ elder: 8 }));
-  assert.ok(Math.abs(s8.upgradeDiscountRate - 0.3) < EPSILON);
-  assert.strictEqual(s8.upgradeAtCap, true);
+  const s4 = getVillagerBuffSummary(makeVillagers({ elder: 4 }));
+  assert.ok(Math.abs(s4.upgradeDiscountRate - 0.24) < EPSILON);
+  assert.strictEqual(s4.upgradeAtCap, false);
 
-  const s9 = getVillagerBuffSummary(makeVillagers({ elder: 9 }));
-  assert.ok(Math.abs(s9.upgradeDiscountRate - 0.3) < EPSILON);
-  assert.strictEqual(s9.upgradeAtCap, true);
+  const s5 = getVillagerBuffSummary(makeVillagers({ elder: 5 }));
+  assert.ok(Math.abs(s5.upgradeDiscountRate - 0.3) < EPSILON);
+  assert.strictEqual(s5.upgradeAtCap, true);
+
+  const s6 = getVillagerBuffSummary(makeVillagers({ elder: 6 }));
+  assert.ok(Math.abs(s6.upgradeDiscountRate - 0.3) < EPSILON);
+  assert.strictEqual(s6.upgradeAtCap, true);
 });
 
-test('VillagerBuffs: Complete Tribe synergy grants +5% CoinBonus strictly when all 3 roles exist', () => {
+test('VillagerBuffs: Complete Tribe synergy grants +10% CoinBonus strictly when all 3 roles exist', () => {
+  assert.strictEqual(VILLAGER_COMPLETE_TRIBE_COIN_BONUS, 0.1);
   assert.strictEqual(hasCompleteTribeSynergy(makeVillagers({ elder: 5, crafter: 5 })), false);
   assert.strictEqual(hasCompleteTribeSynergy(makeVillagers({ elder: 1, woodworker: 9 })), false);
   assert.strictEqual(hasCompleteTribeSynergy(makeVillagers({ crafter: 9, woodworker: 1 })), false);
@@ -109,16 +131,16 @@ test('VillagerBuffs: Complete Tribe synergy grants +5% CoinBonus strictly when a
 
   const summary = getVillagerBuffSummary(makeVillagers({ elder: 1, crafter: 3, woodworker: 1 }));
   assert.strictEqual(summary.hasCompleteTribe, true);
-  assert.strictEqual(summary.tribeCoinBonus, 0.05);
-  assert.ok(Math.abs(summary.crafterCoinBonus - 0.09) < EPSILON);
-  assert.ok(Math.abs(summary.totalCoinBonus - 0.14) < EPSILON);
+  assert.strictEqual(summary.tribeCoinBonus, VILLAGER_COMPLETE_TRIBE_COIN_BONUS);
+  assert.ok(Math.abs(summary.crafterCoinBonus - 0.15) < EPSILON);
+  assert.ok(Math.abs(summary.totalCoinBonus - 0.25) < EPSILON);
 
   const bonuses = extractVillagerCoinBonuses(makeVillagers({ elder: 1, crafter: 3, woodworker: 1 }));
   assert.strictEqual(bonuses.length, 2);
-  assert.ok(Math.abs(aggregateCoinBonus(bonuses) - 0.14) < EPSILON);
+  assert.ok(Math.abs(aggregateCoinBonus(bonuses) - 0.25) < EPSILON);
 });
 
-test('VillagerBuffs: Theoretical CoinBonus ceiling is +135% (+100% buildings + +30% crafters + +5% tribe)', () => {
+test('VillagerBuffs: Theoretical CoinBonus ceiling is +150% (+100% buildings + +40% crafters + +10% tribe)', () => {
   const buildings: BuildingInstance[] = [
     ...([0, 2, 4, 6].map((x, i) => ({
       id: `fp_${i}`,
@@ -136,12 +158,12 @@ test('VillagerBuffs: Theoretical CoinBonus ceiling is +135% (+100% buildings + +
     }))),
   ];
 
-  const maxRoster = makeVillagers({ crafter: 10, elder: 1, woodworker: 1 });
+  const maxRoster = makeVillagers({ crafter: 8, elder: 1, woodworker: 1 });
   const combined = extractCivilizationCoinBonuses(buildings, maxRoster);
   const totalBonus = aggregateCoinBonus(combined);
   assert.ok(
-    Math.abs(totalBonus - 1.35) < EPSILON,
-    `Expected theoretical ceiling 1.35 (+135%), got ${totalBonus}`
+    Math.abs(totalBonus - 1.5) < EPSILON,
+    `Expected theoretical ceiling 1.5 (+150%), got ${totalBonus}`
   );
 });
 

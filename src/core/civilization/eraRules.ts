@@ -1,6 +1,6 @@
 /**
  * Pure Era Rules & Advance Evaluator for Focus Quest Civilization.
- * Milestone Villager V5 (Part C):
+ * Milestone Villager V5.2:
  * - Defines Era upgrade level caps, Stone Age -> Bronze Age advance checklist,
  *   and entry floor level rules as pure data & evaluators.
  * - DOES NOT execute Era transitions or mutate Coins/state; Stone Age stays active.
@@ -16,6 +16,12 @@ import {
   isEraUnlocked,
 } from './buildingTypes.ts';
 import { getBuildingDefinition } from './buildingCatalog.ts';
+import { Villager } from './villager.ts';
+import { getVillagerRoleCounts } from './villagerBuffs.ts';
+import {
+  VILLAGER_ROLES,
+  VillagerRole,
+} from '../../ui/components/civilization/spriteRegistry.ts';
 
 function isValidEraLocal(era: unknown): era is CivilizationEra {
   return typeof era === 'string' && CIVILIZATION_ERAS.includes(era as CivilizationEra);
@@ -30,7 +36,7 @@ export interface EraLevelRule {
 
 export const ERA_LEVEL_RULES: Readonly<Record<CivilizationEra, EraLevelRule>> = Object.freeze({
   STONE_AGE: Object.freeze({ era: 'STONE_AGE', upgradeCap: 5, entryFloor: 1, provisional: false }),
-  BRONZE_AGE: Object.freeze({ era: 'BRONZE_AGE', upgradeCap: 10, entryFloor: 4, provisional: false }),
+  BRONZE_AGE: Object.freeze({ era: 'BRONZE_AGE', upgradeCap: 10, entryFloor: 5, provisional: false }),
   // Provisional caps for unimplemented future eras:
   IRON_AGE: Object.freeze({ era: 'IRON_AGE', upgradeCap: 15, entryFloor: 1, provisional: true }),
   MEDIEVAL: Object.freeze({ era: 'MEDIEVAL', upgradeCap: 20, entryFloor: 1, provisional: true }),
@@ -46,28 +52,41 @@ export interface EraAdvanceBuildingRequirement {
   readonly minLevel: number;
 }
 
+export interface EraAdvanceVillagerRequirement {
+  readonly role: VillagerRole;
+  readonly minCount: number;
+}
+
 export interface EraAdvanceRequirements {
   readonly fromEra: CivilizationEra;
   readonly nextEra: CivilizationEra;
   readonly minPlayerLevel: number;
   readonly minTotalFocusMinutes: number;
+  readonly minLandExpansions: number;
   readonly feeCoins: number;
   readonly buildingRequirements: readonly EraAdvanceBuildingRequirement[];
+  readonly villagerRequirements: readonly EraAdvanceVillagerRequirement[];
 }
 
 export const STONE_TO_BRONZE_ADVANCE_REQUIREMENTS: EraAdvanceRequirements = Object.freeze({
   fromEra: 'STONE_AGE',
   nextEra: 'BRONZE_AGE',
-  minPlayerLevel: 12,
-  minTotalFocusMinutes: 1500,
-  feeCoins: 3500,
+  minPlayerLevel: 9,
+  minTotalFocusMinutes: 500,
+  minLandExpansions: 3,
+  feeCoins: 500,
   buildingRequirements: Object.freeze([
     Object.freeze({ definitionId: 'stone_age_campfire', minCount: 1, minLevel: 1 }),
     Object.freeze({ definitionId: 'stone_age_totem', minCount: 1, minLevel: 1 }),
     Object.freeze({ definitionId: 'stone_age_elder_hut', minCount: 1, minLevel: 1 }),
-    Object.freeze({ definitionId: 'stone_age_study_cave', minCount: 1, minLevel: 4 }),
-    Object.freeze({ definitionId: 'stone_age_foraging_post', minCount: 4, minLevel: 4 }),
-    Object.freeze({ definitionId: 'stone_age_food_cache', minCount: 4, minLevel: 4 }),
+    Object.freeze({ definitionId: 'stone_age_study_cave', minCount: 1, minLevel: 5 }),
+    Object.freeze({ definitionId: 'stone_age_foraging_post', minCount: 4, minLevel: 5 }),
+    Object.freeze({ definitionId: 'stone_age_food_cache', minCount: 4, minLevel: 5 }),
+  ]),
+  villagerRequirements: Object.freeze([
+    Object.freeze({ role: 'crafter', minCount: 1 }),
+    Object.freeze({ role: 'elder', minCount: 1 }),
+    Object.freeze({ role: 'woodworker', minCount: 1 }),
   ]),
 });
 
@@ -77,6 +96,8 @@ const ERA_ADVANCE_REQUIREMENTS_MAP: Readonly<Partial<Record<CivilizationEra, Era
 
 export type EraAdvanceCheckId =
   | `building:${string}`
+  | `villager:${VillagerRole}`
+  | 'land_expansions'
   | 'player_level'
   | 'total_focus_minutes'
   | 'fee_coins';
@@ -91,6 +112,8 @@ export interface EraAdvanceCheckItem {
 export interface EvaluateEraAdvanceInput {
   readonly era: CivilizationEra | unknown;
   readonly buildings: readonly BuildingInstance[] | null | undefined;
+  readonly villagers?: readonly Villager[] | null;
+  readonly landExpansions?: number;
   readonly playerLevel: number;
   readonly totalFocusMinutes: number;
   readonly coins: number;
@@ -220,6 +243,8 @@ export function evaluateEraAdvance(input: EvaluateEraAdvanceInput | null | undef
 
   const validEra = input.era as CivilizationEra;
   const safeBuildings = Array.isArray(input.buildings) ? input.buildings : [];
+  const roleCounts = getVillagerRoleCounts(input.villagers);
+  const safeLandExpansions = Math.floor(toNonNegativeFinite(input.landExpansions ?? 0));
   const safeLevel = Math.floor(toNonNegativeFinite(input.playerLevel));
   const safeMinutes = toNonNegativeFinite(input.totalFocusMinutes);
   const safeCoins = toNonNegativeFinite(input.coins);
@@ -241,6 +266,23 @@ export function evaluateEraAdvance(input: EvaluateEraAdvanceInput | null | undef
       met: matchingCount >= bReq.minCount,
     });
   }
+
+  for (const vReq of req.villagerRequirements) {
+    const currentCount = VILLAGER_ROLES.includes(vReq.role) ? roleCounts[vReq.role] : 0;
+    checks.push({
+      id: `villager:${vReq.role}`,
+      current: currentCount,
+      required: vReq.minCount,
+      met: currentCount >= vReq.minCount,
+    });
+  }
+
+  checks.push({
+    id: 'land_expansions',
+    current: safeLandExpansions,
+    required: req.minLandExpansions,
+    met: safeLandExpansions >= req.minLandExpansions,
+  });
 
   checks.push({
     id: 'player_level',

@@ -26,7 +26,7 @@ export const STONE_AGE_BUILDING_DEFINITIONS: readonly BuildingDefinition[] = Obj
     era: 'STONE_AGE',
     category: 'DECORATIVE',
     footprint: { width: 1, height: 1 },
-    baseCost: 8,
+    baseCost: 4,
     upgradeCostMultiplier: 1.5,
     maxLevel: 3,
     unlockRequirements: {
@@ -44,7 +44,7 @@ export const STONE_AGE_BUILDING_DEFINITIONS: readonly BuildingDefinition[] = Obj
     era: 'STONE_AGE',
     category: 'DECORATIVE',
     footprint: { width: 1, height: 1 },
-    baseCost: 15,
+    baseCost: 8,
     upgradeCostMultiplier: 1.6,
     maxLevel: 3,
     unlockRequirements: {
@@ -64,7 +64,7 @@ export const STONE_AGE_BUILDING_DEFINITIONS: readonly BuildingDefinition[] = Obj
     era: 'STONE_AGE',
     category: 'FOCUS_SUPPORT',
     footprint: { width: 3, height: 3 },
-    baseCost: 25,
+    baseCost: 12,
     upgradeCostMultiplier: 1.75,
     maxLevel: 5,
     unlockRequirements: {
@@ -87,7 +87,7 @@ export const STONE_AGE_BUILDING_DEFINITIONS: readonly BuildingDefinition[] = Obj
     era: 'STONE_AGE',
     category: 'FOCUS_SUPPORT',
     footprint: { width: 2, height: 2 },
-    baseCost: 40,
+    baseCost: 20,
     upgradeCostMultiplier: 1.8,
     maxLevel: 5,
     unlockRequirements: {
@@ -112,7 +112,7 @@ export const STONE_AGE_BUILDING_DEFINITIONS: readonly BuildingDefinition[] = Obj
     era: 'STONE_AGE',
     category: 'ECONOMY_EFFECT',
     footprint: { width: 2, height: 2 },
-    baseCost: 30,
+    baseCost: 15,
     upgradeCostMultiplier: 1.6,
     maxLevel: 5,
     unlockRequirements: {
@@ -135,7 +135,7 @@ export const STONE_AGE_BUILDING_DEFINITIONS: readonly BuildingDefinition[] = Obj
     era: 'STONE_AGE',
     category: 'ECONOMY_EFFECT',
     footprint: { width: 2, height: 3 },
-    baseCost: 60,
+    baseCost: 30,
     upgradeCostMultiplier: 1.8,
     maxLevel: 5,
     unlockRequirements: {

@@ -652,7 +652,7 @@ export class CivilizationCoordinator {
   /**
    * Recruits 1 villager into the active Meditation Cave atomically under StorageMutex:
    * - Validates role (`elder | crafter | woodworker`), Cave presence, capacity (`2 * cave.level`),
-   *   and Focus Coins (`Math.round(40 * 1.35^currentCount)`).
+   *   and Focus Coins (`Math.round(25 * 1.35^currentCount)`).
    * - Deducts Coins and persists the new Villager `{ id, role, recruitedAt }` without coordinates.
    * - Zero side effects on XP, CoinBonuses, dailyStats, or quests.
    */
