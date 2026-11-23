@@ -1,0 +1,305 @@
+@import "tailwindcss";
+
+@keyframes fq-axe-chop {
+  0% {
+    opacity: 0;
+    transform: translateY(-56px) rotate(32deg) scale(0.95);
+  }
+  16% {
+    opacity: 1;
+    transform: translateY(-48px) rotate(38deg) scale(1.08);
+  }
+  52% {
+    opacity: 1;
+    transform: translateY(-10px) rotate(16deg) scale(1.1);
+  }
+  59% {
+    /* Impact moment synced to EXPANSION_IMPACT_MS (680ms / 1150ms ~= 59%) */
+    opacity: 1;
+    transform: translateY(4px) rotate(-46deg) scale(1);
+  }
+  72% {
+    opacity: 1;
+    transform: translateY(-8px) rotate(-28deg) scale(0.98);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-16px) rotate(-18deg) scale(0.85);
+  }
+}
+
+@keyframes fq-expansion-flash {
+  0% {
+    opacity: 0;
+    transform: scale(0.86);
+  }
+  18% {
+    opacity: 0.78;
+    transform: scale(1.02);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes fq-expansion-particle {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.5);
+  }
+  15% {
+    opacity: 1;
+    transform: translate(calc(var(--fq-tx, 0px) * 0.35), calc(var(--fq-ty, 0px) * 0.35)) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--fq-tx, 0px), var(--fq-ty, 0px)) scale(0.45);
+  }
+}
+
+@keyframes fq-map-shake {
+  0% {
+    transform: none;
+  }
+  20% {
+    transform: translate(-2.5px, 2px);
+  }
+  42% {
+    transform: translate(2.5px, -2px);
+  }
+  64% {
+    transform: translate(-2px, -1.5px);
+  }
+  84% {
+    transform: translate(1.5px, 1px);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+.fq-expansion-axe {
+  animation: fq-axe-chop var(--fq-total-duration, 1150ms) cubic-bezier(0.22, 0.85, 0.32, 1) forwards;
+  will-change: transform, opacity;
+}
+
+.fq-expansion-flash {
+  opacity: 0;
+  animation: fq-expansion-flash 460ms ease-out var(--fq-impact-delay, 680ms) forwards;
+}
+
+.fq-expansion-particle {
+  opacity: 0;
+  animation: fq-expansion-particle 460ms cubic-bezier(0.16, 0.84, 0.44, 1) var(--fq-impact-delay, 680ms) forwards;
+}
+
+.fq-map-shake-active {
+  animation: fq-map-shake var(--fq-shake-duration, 340ms) ease-out var(--fq-impact-delay, 680ms) 1 both;
+}
+
+/* Stage 4b: FocusSceneArea deterministic pixel animations */
+@keyframes fq-scene-bob-work {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}
+
+@keyframes fq-scene-bob-rest {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-1.5px);
+  }
+}
+
+@keyframes fq-scene-tool-swing {
+  0%,
+  100% {
+    transform: rotate(-10deg);
+  }
+  50% {
+    transform: rotate(16deg);
+  }
+}
+
+@keyframes fq-scene-flame-flicker {
+  0%,
+  100% {
+    transform: scaleY(1) scaleX(1);
+    opacity: 0.92;
+  }
+  50% {
+    transform: scaleY(1.16) scaleX(0.92);
+    opacity: 1;
+  }
+}
+
+@keyframes fq-scene-glow-pulse {
+  0%,
+  100% {
+    transform: scale(0.95);
+    opacity: 0.45;
+  }
+  50% {
+    transform: scale(1.06);
+    opacity: 0.72;
+  }
+}
+
+@keyframes fq-scene-spark-rise {
+  0% {
+    transform: translate(0px, 0px) scale(1);
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.95;
+  }
+  100% {
+    transform: translate(var(--fq-spark-dx, 4px), -18px) scale(0.5);
+    opacity: 0;
+  }
+}
+
+@keyframes fq-scene-zzz-float {
+  0% {
+    transform: translate(0px, 0px);
+    opacity: 0;
+  }
+  25% {
+    opacity: 0.95;
+  }
+  80% {
+    opacity: 0.85;
+  }
+  100% {
+    transform: translate(4px, -11px);
+    opacity: 0;
+  }
+}
+
+@keyframes fq-scene-cloud-drift {
+  0% {
+    transform: translateX(-6px);
+  }
+  100% {
+    transform: translateX(8px);
+  }
+}
+
+@keyframes fq-music-eq {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.fq-scene-villager-work {
+  animation: fq-scene-bob-work 0.9s steps(2, end) infinite;
+}
+
+.fq-scene-villager-rest {
+  animation: fq-scene-bob-rest 3.2s ease-in-out infinite;
+}
+
+.fq-scene-tool-swing {
+  transform-origin: 25% 75%;
+  animation: fq-scene-tool-swing 0.9s steps(2, end) infinite;
+}
+
+.fq-scene-flame {
+  transform-origin: 50% 100%;
+  animation: fq-scene-flame-flicker 0.55s steps(2, end) infinite;
+}
+
+.fq-scene-glow-work {
+  animation: fq-scene-glow-pulse 2s ease-in-out infinite;
+}
+
+.fq-scene-glow-rest {
+  animation: fq-scene-glow-pulse 3.4s ease-in-out infinite;
+}
+
+.fq-scene-spark {
+  animation: fq-scene-spark-rise 1.8s linear infinite;
+}
+
+.fq-scene-zzz {
+  animation: fq-scene-zzz-float 2.4s steps(4, end) infinite;
+}
+
+.fq-scene-cloud {
+  animation: fq-scene-cloud-drift 16s ease-in-out infinite alternate;
+}
+
+.fq-music-eq-bar {
+  transform-origin: bottom;
+  animation: fq-music-eq 0.8s ease-in-out infinite;
+}
+
+/* Milestone Villager V1: step keyframes and classes */
+@keyframes fq-villager-steps-2 {
+  from {
+    background-position-x: 0px;
+  }
+  to {
+    background-position-x: var(--villager-end-x, -64px);
+  }
+}
+
+@keyframes fq-villager-steps-4 {
+  from {
+    background-position-x: 0px;
+  }
+  to {
+    background-position-x: var(--villager-end-x, -128px);
+  }
+}
+
+.fq-villager-anim-2 {
+  animation: fq-villager-steps-2 var(--villager-duration, 1200ms) steps(2) infinite;
+}
+
+.fq-villager-anim-4 {
+  animation: fq-villager-steps-4 var(--villager-duration, 600ms) steps(4) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fq-expansion-overlay {
+    display: none !important;
+  }
+  .fq-expansion-axe,
+  .fq-expansion-flash,
+  .fq-expansion-particle,
+  .fq-map-shake-active,
+  .fq-scene-villager-work,
+  .fq-scene-villager-rest,
+  .fq-scene-tool-swing,
+  .fq-scene-flame,
+  .fq-scene-glow-work,
+  .fq-scene-glow-rest,
+  .fq-scene-spark,
+  .fq-scene-zzz,
+  .fq-scene-cloud,
+  .fq-music-eq-bar,
+  .fq-villager-anim-2,
+  .fq-villager-anim-4,
+  .fq-scene-villager-mover {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
+  .fq-scene-spark {
+    display: none !important;
+  }
+}
+

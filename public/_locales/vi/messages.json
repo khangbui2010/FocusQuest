@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": "Focus Quest",
+    "description": "Tên tiện ích hiển thị trên thanh công cụ Chrome và Chrome Web Store."
+  },
+  "extDescription": {
+    "message": "Đồng hồ tập trung và chặn web theo danh sách cho phép, biến giờ tập trung thành tiến trình xây dựng nền văn minh.",
+    "description": "Mô tả ngắn tiện ích hiển thị trên Chrome và Chrome Web Store."
+  }
+}
