@@ -1,26 +1,36 @@
 /**
- * Domain types for Focus Quest Daily & Weekly Quest system (Milestone 5B.5 Stage 2a).
+ * Domain types for Focus Quest Daily & Weekly Quest system (Milestone 5B.5 + Milestone 5D-1 Quest Pool).
  * Pure domain schema only; rewards are flat (unaffected by Multiplier or CoinBonus).
  */
 
 export type QuestPeriod = 'DAILY' | 'WEEKLY';
 
+export type QuestSlot = 'A' | 'B' | 'C';
+
+export const QUEST_SLOTS: readonly QuestSlot[] = ['A', 'B', 'C'] as const;
+
+export type QuestDifficulty = 'standard' | 'hard';
+
 export type QuestMetric =
   | 'COMPLETED_SESSIONS'
   | 'FOCUS_MINUTES'
   | 'ACTIVE_DAYS'
-  | 'DEEP_SESSIONS';
+  | 'DEEP_SESSIONS'
+  | 'POMODORO_FOCUS_INTERVALS';
 
-export const CURRENT_QUEST_STATE_VERSION = 1;
+export const CURRENT_QUEST_STATE_VERSION = 2;
 export const MAX_RECENT_CLAIMED_KEYS = 14;
 export const MAX_PROCESSED_PERIOD_KEYS = 14;
 
 export interface QuestDefinition {
   readonly id: string;
   readonly period: QuestPeriod;
+  readonly slot: QuestSlot;
   readonly metric: QuestMetric;
   readonly target: number;
   readonly minSessionMinutes?: number;
+  readonly minDailyMinutes?: number;
+  readonly difficulty?: QuestDifficulty;
   readonly rewardCoins: number;
   readonly rewardXp: number;
   readonly titleKey: string;
@@ -50,6 +60,10 @@ export interface QuestState {
   readonly daily: Record<string, QuestProgress>;
   readonly weekly: Record<string, QuestProgress>;
   readonly weeklyActiveDateKeys: readonly string[];
+  readonly weeklyDailyMinutes?: Readonly<Record<string, number>>;
+  readonly salt?: string;
+  readonly dailyPreviousSelection?: readonly string[];
+  readonly weeklyPreviousSelection?: readonly string[];
   readonly streak: QuestStreak;
   readonly lastSettledTimestamp: number;
   readonly processedPeriodKeys: readonly string[];
@@ -59,6 +73,7 @@ export interface QuestState {
 export interface QuestOutcomeDelta {
   readonly completedDateKey: string;
   readonly completedFocusMinutes: number;
+  readonly pomodoroCompletedIntervals?: number;
 }
 
 export interface QuestResetCountdown {
@@ -83,4 +98,3 @@ export type QuestErrorCode =
   | 'QUEST_NOT_COMPLETED'
   | 'QUEST_ALREADY_CLAIMED'
   | 'QUEST_EXPIRED';
-

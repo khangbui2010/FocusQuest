@@ -15,6 +15,7 @@ import {
 import {
   DAILY_QUEST_CAP,
   WEEKLY_QUEST_CAP,
+  getQuestDefinition,
   getQuestDefinitionsByPeriod,
 } from '../../src/core/quests/questCatalog.ts';
 import {
@@ -22,6 +23,7 @@ import {
   claimQuest,
   countUnclaimed,
   createInitialQuestState,
+  getActiveQuestDefinitions,
 } from '../../src/core/quests/questEngine.ts';
 import { getResetCountdown } from '../../src/core/quests/questDates.ts';
 import { I18nProvider } from '../../src/i18n/I18nContext.tsx';
@@ -73,7 +75,7 @@ test('Stage 5c Quest Formatting: countdowns, statuses, caps, and progress labels
   );
 
   const now = new Date(2026, 10, 18, 10, 0, 0).getTime();
-  let state = createInitialQuestState(now);
+  let state = createInitialQuestState(now, { useLegacySelection: true });
   state = applyCompletedSession(
     state,
     { completedDateKey: '2026-11-18', completedFocusMinutes: 60 },
@@ -90,25 +92,25 @@ test('Stage 5c Quest Formatting: countdowns, statuses, caps, and progress labels
   assert.equal(summary.claimedCount, 1);
   assert.equal(summary.readyCount, 1); // daily_steady_rhythm ready (60/60)
 
-  const [sparkDef, steadyDef] = getQuestDefinitionsByPeriod('DAILY');
-  const [habitDef] = getQuestDefinitionsByPeriod('WEEKLY');
+  const sparkDef = getQuestDefinition('DAILY', 'daily_first_spark')!;
+  const steadyDef = getQuestDefinition('DAILY', 'daily_steady_rhythm')!;
+  const habitDef = getQuestDefinition('WEEKLY', 'weekly_habit_builder')!;
+  const pomoPairDef = getQuestDefinition('DAILY', 'daily_pomodoro_pair')!;
   assert.equal(formatQuestProgressLabel(sparkDef, 5, enT), '1/1 sessions');
   assert.equal(formatQuestProgressLabel(steadyDef, 45, viT), '45/60 phút');
   assert.equal(formatQuestProgressLabel(habitDef, 2, enT), '2/4 days');
+  assert.equal(formatQuestProgressLabel(pomoPairDef, 1, viT), '1/2 pha');
+  assert.equal(getQuestDefinitionsByPeriod('DAILY').length, 9);
 });
 
-test('Stage 5c QuestView SSR: renders all 4 visual states (IN_PROGRESS, READY, CLAIMED, EXPIRED), Quest Streak, Caps, and EN/VI catalog strings', () => {
+test('Stage 5c + 5D-1 QuestView SSR: renders all 4 visual states, Slot badges, Hard tag, countdown, zero reroll button, and EN/VI strings', () => {
   const now = new Date(2026, 10, 18, 12, 0, 0).getTime();
-  let qState = createInitialQuestState(now);
+  let qState = createInitialQuestState(now, { useLegacySelection: true });
   qState = applyCompletedSession(
     qState,
     { completedDateKey: '2026-11-18', completedFocusMinutes: 60 },
     now
   );
-  // daily_first_spark: READY -> claim it -> CLAIMED
-  // daily_steady_rhythm: READY (60/60)
-  // daily_double_tap: IN_PROGRESS (1/2)
-  // weekly_habit_builder: mark EXPIRED override for visual state test
   const claimRes = claimQuest(qState, 'DAILY', 'daily_first_spark', now);
   assert.equal(claimRes.claimed, true);
 
@@ -137,6 +139,12 @@ test('Stage 5c QuestView SSR: renders all 4 visual states (IN_PROGRESS, READY, C
   assert.ok(enHtml.includes('data-testid="quest-claim-btn-daily_steady_rhythm"'));
   assert.ok(enHtml.includes('data-testid="quest-card-daily_double_tap" data-quest-status="IN_PROGRESS"'));
   assert.ok(enHtml.includes('data-testid="quest-card-weekly_habit_builder" data-quest-status="EXPIRED"'));
+  assert.ok(enHtml.includes('Slot A · Starter'));
+  assert.ok(enHtml.includes('Slot B · Pace'));
+  assert.ok(enHtml.includes('Slot C · Challenge'));
+  assert.ok(enHtml.includes('data-testid="quest-difficulty-weekly_tenacity_10"'));
+  assert.ok(enHtml.includes('New quests in'));
+  assert.ok(!enHtml.toLowerCase().includes('reroll'));
   assert.ok(enHtml.includes('Claimed 10/40 Coins · 25/100 XP'));
   assert.ok(enHtml.includes(`Claimed 0/${WEEKLY_QUEST_CAP.coins} Coins · 0/${WEEKLY_QUEST_CAP.xp} XP`));
   assert.ok(enHtml.includes('role="progressbar"'));
@@ -156,6 +164,8 @@ test('Stage 5c QuestView SSR: renders all 4 visual states (IN_PROGRESS, READY, C
   );
   assert.ok(viHtml.includes('Nhiệm vụ Ngày &amp; Tuần'));
   assert.ok(viHtml.includes('1 thưởng chờ nhận'));
+  assert.ok(viHtml.includes('Khe A · Khởi động'));
+  assert.ok(viHtml.includes('Nhiệm vụ mới sau'));
   assert.ok(viHtml.includes('Tia Sáng Đầu Tiên'));
   assert.ok(viHtml.includes('Nhịp Điệu Bền Bỉ'));
   assert.ok(viHtml.includes('Chuỗi Nhiệm vụ'));
@@ -163,6 +173,25 @@ test('Stage 5c QuestView SSR: renders all 4 visual states (IN_PROGRESS, READY, C
   assert.ok(viHtml.includes('Hết hạn'));
   assert.ok(viHtml.includes('Đang làm'));
   assert.ok(viHtml.includes('>Nhận<'));
+
+  // Randomized Quest Pool state renders strictly 3 Daily + 3 Weekly cards matching active keys
+  const poolState = createInitialQuestState(now, { salt: 'ui-pool-seed' });
+  const poolHtml = renderToString(
+    React.createElement(
+      I18nProvider,
+      { locale: 'en' },
+      React.createElement(QuestView, {
+        initialData: {
+          questState: poolState,
+          resetCountdown: getResetCountdown(now, poolState),
+          unclaimedCount: countUnclaimed(poolState, now),
+        },
+      })
+    )
+  );
+  for (const def of [...getActiveQuestDefinitions('DAILY', poolState), ...getActiveQuestDefinitions('WEEKLY', poolState)]) {
+    assert.ok(poolHtml.includes(`data-testid="quest-card-${def.id}"`));
+  }
 });
 
 test('Stage 5c Navbar Unclaimed Badge: hidden at 0, shows 1..9, caps >=10 to 9+ in EN and VI', () => {
@@ -309,10 +338,11 @@ test('Stage 5c Simulator Claim Flow: flat Quest reward updates economy without m
   });
   assert.equal(questBefore.success, true);
   assert.equal(questBefore.data!.unclaimedCount >= 1, true);
+  const activeSlotA = getActiveQuestDefinitions('DAILY', questBefore.data!.questState)[0];
 
   const claimRes = await sendExtensionMessage<ClaimQuestRewardResponseData>({
     action: 'CLAIM_QUEST_REWARD',
-    payload: { period: 'DAILY', questId: 'daily_first_spark' },
+    payload: { period: 'DAILY', questId: activeSlotA.id },
   });
   assert.equal(claimRes.success, true);
   assert.equal(claimRes.data!.claimedCoins, 10);
@@ -332,7 +362,7 @@ test('Stage 5c Simulator Claim Flow: flat Quest reward updates economy without m
   // Repeat claim must reject with QUEST_ALREADY_CLAIMED and clean localized VI error
   const repeatRes = await sendExtensionMessage<ClaimQuestRewardResponseData>({
     action: 'CLAIM_QUEST_REWARD',
-    payload: { period: 'DAILY', questId: 'daily_first_spark' },
+    payload: { period: 'DAILY', questId: activeSlotA.id },
   });
   assert.equal(repeatRes.success, false);
   assert.equal(repeatRes.errorCode, 'QUEST_ALREADY_CLAIMED');

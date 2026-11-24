@@ -5,14 +5,16 @@ import { v1_initialSchema } from './v1_initialSchema.ts';
 import { v2_civilizationSchema } from './v2_civilizationSchema.ts';
 import { v3_questsSchema } from './v3_questsSchema.ts';
 import { v4_villagersSchema } from './v4_villagersSchema.ts';
+import { v5_questPoolSchema } from './v5_questPoolSchema.ts';
 
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 
 export const ALL_MIGRATIONS: Migration[] = [
   v1_initialSchema,
   v2_civilizationSchema,
   v3_questsSchema,
   v4_villagersSchema,
+  v5_questPoolSchema,
 ];
 
 export class MigrationRunner {

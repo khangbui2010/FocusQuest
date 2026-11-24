@@ -41,11 +41,8 @@ import {
   applyCompletedSession,
   claimQuest,
   createInitialQuestState,
+  getActiveQuestDefinitions,
 } from '../../src/core/quests/questEngine.ts';
-import {
-  DAILY_QUEST_DEFINITIONS,
-  WEEKLY_QUEST_DEFINITIONS,
-} from '../../src/core/quests/questCatalog.ts';
 
 const REFERENCE_BASE_COINS_PER_DAY = 378; // 3 x 60m Countdown (x1.4) = 180 * 1.5 * 1.4 = 378 Coins/day
 
@@ -215,8 +212,8 @@ function simulateStoneToBronzeProgression(
       );
     }
 
-    // Claim completed Daily & Weekly quests (flat Coins + XP, no multipliers/bonuses)
-    for (const qDef of DAILY_QUEST_DEFINITIONS) {
+    // Claim completed active Daily & Weekly quests (flat Coins + XP, no multipliers/bonuses)
+    for (const qDef of getActiveQuestDefinitions('DAILY', questState)) {
       const claimed = claimQuest(questState, 'DAILY', qDef.id, dayMs);
       questState = claimed.state;
       if (claimed.claimed) {
@@ -224,7 +221,7 @@ function simulateStoneToBronzeProgression(
         totalXP += claimed.xp;
       }
     }
-    for (const qDef of WEEKLY_QUEST_DEFINITIONS) {
+    for (const qDef of getActiveQuestDefinitions('WEEKLY', questState)) {
       const claimed = claimQuest(questState, 'WEEKLY', qDef.id, dayMs);
       questState = claimed.state;
       if (claimed.claimed) {

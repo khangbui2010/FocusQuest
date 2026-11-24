@@ -109,7 +109,9 @@ function shouldPersistRolledState(raw: unknown, rolled: QuestState): boolean {
   const record = raw as Record<string, unknown>;
   return (
     record.dailyDateKey !== rolled.dailyDateKey ||
-    record.weeklyStartKey !== rolled.weeklyStartKey
+    record.weeklyStartKey !== rolled.weeklyStartKey ||
+    record.salt !== rolled.salt ||
+    record.schemaVersion !== rolled.schemaVersion
   );
 }
 

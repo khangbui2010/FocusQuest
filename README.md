@@ -23,8 +23,8 @@ Focus Quest transforms daily study and focused work into a civilization-building
   - **Villager Role Buffs, Map Wandering, Dynamic Focus Scene & Pure Era Rules (`Villager V2–V5.2`):** Recruit villagers (`elder`, `crafter`, `woodworker`, cost `round(25 × 1.35^n)`), unlock additive buffs (**Crafter** `+5%` CoinBonus cap `+40%` at 8, **Woodworker** `-5%` land expansion discount cap `-40%` at 8 while preserving `k+2` level gate, **Elder** `-6%` building upgrade discount cap `-30%` at 5, **Complete Tribe** `+10%` CoinBonus → theoretical Stone Age ceiling **`+150%`**), watch them wander unlocked map tiles (`villagerWander.ts` + `useVillagerWander.ts`), and see only actually constructed buildings (max 1 sprite per type) + up to 6 recruited villagers animated inside `FocusSceneArea`. Pure `eraRules.ts` (`ERA_LEVEL_RULES` `BRONZE_AGE.entryFloor = 5` with provisional flags for `IRON_AGE..INTERPLANETARY`, `STONE_TO_BRONZE_ADVANCE_REQUIREMENTS` requiring all 3 villager roles, `3` land expansions, `Lv.9`, `500` focus mins, and Lv.5 Cave/Economy floors = `3,907 + 500 = 4,407` Coins) targets 3h/day 5–7 day and 1–2h/day ~2 week progression; Era switching remains deferred to `5C-2`.
 - **Focus Music Player (MV3 Offscreen Streaming):** Streams curated tracks from the online `FocusQuest-LOFI-archive` catalog through a Chrome Offscreen Document (`Chrome >= 116`), persisting playback position past Chrome's 30s audio idle cutoff with a session-scoped mini-player and expandable bottom sheet.
 - **Map-First 5-Tab Popup & Analytics Engine (`Stage 5c`):** Compact `Quests | Focus | Map | Awards | Stats` bottom navigation (hidden inside active/post-focus sessions until Exit), upgraded `StatsView` (`Day | Month | Year` navigation, custom SVG `StatsBarChart`, and `Focus Streak` gated by `Elder's Hut` `FOCUS_STAT_UNLOCK`), and half-up 2-decimal UI display (`formatRewardAmount`) preserving full IEEE-754 precision in storage.
-- **Daily & Weekly Quests (`Stage 2b` + `Stage 5c`):** Interactive `QuestView` (4 card states, manual claim via `CLAIM_QUEST_REWARD`, unclaimed badge on `Navbar`, live reset countdowns, Quest Streak with zero passive Coins), `QuestCoordinator`, Schema v4 migration (`v3_questsSchema` + `v4_villagersSchema`), and atomic Session-Quest settlement under `StorageMutex` with rollback compensation.
-- **Full EN/VI Localization & MV3 CSP Compliance (`Stage 6+7`, `Stage 5C-1`, `Villager V2–V5.2`, `CLEANUP-1`):** `582`-key EN/VI dictionary parity enforced by static `t(...)`/`translate(...)` key-usage tests, dynamic `RewardHelpModal`, all 7 Chrome notification paths, `113` structured `ErrorCode`s with technical error sanitization (`errorTranslator.ts`), Chrome `_locales`, and CSP-safe `blocked.html` + `blocked.js`.
+- **Daily & Weekly Quest Pool (`Stage 2b`, `Stage 5c`, `Milestone 5D-1`):** 3-slot Daily (`9` quests, fixed cap `40C · 100XP`) & 3-slot Weekly (`10` quests, fixed cap `150C · 370XP`) pool with deterministic non-repeating rotation at midnight / Monday (`hashQuestSeed` + `selectQuestsForPeriod`, zero user reroll), manual claim (`CLAIM_QUEST_REWARD`), `Navbar` unclaimed badge, slot/Hard tags, Quest Streak (zero passive Coins), Schema v5 migration (`v5_questPoolSchema`), and atomic Session-Quest settlement under `StorageMutex`.
+- **Full EN/VI Localization & MV3 CSP Compliance (`Stage 6+7`, `Stage 5C-1`, `Villager V2–V5.2`, `CLEANUP-1`, `Milestone 5D-1`):** `616`-key EN/VI dictionary parity enforced by static `t(...)`/`translate(...)` key-usage tests, dynamic `RewardHelpModal`, all 7 Chrome notification paths, `113` structured `ErrorCode`s with technical error sanitization (`errorTranslator.ts`), Chrome `_locales`, and CSP-safe `blocked.html` + `blocked.js`.
 - **Concurrency & Transaction Safety:** All mutations execute inside atomic critical sections guarded by `StorageMutex` with rollback compensation.
 
 ---
@@ -69,7 +69,7 @@ npm install
 # Start local interactive dev preview (Port 3000)
 npm run dev
 
-# Run comprehensive test suite (693/693 PASS — 0 failures)
+# Run comprehensive test suite (698/698 PASS — 0 failures)
 npm test
 
 # Typecheck and lint codebase (0 TypeScript errors)
@@ -79,7 +79,7 @@ npm run lint
 npm run build
 ```
 
-> **Verification scope:** Automated tests execute on Node.js (`tsx --test`) using React SSR (`renderToString`), mock 2D canvas context, and mock Chrome adapters for background services. Previously completed milestones (`UX-1`–`UX-6`, `UX-5` terrain canvas, `UX-5.1` persistent camera, `LOFI-1`/`1b`/`2`, and `Milestone 5B.5` stages `1a`–`7` including `2b`, `5c`, `6+7`) have been verified and accepted in unpacked Chrome (`>= 116`). **Stage 5C-1**, **Milestone Villager V2–V5.2**, and **CLEANUP-1** (`693/693 PASS`, `npm run lint` `0` errors, Vite build **PASS**) await visual/runtime verification in unpacked Chrome.
+> **Verification scope:** Automated tests execute on Node.js (`tsx --test`) using React SSR (`renderToString`), mock 2D canvas context, and mock Chrome adapters for background services. Previously completed milestones (`UX-1`–`UX-6`, `UX-5` terrain canvas, `UX-5.1` persistent camera, `LOFI-1`/`1b`/`2`, and `Milestone 5B.5` stages `1a`–`7` including `2b`, `5c`, `6+7`) have been verified and accepted in unpacked Chrome (`>= 116`). **Stage 5C-1**, **Milestone Villager V2–V5.2**, **CLEANUP-1**, and **Milestone 5D-1 (Quest Pool)** (`698/698 PASS`, `npm run lint` `0` errors, Vite build **PASS**) await visual/runtime verification in unpacked Chrome.
 
 ---
 

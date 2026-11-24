@@ -127,6 +127,7 @@ test('i18n Static Key-Usage Guard: every t(...) and translate(...) key in src/ e
     'row.key', // RewardHelpModal MULTIPLIER_TIER_ROWS help.tier1..tier7
     'def.titleKey as TranslationKey', // QuestView QUEST_CATALOG verified below
     'def.descriptionKey as TranslationKey', // QuestView QUEST_CATALOG verified below
+    'slotLabelKey', // QuestView SLOT_LABEL_KEYS verified below
   ]);
 
   const staticCallRe = /(?:^|[^.\w$])(?:t\(|translate\(\s*[^,]+,)\s*(['"])([a-zA-Z0-9_.-]+)\1/gm;
@@ -204,6 +205,14 @@ test('i18n Static Key-Usage Guard: every t(...) and translate(...) key in src/ e
     for (const key of [quest.titleKey, quest.descriptionKey]) {
       if (!enSet.has(key) || !viSet.has(key)) {
         missingKeys.push(`ALL_QUEST_DEFINITIONS(${quest.id}) -> '${key}'`);
+      }
+    }
+  }
+  for (const period of ['DAILY', 'WEEKLY'] as const) {
+    for (const slot of ['A', 'B', 'C'] as const) {
+      const key = `quests.slot.${period}.${slot}`;
+      if (!enSet.has(key) || !viSet.has(key)) {
+        missingKeys.push(`QuestSlot(${period}:${slot}) -> '${key}'`);
       }
     }
   }

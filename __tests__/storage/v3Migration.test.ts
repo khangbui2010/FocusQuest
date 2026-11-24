@@ -18,9 +18,8 @@ import {
   applyCompletedSession,
   claimQuest,
   createInitialQuestState,
-  DAILY_QUEST_DEFINITIONS,
   formatLocalDateKey,
-  WEEKLY_QUEST_DEFINITIONS,
+  getActiveQuestDefinitions,
 } from '../../src/core/quests/index.ts';
 import {
   MockAlarmsAdapter,
@@ -113,13 +112,13 @@ test('Migration v3: upgrades v2 -> v3 preserving 100% of player data with zero h
   await storage.set(STORAGE_KEYS.CIVILIZATION, v2Civ);
   await storage.set(STORAGE_KEYS.CURRENT_SESSION, v2Session);
 
-  assert.strictEqual(CURRENT_SCHEMA_VERSION, 4);
+  assert.strictEqual(CURRENT_SCHEMA_VERSION, 5);
 
   const runner = new MigrationRunner(storage);
   const res = await runner.runMigrations();
   assert.strictEqual(res.previousVersion, 2);
-  assert.strictEqual(res.currentVersion, 4);
-  assert.strictEqual(await storage.get<number>(STORAGE_KEYS.SCHEMA_VERSION), 4);
+  assert.strictEqual(res.currentVersion, 5);
+  assert.strictEqual(await storage.get<number>(STORAGE_KEYS.SCHEMA_VERSION), 5);
 
   // All prior v2 data preserved bit-for-bit
   assert.deepStrictEqual(await storage.get<PlayerEconomy>(STORAGE_KEYS.ECONOMY), v2Economy);
@@ -131,14 +130,18 @@ test('Migration v3: upgrades v2 -> v3 preserving 100% of player data with zero h
   assert.deepStrictEqual(await storage.get<CivilizationState>(STORAGE_KEYS.CIVILIZATION), v2Civ);
   assert.deepStrictEqual(await storage.get<SessionSnapshot>(STORAGE_KEYS.CURRENT_SESSION), v2Session);
 
-  // Quests seeded clean with ZERO historical session backfill
+  // Quests seeded clean with ZERO historical session backfill (3 active Daily + 3 active Weekly)
   const quests = await storage.get<QuestState>(STORAGE_KEYS.QUESTS);
   assert.ok(quests);
-  for (const def of DAILY_QUEST_DEFINITIONS) {
+  const activeDaily = getActiveQuestDefinitions('DAILY', quests);
+  const activeWeekly = getActiveQuestDefinitions('WEEKLY', quests);
+  assert.strictEqual(activeDaily.length, 3);
+  assert.strictEqual(activeWeekly.length, 3);
+  for (const def of activeDaily) {
     assert.strictEqual(quests.daily[def.id].progress, 0);
     assert.strictEqual(quests.daily[def.id].claimed, false);
   }
-  for (const def of WEEKLY_QUEST_DEFINITIONS) {
+  for (const def of activeWeekly) {
     assert.strictEqual(quests.weekly[def.id].progress, 0);
     assert.strictEqual(quests.weekly[def.id].claimed, false);
   }
@@ -147,11 +150,11 @@ test('Migration v3: upgrades v2 -> v3 preserving 100% of player data with zero h
   assert.strictEqual(quests.streak.lastCompletedDateKey, null);
 });
 
-test('Migration v3: upgrades empty storage & legacy v1 storage cleanly up to v3', async () => {
+test('Migration v3: upgrades empty storage & legacy v1 storage cleanly up to v5', async () => {
   const emptyStorage = new MemoryStorageAdapter();
   const resEmpty = await new MigrationRunner(emptyStorage).runMigrations();
   assert.strictEqual(resEmpty.previousVersion, 0);
-  assert.strictEqual(resEmpty.currentVersion, 4);
+  assert.strictEqual(resEmpty.currentVersion, 5);
   assert.ok(await emptyStorage.get(STORAGE_KEYS.PROFILES));
   assert.ok(await emptyStorage.get(STORAGE_KEYS.CIVILIZATION));
   assert.ok(await emptyStorage.get(STORAGE_KEYS.QUESTS));
@@ -161,7 +164,7 @@ test('Migration v3: upgrades empty storage & legacy v1 storage cleanly up to v3'
   await v1Storage.set(STORAGE_KEYS.ECONOMY, { focusCoins: 18.75, totalXP: 125, level: 2 });
   const resV1 = await new MigrationRunner(v1Storage).runMigrations();
   assert.strictEqual(resV1.previousVersion, 1);
-  assert.strictEqual(resV1.currentVersion, 4);
+  assert.strictEqual(resV1.currentVersion, 5);
   assert.strictEqual((await v1Storage.get<PlayerEconomy>(STORAGE_KEYS.ECONOMY))?.focusCoins, 18.75);
   assert.ok(await v1Storage.get(STORAGE_KEYS.CIVILIZATION));
   assert.ok(await v1Storage.get(STORAGE_KEYS.QUESTS));
@@ -172,10 +175,10 @@ test('Migration v3: strictly idempotent and preserves existing quest progress & 
   const runner = new MigrationRunner(storage);
   await runner.runMigrations();
 
-  // Record legitimate progress & claim
+  // Record legitimate progress & claim using legacy 3+3 selection
   const manager = new StorageManager(storage);
   const fixedNow = new Date(2026, 10, 18, 12, 0, 0, 0).getTime();
-  let state = await manager.getQuests(fixedNow);
+  let state = createInitialQuestState(fixedNow, { useLegacySelection: true });
   state = {
     ...state,
     dailyDateKey: '2026-11-18',
@@ -188,8 +191,8 @@ test('Migration v3: strictly idempotent and preserves existing quest progress & 
 
   // Re-running MigrationRunner skips cleanly
   const second = await runner.runMigrations();
-  assert.strictEqual(second.previousVersion, 4);
-  assert.strictEqual(second.currentVersion, 4);
+  assert.strictEqual(second.previousVersion, 5);
+  assert.strictEqual(second.currentVersion, 5);
   assert.deepStrictEqual(await storage.get<QuestState>(STORAGE_KEYS.QUESTS), state);
 
   // Even calling v3_questsSchema.up directly after forcing version 2 preserves valid quest state
@@ -219,15 +222,18 @@ test('StorageManager Quests accessors work cleanly & Stage 2a does NOT alter exi
   const nowMs = Date.now();
   const initialQuests = await manager.getQuests(nowMs);
   assert.strictEqual(initialQuests.dailyDateKey, formatLocalDateKey(nowMs));
+  assert.strictEqual(getActiveQuestDefinitions('DAILY', initialQuests).length, 3);
 
+  const testNowMs = Date.now();
+  const legacyInitial = createInitialQuestState(testNowMs, { useLegacySelection: true });
+  await manager.setQuests(legacyInitial);
   const mutated = await manager.updateQuests((curr) =>
     applyCompletedSession(curr, { completedDateKey: curr.dailyDateKey, completedFocusMinutes: 25 }, curr.lastSettledTimestamp)
   );
   assert.strictEqual(mutated.daily.daily_first_spark.progress, 1);
 
   // Reset quests snapshot cleanly to current day and verify SessionCoordinator settlement across modes
-  const testNowMs = Date.now();
-  await manager.setQuests(createInitialQuestState(testNowMs));
+  await manager.setQuests(createInitialQuestState(testNowMs, { useLegacySelection: true }));
   const { coordinator, profileManager } = createSessionHarness(manager);
   const profile = await profileManager.createProfile('Stage2a Check', ['example.com']);
 

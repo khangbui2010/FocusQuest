@@ -58,8 +58,8 @@ test('Migration v4: expands legacy 2x2 Cave cleanly to 3x3, backfills villagers 
   await storage.set(STORAGE_KEYS.PROFILES, profiles);
   await storage.set(STORAGE_KEYS.DAILY_STATS, dailyStats);
 
-  assert.equal(CURRENT_SCHEMA_VERSION, 4);
-  const res = await new MigrationRunner(storage).runMigrations();
+  assert.equal(CURRENT_SCHEMA_VERSION, 5);
+  const res = await new MigrationRunner(storage, undefined, 4).runMigrations();
   assert.equal(res.previousVersion, 3);
   assert.equal(res.currentVersion, 4);
   assert.equal(await storage.get<number>(STORAGE_KEYS.SCHEMA_VERSION), 4);
@@ -81,7 +81,7 @@ test('Migration v4: expands legacy 2x2 Cave cleanly to 3x3, backfills villagers 
   assert.deepEqual(await storage.get(STORAGE_KEYS.DAILY_STATS), dailyStats);
 
   // Idempotency check
-  const second = await new MigrationRunner(storage).runMigrations();
+  const second = await new MigrationRunner(storage, undefined, 4).runMigrations();
   assert.equal(second.previousVersion, 4);
   assert.equal(second.currentVersion, 4);
   await v4_villagersSchema.up(storage);

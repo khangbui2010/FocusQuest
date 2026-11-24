@@ -88,6 +88,7 @@ import {
   claimQuest,
   countUnclaimed,
   createInitialQuestState,
+  getActiveQuestDefinitions,
   makeClaimLedgerKey,
   rolloverQuestState,
   toQuestOutcomeDelta,
@@ -353,8 +354,8 @@ export function createInitialSimulatedQuestState(
   if (devServerMode) {
     const daily: Record<string, QuestProgress> = {};
     const weekly: Record<string, QuestProgress> = {};
-    for (const def of ALL_QUEST_DEFINITIONS) {
-      const maxProgress: QuestProgress = {
+    for (const def of getActiveQuestDefinitions('DAILY', initial)) {
+      daily[def.id] = {
         questId: def.id,
         period: def.period,
         progress: def.target,
@@ -363,11 +364,17 @@ export function createInitialSimulatedQuestState(
         claimed: false,
         claimedAt: null,
       };
-      if (def.period === 'DAILY') {
-        daily[def.id] = maxProgress;
-      } else {
-        weekly[def.id] = maxProgress;
-      }
+    }
+    for (const def of getActiveQuestDefinitions('WEEKLY', initial)) {
+      weekly[def.id] = {
+        questId: def.id,
+        period: def.period,
+        progress: def.target,
+        target: def.target,
+        completed: true,
+        claimed: false,
+        claimedAt: null,
+      };
     }
     return {
       ...initial,

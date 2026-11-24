@@ -17,15 +17,21 @@ import {
   MockTabsAdapter,
 } from '../mocks/chromeMock.ts';
 import {
+  ALL_QUEST_DEFINITIONS,
   DAILY_QUEST_CAP,
   DAILY_QUEST_DEFINITIONS,
+  DAILY_SLOT_REWARDS,
   WEEKLY_QUEST_CAP,
   WEEKLY_QUEST_DEFINITIONS,
+  WEEKLY_SLOT_REWARDS,
   applyCompletedSession,
   createInitialQuestState,
   formatLocalDateKey,
+  getActiveQuestDefinitions,
   getQuestDefinition,
+  getSlotDefinitions,
 } from '../../src/core/quests/index.ts';
+import { QUEST_SLOTS } from '../../src/types/quests.ts';
 import { calculatePlayerLevel } from '../../src/core/economy/levelSystem.ts';
 import { localizeErrorMessage } from '../../src/i18n/errorTranslator.ts';
 import { CoinBonus } from '../../src/types/economy.ts';
@@ -100,52 +106,36 @@ async function createHarness(coinBonuses: readonly CoinBonus[] = []) {
   };
 }
 
-test('Stage 2b Step 0a: Quest catalog definitions and Daily/Weekly reward caps match specification exactly', () => {
-  const expectedDaily: Record<string, { target: number; coins: number; xp: number }> = {
-    daily_first_spark: { target: 1, coins: 10, xp: 25 },
-    daily_steady_rhythm: { target: 60, coins: 15, xp: 35 },
-    daily_double_tap: { target: 2, coins: 15, xp: 40 },
-  };
-  const expectedWeekly: Record<string, { target: number; coins: number; xp: number; minMins?: number }> = {
-    weekly_habit_builder: { target: 4, coins: 50, xp: 120 },
-    weekly_deep_diver: { target: 3, coins: 60, xp: 150, minMins: 45 },
-    weekly_tenacity_10: { target: 10, coins: 40, xp: 100 },
-  };
+test('Stage 2b Step 0a: Quest Pool catalog, slot rewards & Daily/Weekly reward caps match specification exactly', () => {
+  assert.strictEqual(DAILY_QUEST_DEFINITIONS.length, 9);
+  assert.strictEqual(WEEKLY_QUEST_DEFINITIONS.length, 10);
+  assert.strictEqual(ALL_QUEST_DEFINITIONS.length, 19);
 
-  assert.strictEqual(DAILY_QUEST_DEFINITIONS.length, 3);
-  assert.strictEqual(WEEKLY_QUEST_DEFINITIONS.length, 3);
-
-  let dailyCoinsSum = 0;
-  let dailyXpSum = 0;
-  for (const def of DAILY_QUEST_DEFINITIONS) {
-    const exp = expectedDaily[def.id];
-    assert.ok(exp, `Unexpected daily quest: ${def.id}`);
-    assert.strictEqual(def.target, exp.target);
-    assert.strictEqual(def.rewardCoins, exp.coins);
-    assert.strictEqual(def.rewardXp, exp.xp);
-    dailyCoinsSum += def.rewardCoins;
-    dailyXpSum += def.rewardXp;
-  }
-  assert.strictEqual(dailyCoinsSum, 40);
-  assert.strictEqual(dailyXpSum, 100);
-  assert.deepStrictEqual(DAILY_QUEST_CAP, { coins: 40, xp: 100 });
-
-  let weeklyCoinsSum = 0;
-  let weeklyXpSum = 0;
-  for (const def of WEEKLY_QUEST_DEFINITIONS) {
-    const exp = expectedWeekly[def.id];
-    assert.ok(exp, `Unexpected weekly quest: ${def.id}`);
-    assert.strictEqual(def.target, exp.target);
-    assert.strictEqual(def.rewardCoins, exp.coins);
-    assert.strictEqual(def.rewardXp, exp.xp);
-    if (exp.minMins !== undefined) {
-      assert.strictEqual(def.minSessionMinutes, exp.minMins);
+  for (const slot of QUEST_SLOTS) {
+    const dPool = getSlotDefinitions('DAILY', slot);
+    const wPool = getSlotDefinitions('WEEKLY', slot);
+    assert.ok(dPool.length >= 3);
+    assert.ok(wPool.length >= 3);
+    for (const def of dPool) {
+      assert.strictEqual(def.rewardCoins, DAILY_SLOT_REWARDS[slot].rewardCoins);
+      assert.strictEqual(def.rewardXp, DAILY_SLOT_REWARDS[slot].rewardXp);
     }
-    weeklyCoinsSum += def.rewardCoins;
-    weeklyXpSum += def.rewardXp;
+    for (const def of wPool) {
+      assert.strictEqual(def.rewardCoins, WEEKLY_SLOT_REWARDS[slot].rewardCoins);
+      assert.strictEqual(def.rewardXp, WEEKLY_SLOT_REWARDS[slot].rewardXp);
+    }
   }
-  assert.strictEqual(weeklyCoinsSum, 150);
-  assert.strictEqual(weeklyXpSum, 370);
+
+  // Legacy 6 definitions remain present with exact caps
+  assert.strictEqual(getQuestDefinition('DAILY', 'daily_first_spark')?.target, 1);
+  assert.strictEqual(getQuestDefinition('DAILY', 'daily_steady_rhythm')?.target, 60);
+  assert.strictEqual(getQuestDefinition('DAILY', 'daily_double_tap')?.target, 2);
+  assert.strictEqual(getQuestDefinition('WEEKLY', 'weekly_habit_builder')?.target, 4);
+  assert.strictEqual(getQuestDefinition('WEEKLY', 'weekly_deep_diver')?.target, 3);
+  assert.strictEqual(getQuestDefinition('WEEKLY', 'weekly_deep_diver')?.minSessionMinutes, 45);
+  assert.strictEqual(getQuestDefinition('WEEKLY', 'weekly_tenacity_10')?.target, 10);
+
+  assert.deepStrictEqual(DAILY_QUEST_CAP, { coins: 40, xp: 100 });
   assert.deepStrictEqual(WEEKLY_QUEST_CAP, { coins: 150, xp: 370 });
 });
 
@@ -158,6 +148,7 @@ test('Stage 2b Session Invariant: Quest integration leaves session Coins/XP/Leve
     () => clock,
     async () => {
       const h = await createHarness(bonuses);
+      await h.storage.setQuests(createInitialQuestState(clock, { useLegacySelection: true }));
       const todayKey = formatLocalDateKey(clock);
 
       // 1. COUNTDOWN 45m -> 45 * 1.5 * 1.2 * 1.05 = 85.05 Coins, 45 * 5 * 1.2 = 270 XP
@@ -376,7 +367,8 @@ test('Stage 2b Resilience: Missing or corrupted fq_quests self-heals safely on s
       assert.strictEqual(res1?.status, 'COMPLETED');
       assert.strictEqual((await h.storage.getEconomy()).focusCoins, 37.5);
       let quests = await h.storage.getQuests(clock);
-      assert.strictEqual(quests.daily.daily_first_spark.progress, 1);
+      assert.strictEqual(getActiveQuestDefinitions('DAILY', quests).length, 3);
+      assert.strictEqual(quests.daily[getActiveQuestDefinitions('DAILY', quests)[0].id].progress > 0, true);
 
       // Case B: fq_quests corrupted with non-object string
       await h.sessionCoordinator.resetSession();
@@ -387,7 +379,7 @@ test('Stage 2b Resilience: Missing or corrupted fq_quests self-heals safely on s
       assert.strictEqual(res2?.status, 'COMPLETED');
       assert.strictEqual((await h.storage.getEconomy()).focusCoins, 75);
       quests = await h.storage.getQuests(clock);
-      assert.strictEqual(quests.daily.daily_first_spark.progress, 1);
+      assert.strictEqual(quests.daily[getActiveQuestDefinitions('DAILY', quests)[0].id].progress > 0, true);
 
       // Case C: fq_quests corrupted with bad numeric fields
       await h.sessionCoordinator.resetSession();
@@ -457,7 +449,7 @@ test('Stage 2b Atomicity & Rollback: Partial setMultiple failure rolls back sess
   const h = await createHarness();
   const baseClock = localMs(2026, 11, 18, 13, 0, 0);
   await h.storage.setEconomy({ focusCoins: 10, totalXP: 50, level: 1 });
-  const initialQuests = createInitialQuestState(baseClock);
+  const initialQuests = createInitialQuestState(baseClock, { useLegacySelection: true });
   await h.storage.setQuests(initialQuests);
   await h.sessionCoordinator.startSession('COUNTDOWN', 25, h.profileId);
 
@@ -536,9 +528,9 @@ test('Stage 2b Midnight 00:00 Crossover & Period Rollovers (Daily midnight, Week
   await withMockedNow(
     () => clock,
     async () => {
-      // Seed Sunday progress & 1 completed unclaimed quest from Sunday before starting late-night session
+      // Seed Sunday legacy progress & 1 completed unclaimed quest from Sunday before starting late-night session
       const sunState = applyCompletedSession(
-        createInitialQuestState(sunNight - 2 * 60 * 60 * 1000),
+        createInitialQuestState(sunNight - 2 * 60 * 60 * 1000, { useLegacySelection: true }),
         { completedDateKey: '2026-11-22', completedFocusMinutes: 25 },
         sunNight - 2 * 60 * 60 * 1000
       );
@@ -556,9 +548,14 @@ test('Stage 2b Midnight 00:00 Crossover & Period Rollovers (Daily midnight, Week
       const questsAfter = await h.storage.getQuests(monMorning);
       assert.strictEqual(questsAfter.dailyDateKey, '2026-11-23');
       assert.strictEqual(questsAfter.weeklyStartKey, '2026-11-23');
-      assert.strictEqual(questsAfter.daily.daily_first_spark.progress, 1);
-      assert.strictEqual(questsAfter.daily.daily_steady_rhythm.progress, 25);
-      assert.strictEqual(questsAfter.weekly.weekly_tenacity_10.progress, 1);
+      // Midnight Monday rollover rotated away from legacy quests into fresh Quest Pool quests
+      const monDailyDefs = getActiveQuestDefinitions('DAILY', questsAfter);
+      const monWeeklyDefs = getActiveQuestDefinitions('WEEKLY', questsAfter);
+      assert.strictEqual(monDailyDefs.length, 3);
+      assert.strictEqual(monWeeklyDefs.length, 3);
+      assert.ok(!questsAfter.daily.daily_first_spark, 'Monday rollover should select new Daily Slot A quest');
+      assert.ok(questsAfter.daily[monDailyDefs[0].id].progress > 0);
+      assert.ok(questsAfter.weekly[monWeeklyDefs[2].id].progress > 0);
       // Streak grew from Sunday (2026-11-22) -> Monday (2026-11-23) = 2 consecutive days
       assert.strictEqual(questsAfter.streak.currentDays, 2);
       assert.strictEqual(questsAfter.streak.lastCompletedDateKey, '2026-11-23');
@@ -568,18 +565,24 @@ test('Stage 2b Midnight 00:00 Crossover & Period Rollovers (Daily midnight, Week
       const tueState = await h.questCoordinator.getQuestState(tueMorning);
       assert.strictEqual(tueState.questState.dailyDateKey, '2026-11-24');
       assert.strictEqual(tueState.questState.weeklyStartKey, '2026-11-23');
-      assert.strictEqual(tueState.questState.daily.daily_first_spark.progress, 0);
-      assert.strictEqual(tueState.questState.weekly.weekly_tenacity_10.progress, 1);
+      const tueDailyIds = Object.keys(tueState.questState.daily);
+      assert.strictEqual(tueDailyIds.length, 3);
+      for (const qId of tueDailyIds) {
+        assert.strictEqual(tueState.questState.daily[qId].progress, 0);
+      }
+      assert.ok(tueState.questState.weekly[monWeeklyDefs[2].id].progress > 0);
       assert.strictEqual(tueState.unclaimedCount, 0);
 
-      // Clock rollback backward to Monday after Tuesday rollover cannot revive expired Monday reward
+      // Clock rollback backward to Monday after Tuesday rollover cannot revive expired Monday Slot A reward
       await assert.rejects(
         () =>
           h.questCoordinator.claimQuestReward(
-            { period: 'DAILY', questId: 'daily_first_spark' },
+            { period: 'DAILY', questId: monDailyDefs[0].id },
             monMorning + 60_000
           ),
-        (err: unknown) => err instanceof QuestCoordinatorError && err.code === 'QUEST_NOT_COMPLETED'
+        (err: unknown) =>
+          err instanceof QuestCoordinatorError &&
+          (err.code === 'QUEST_NOT_COMPLETED' || err.code === 'QUEST_EXPIRED')
       );
     }
   );
@@ -603,7 +606,7 @@ test('Stage 2b QuestCoordinator.claimQuestReward: flat Coins/XP, IEEE-754 precis
   };
   await h.storage.setDailyStats(preDailyStats);
 
-  let q = createInitialQuestState(t);
+  let q = createInitialQuestState(t, { useLegacySelection: true });
   q = applyCompletedSession(q, { completedDateKey: '2026-11-18', completedFocusMinutes: 60 }, t);
   await h.storage.setQuests(q);
 
@@ -636,7 +639,7 @@ test('Stage 2b QuestCoordinator Claim rejections: QUEST_EXPIRED, QUEST_ALREADY_C
   const day1 = localMs(2026, 11, 18, 23, 50, 0);
   const day2 = localMs(2026, 11, 19, 0, 5, 0);
 
-  let q = createInitialQuestState(day1);
+  let q = createInitialQuestState(day1, { useLegacySelection: true });
   q = applyCompletedSession(q, { completedDateKey: '2026-11-18', completedFocusMinutes: 60 }, day1);
   await h.storage.setQuests(q);
 
@@ -684,7 +687,7 @@ test('Stage 2b Concurrency: parallel CLAIM_QUEST_REWARD double-claim prevention 
     () => baseNow,
     async () => {
       const q = applyCompletedSession(
-        createInitialQuestState(baseNow),
+        createInitialQuestState(baseNow, { useLegacySelection: true }),
         { completedDateKey: '2026-11-18', completedFocusMinutes: 25 },
         baseNow
       );
@@ -826,28 +829,32 @@ test('Stage 2b ExtensionClient Simulator: deterministic GET_QUEST_STATE, CLAIM_Q
   });
   assert.strictEqual(initialRes.success, true);
   assert.ok(initialRes.data);
+  const activeDaily = getActiveQuestDefinitions('DAILY', initialRes.data.questState);
+  assert.strictEqual(activeDaily.length, 3);
+  const slotADef = activeDaily[0];
+
   const preEcoRes = await sendExtensionMessage<FullSessionStateResponse>({
     action: 'GET_SESSION_STATE',
   });
   const ecoBefore = preEcoRes.data!.economy;
 
-  // Claim pre-seeded daily_first_spark
+  // Claim active Slot A quest (completed by simulator's initial 25m session -> 10C / 25XP)
   const claimRes = await sendExtensionMessage<ClaimQuestRewardResponseData>({
     action: 'CLAIM_QUEST_REWARD',
-    payload: { period: 'DAILY', questId: 'daily_first_spark' },
+    payload: { period: 'DAILY', questId: slotADef.id },
   });
   assert.strictEqual(claimRes.success, true);
   assert.strictEqual(claimRes.data?.claimedCoins, 10);
   assert.strictEqual(claimRes.data?.claimedXp, 25);
   assert.strictEqual(
     claimRes.data?.economy.focusCoins,
-    ecoBefore.focusCoins + getQuestDefinition('DAILY', 'daily_first_spark')!.rewardCoins
+    ecoBefore.focusCoins + slotADef.rewardCoins
   );
 
   // Double-claim in simulator returns QUEST_ALREADY_CLAIMED
   const dupClaimRes = await sendExtensionMessage({
     action: 'CLAIM_QUEST_REWARD',
-    payload: { period: 'DAILY', questId: 'daily_first_spark' },
+    payload: { period: 'DAILY', questId: slotADef.id },
   });
   assert.strictEqual(dupClaimRes.success, false);
   assert.strictEqual(dupClaimRes.errorCode, 'QUEST_ALREADY_CLAIMED');
@@ -867,31 +874,32 @@ test('Stage 2b ExtensionClient Simulator: deterministic GET_QUEST_STATE, CLAIM_Q
   assert.strictEqual(unknownSim.success, false);
   assert.strictEqual(unknownSim.errorCode, 'UNKNOWN_QUEST');
 
-  // Completing an elapsed COUNTDOWN via GET_SESSION_STATE advances simulated quest progress
+  // Completing an elapsed COUNTDOWN via GET_SESSION_STATE advances active Daily Slot B quest
+  const slotBDef = activeDaily[1];
   await sendExtensionMessage({ action: 'RESET_SESSION' });
   await sendExtensionMessage({
     action: 'START_SESSION',
-    payload: { mode: 'COUNTDOWN', targetMinutes: 25, profileId: 'profile-study-research' },
+    payload: { mode: 'COUNTDOWN', targetMinutes: 35, profileId: 'profile-study-research' },
   });
   const beforeQ = await sendExtensionMessage<GetQuestStateResponseData>({ action: 'GET_QUEST_STATE' });
-  const prevDoubleTap = beforeQ.data!.questState.daily.daily_double_tap.progress;
+  const prevSlotBProgress = beforeQ.data!.questState.daily[slotBDef.id].progress;
 
-  // Give Up does NOT advance daily_double_tap
+  // Give Up does NOT advance Slot B
   await sendExtensionMessage({ action: 'GIVE_UP_SESSION' });
   await sendExtensionMessage({ action: 'RESET_SESSION' });
   const afterGiveUp = await sendExtensionMessage<GetQuestStateResponseData>({
     action: 'GET_QUEST_STATE',
   });
-  assert.strictEqual(afterGiveUp.data!.questState.daily.daily_double_tap.progress, prevDoubleTap);
+  assert.strictEqual(afterGiveUp.data!.questState.daily[slotBDef.id].progress, prevSlotBProgress);
 
-  // Completing an elapsed COUNTDOWN via GET_SESSION_STATE advances simulated daily_double_tap
+  // Completing an elapsed 35m COUNTDOWN advances Slot B (either >=45m or >=60m or 1x60m)
   const simStartClock = Date.now();
   await sendExtensionMessage({
     action: 'START_SESSION',
-    payload: { mode: 'COUNTDOWN', targetMinutes: 25, profileId: 'profile-study-research' },
+    payload: { mode: 'COUNTDOWN', targetMinutes: 35, profileId: 'profile-study-research' },
   });
   await withMockedNow(
-    () => simStartClock + 25 * 60 * 1000 + 500,
+    () => simStartClock + 35 * 60 * 1000 + 500,
     async () => {
       const stateRes = await sendExtensionMessage<FullSessionStateResponse>({
         action: 'GET_SESSION_STATE',
@@ -901,12 +909,41 @@ test('Stage 2b ExtensionClient Simulator: deterministic GET_QUEST_STATE, CLAIM_Q
       const afterComplete = await sendExtensionMessage<GetQuestStateResponseData>({
         action: 'GET_QUEST_STATE',
       });
-      assert.strictEqual(afterComplete.data!.questState.daily.daily_double_tap.progress, 2);
-      assert.strictEqual(afterComplete.data!.questState.daily.daily_double_tap.completed, true);
+      const expectedAfter =
+        slotBDef.metric === 'FOCUS_MINUTES'
+          ? Math.min(slotBDef.target, prevSlotBProgress + 35)
+          : prevSlotBProgress;
+      assert.strictEqual(afterComplete.data!.questState.daily[slotBDef.id].progress, expectedAfter);
     }
   );
   await sendExtensionMessage({ action: 'RESET_SESSION' });
 
   // Verify today's local date key aligns with getLocalDateKey()
   assert.strictEqual(afterGiveUp.data!.questState.dailyDateKey, getLocalDateKey());
+});
+
+test('Milestone 5D-1 Coordinator: SW restart & same-day getQuestState do not reroll; inactive pool quests cannot be claimed mid-period', async () => {
+  const h = await createHarness();
+  const day1 = localMs(2026, 11, 18, 10, 0, 0);
+
+  const first = await h.questCoordinator.getQuestState(day1);
+  const firstDailyIds = Object.keys(first.questState.daily);
+  const firstWeeklyIds = Object.keys(first.questState.weekly);
+  assert.strictEqual(firstDailyIds.length, 3);
+  assert.strictEqual(firstWeeklyIds.length, 3);
+
+  // Simulate Service Worker restart with a fresh QuestCoordinator instance on same StorageManager
+  const freshCoordinator = new QuestCoordinator(h.storage);
+  const afterRestart = await freshCoordinator.getQuestState(day1 + 2 * 60 * 60 * 1000);
+  assert.deepStrictEqual(Object.keys(afterRestart.questState.daily), firstDailyIds);
+  assert.deepStrictEqual(Object.keys(afterRestart.questState.weekly), firstWeeklyIds);
+
+  // Inactive pool quest in same slot must reject claim cleanly
+  const inactiveDailyA = getSlotDefinitions('DAILY', 'A').find(
+    (q) => !firstDailyIds.includes(q.id)
+  )!;
+  await assert.rejects(
+    () => freshCoordinator.claimQuestReward({ period: 'DAILY', questId: inactiveDailyA.id }, day1 + 5000),
+    (err: unknown) => err instanceof QuestCoordinatorError && err.code === 'QUEST_NOT_COMPLETED'
+  );
 });

@@ -14,9 +14,11 @@ import {
 import {
   DAILY_QUEST_CAP,
   WEEKLY_QUEST_CAP,
-  getQuestDefinitionsByPeriod,
 } from '../../../core/quests/questCatalog.ts';
-import { countUnclaimed } from '../../../core/quests/questEngine.ts';
+import {
+  countUnclaimed,
+  getActiveQuestDefinitions,
+} from '../../../core/quests/questEngine.ts';
 import { useTranslation } from '../../../i18n/I18nContext.tsx';
 import { localizeErrorMessage } from '../../../i18n/errorTranslator.ts';
 import { TranslationKey } from '../../../i18n/types.ts';
@@ -35,6 +37,7 @@ import {
   formatDailyResetCountdown,
   formatQuestProgressLabel,
   formatWeeklyResetCountdown,
+  getQuestSlotLabelKey,
   resolveQuestVisualStatus,
 } from '../../utils/questFormatting.ts';
 
@@ -70,6 +73,7 @@ const QuestCard: React.FC<QuestCardProps> = ({
   const status = resolveQuestVisualStatus(entry, { isExpired });
   const title = t(def.titleKey as TranslationKey);
   const description = t(def.descriptionKey as TranslationKey);
+  const slotLabelKey = getQuestSlotLabelKey(def.period, def.slot);
   const rawProgress = entry?.progress ?? 0;
   const clampedProgress = Math.max(0, Math.min(def.target, Math.floor(rawProgress)));
   const pct = def.target > 0 ? Math.min(100, Math.round((clampedProgress / def.target) * 100)) : 0;
@@ -102,6 +106,19 @@ const QuestCard: React.FC<QuestCardProps> = ({
     >
       <div className="flex items-start justify-between gap-2.5">
         <div className="min-w-0 flex-1 space-y-0.5">
+          <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            <span data-testid={`quest-slot-${def.id}`}>
+              {t(slotLabelKey)}
+            </span>
+            {def.difficulty === 'hard' && (
+              <span
+                data-testid={`quest-difficulty-${def.id}`}
+                className="px-1 py-0.5 rounded bg-amber-100/90 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 leading-none"
+              >
+                {t('quests.difficulty.hard')}
+              </span>
+            )}
+          </div>
           <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100 leading-snug">
             {title}
           </h3>
@@ -409,8 +426,8 @@ export const QuestView: React.FC<QuestViewProps> = ({
   }
 
   const { questState, resetCountdown, unclaimedCount } = questData;
-  const dailyDefs = getQuestDefinitionsByPeriod('DAILY');
-  const weeklyDefs = getQuestDefinitionsByPeriod('WEEKLY');
+  const dailyDefs = getActiveQuestDefinitions('DAILY', questState);
+  const weeklyDefs = getActiveQuestDefinitions('WEEKLY', questState);
 
   const dailySummary = computePeriodClaimedSummary('DAILY', questState);
   const weeklySummary = computePeriodClaimedSummary('WEEKLY', questState);

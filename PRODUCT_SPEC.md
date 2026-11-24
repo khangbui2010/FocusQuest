@@ -1,9 +1,9 @@
 # Focus Quest — Product Specification
 
-**Document Version:** 1.9.0-synced  
+**Document Version:** 1.10.0-synced  
 **Target Release:** MVP v1.0  
 **Role:** Senior Product Architect & Product Manager  
-**Status:** Formal Product Specification (Synced through Milestone 5B.5 Closed, UX-1..UX-6 Approved, Milestone 5C Stage 5C-1, **Milestone Villager V1–V5.2** & CLEANUP-1 Green)  
+**Status:** Formal Product Specification (Synced through Milestone 5B.5 Closed, UX-1..UX-6 Approved, Milestone 5C Stage 5C-1, Milestone Villager V1–V5.2, CLEANUP-1 & **Milestone 5D-1 Quest Pool** Green)  
 
 ---
 
@@ -145,7 +145,7 @@ Sản phẩm áp dụng triết lý **Positive Reinforcement (Khen thưởng tí
     - `ECONOMY_EFFECT` (*Foraging Post* `baseCost = 15`, `mult = 1.6`, `+2%/cấp`; *Primitive Granary* `baseCost = 30`, `mult = 1.8`, `+3%/cấp`): hỗ trợ nâng cấp tới `maxLevel = 5` thông qua `UPGRADE_BUILDING`, nhân tỷ lệ `CoinBonus = rate × level` (vẫn chỉ áp dụng cho Coins khi hoàn thành phiên Focus; XP và Quests hoàn toàn không bị ảnh hưởng). Tổng chi phí xây + nâng cấp tối đa toàn bộ công trình Stone Age là **`3,907` Coins**.
     - **Công thức phí & Level gate nâng cấp (`L → L+1`, với `L = currentLevel`):** Chi phí gốc `round(baseCost × upgradeCostMultiplier^L)`; sau khi áp dụng giảm giá của **Trưởng lão (Elder)** (`-6%/người`, trần `-30%` tại `5` người, làm tròn `Math.round`, tối thiểu `1` Coin); yêu cầu `Player Level >= unlockRequirements.minPlayerLevel + L`.
     - **Giới hạn xây dựng — Build Limit:** Tối đa **`4`** công trình cho **mỗi loại** thuộc nhóm `ECONOMY_EFFECT` (`MAX_ECONOMY_EFFECT_BUILDINGS = 4`; trần `CoinBonus` công trình Thời đại Đồ Đá `+100%`, cộng với `+40%` từ 8 Crafter và `+10%` Đủ bộ 3 vai trò = **`+150%` trần lý thuyết**) và tối đa **`1`** *Meditation Cave* (`MAX_VILLAGE_CAVES = 1`); phá dỡ công trình giải phóng ngay slot của loại đó. Không giới hạn số công trình `DECORATIVE` hay *Elder's Hut*.
-    - **Dân làng, Buff Vai trò (V5.2), Đi lại trên Bản đồ & Cảnh Focus động (`Milestone Villager V2–V5.2`):** Người chơi dùng Focus Coins tuyển dân làng (`role: 'elder' | 'crafter' | 'woodworker'`) tại *Meditation Cave* với chi phí `Math.round(25 × 1.35^currentCount)` (`25, 34, 46, 62, 83, 112, 151, 204, 276, 372` Coins; trần tối đa `10` dân tại Cave Lv. 5). Dân làng chỉ lưu `{ id, role, recruitedAt }` trong storage (`CURRENT_SCHEMA_VERSION = 4`), **không có Passive Income, không nhân XP hay Quest**. Từ **V5.2**, 3 vai trò mang lại buff cộng dồn: **Crafter (`Thợ thủ công`)** `+5% CoinBonus/người` (trần `+40%` ở 8 người), **Woodworker (`Tiều phu`)** `-5% chi phí mở rộng đất/người` (trần `-40%` ở 8 người, giữ nguyên cổng Level `k+2`), **Elder (`Trưởng lão`)** `-6% chi phí nâng cấp công trình/người` (trần `-30%` ở 5 người, chỉ áp dụng khi nâng cấp — không giảm giá xây mới), và **Complete Tribe (`Đủ bộ 3 vai trò`)** `+10% CoinBonus` khi có tối thiểu 1 người mỗi vai trò. Lớp hiển thị Bản đồ (**V3**) và `FocusSceneArea` (**V4**) giữ nguyên thuần UI (không ghi storage, không thêm extension message).
+    - **Dân làng, Buff Vai trò (V5.2), Đi lại trên Bản đồ & Cảnh Focus động (`Milestone Villager V2–V5.2`):** Người chơi dùng Focus Coins tuyển dân làng (`role: 'elder' | 'crafter' | 'woodworker'`) tại *Meditation Cave* với chi phí `Math.round(25 × 1.35^currentCount)` (`25, 34, 46, 62, 83, 112, 151, 204, 276, 372` Coins; trần tối đa `10` dân tại Cave Lv. 5). Dân làng chỉ lưu `{ id, role, recruitedAt }` trong storage (`fq_civilization` giữ nguyên từ Schema v4 khi Storage nâng lên `CURRENT_SCHEMA_VERSION = 5` ở 5D-1), **không có Passive Income, không nhân XP hay Quest**. Từ **V5.2**, 3 vai trò mang lại buff cộng dồn: **Crafter (`Thợ thủ công`)** `+5% CoinBonus/người` (trần `+40%` ở 8 người), **Woodworker (`Tiều phu`)** `-5% chi phí mở rộng đất/người` (trần `-40%` ở 8 người, giữ nguyên cổng Level `k+2`), **Elder (`Trưởng lão`)** `-6% chi phí nâng cấp công trình/người` (trần `-30%` ở 5 người, chỉ áp dụng khi nâng cấp — không giảm giá xây mới), và **Complete Tribe (`Đủ bộ 3 vai trò`)** `+10% CoinBonus` khi có tối thiểu 1 người mỗi vai trò. Lớp hiển thị Bản đồ (**V3**) và `FocusSceneArea` (**V4**) giữ nguyên thuần UI (không ghi storage, không thêm extension message).
     - **Hoàn tiền khi Phá dỡ (`50%`) & Chặn phá Hang còn dân:** Phá dỡ công trình hoàn trả nguyên tử **`50%`** (`BUILDING_DEMOLISH_REFUND_RATE = 0.5`) tổng số Focus Coins đã đầu tư thực tế (`baseCost + tổng phí nâng cấp 1..level-1`) theo độ chính xác IEEE-754 đầy đủ (`15 × 0.5 = 7.5`, UI làm tròn half-up tối đa 2 chữ số thập phân). Riêng *Meditation Cave* bị **chặn phá dỡ (`CIV_CAVE_HAS_VILLAGERS`)** khi vẫn còn dân làng (`villagers.length > 0`).
     - **Luật Era thuần & Mục tiêu Stone → Bronze (`Milestone Villager V5.2` — CHƯA kích hoạt chuyển Era):** Bảng `ERA_LEVEL_RULES` định nghĩa trần nâng cấp theo kỷ nguyên (`5, 10, 15, 20, 30, 40, 50, 60`; 6 kỷ nguyên `IRON_AGE..INTERPLANETARY` mang cờ `provisional: true`), `entryFloor` của `BRONZE_AGE` là `5`, và bộ kiểm tra thuần `evaluateEraAdvance` đối chiếu đủ: tổng phút Focus `>= 500`, `Player Level >= 9`, phí `500` Coins (`feeCoins`), mở rộng đất `>= 3` chunk (`minLandExpansions = 3`), đủ cả 3 vai trò dân làng (`>= 1` Crafter, `>= 1` Elder, `>= 1` Woodworker), và mọi loại công trình Stone Age đạt mức sàn (`Campfire 1×L1`, `Totem 1×L1`, `Elder's Hut 1×L1`, `Cave 1×L5`, `Foraging Post 4×L5`, `Granary 4×L5` — tổng chi xây+nâng sàn `3,907 + 500 = 4,407` Coins; người chơi tối ưu 3 giờ/ngày đạt điều kiện sau **5–7 ngày**, 1–2 giờ/ngày sau **khoảng 2 tuần**). Logic chuyển đổi kỷ nguyên (`era` chuyển sang `BRONZE_AGE`, trừ `500` Coins, UI nâng Era) **chưa kích hoạt** và thuộc **Giai đoạn 5C-2**.
 
@@ -201,23 +201,44 @@ Sản phẩm áp dụng triết lý **Positive Reinforcement (Khen thưởng tí
 
 ## 12. Phong cách & Kiến trúc Giao diện (UI Architecture)
 - **Công nghệ UI:** **React 19 + Tailwind CSS 4** cho Popup (`index.html`), Blocked Page (`blocked.html` + module `blocked.js` tuân thủ CSP MV3) và Chrome `_locales` (`en`, `vi`).
-- **Điều hướng & Song ngữ:** Thanh điều hướng đáy 5 tab cố định (`Quests | Focus | Map | Awards | Stats`), mặc định mở màn hình bản đồ `Map` ở giữa; song ngữ 100% EN/VI trên UI (`582` khóa parity), `113` mã lỗi có cấu trúc (`AppError` / `errorTranslator.ts`), `RewardHelpModal` đọc động công thức/`CoinBonus`/buff dân làng/settlement/precision, thông báo Chrome, và trang chặn `blocked.html`. Tab `Quests` (Manual Claim, huy hiệu chưa nhận) và `Stats` (Day/Month/Year + `Focus Streak` mở qua `Elder's Hut`) đã hoàn thiện ở Stage 5c; hiện chỉ còn `Awards` ở trạng thái giữ chỗ `"Coming soon"`.
+- **Điều hướng & Song ngữ:** Thanh điều hướng đáy 5 tab cố định (`Quests | Focus | Map | Awards | Stats`), mặc định mở màn hình bản đồ `Map` ở giữa; song ngữ 100% EN/VI trên UI (`616` khóa parity), `113` mã lỗi có cấu trúc (`AppError` / `errorTranslator.ts`), `RewardHelpModal` đọc động công thức/`CoinBonus`/buff dân làng/settlement/precision, thông báo Chrome, và trang chặn `blocked.html`. Tab `Quests` (3 khe Quest Pool ngẫu nhiên theo kỳ, Manual Claim, huy hiệu chưa nhận) và `Stats` (Day/Month/Year + `Focus Streak` mở qua `Elder's Hut`) đã hoàn thiện ở Stage 5c & 5D-1; hiện chỉ còn `Awards` ở trạng thái giữ chỗ `"Coming soon"`.
 - **Ranh giới:** UI là view/controller mỏng; **tuyệt đối không trực tiếp quyết định thời gian tập trung chính thức hoặc tự trao Coins/XP**.
 
 ---
 
-## 13. Hệ thống Nhiệm vụ Hàng ngày & Hàng tuần (Quest Engine, Coordinator & UI — Stages 2b, 5c & 6–7)
-> **Trạng thái tích hợp:** Toàn bộ **Milestone 5B.5 (1a → 7) ĐÃ ĐÓNG (APPROVED)**: domain thuần (`src/core/quests/`), Schema v3 (`fq_quests`), quyết toán nguyên tử cùng phiên Focus (`SessionCoordinator` / `StorageManager`), `QuestCoordinator`, `QuestView`, badge `Navbar`, `StatsView` (`Day | Month | Year` + `FOCUS_STAT_UNLOCK`), và Giai đoạn 6–7 (notification EN/VI 7 nhánh, `RewardHelpModal` động, 98+ `ErrorCode` chuẩn hóa & nghiệm thu tài liệu). Phần thưởng khi Claim chỉ cộng phẳng Coins/XP vào `ECONOMY` (dùng đúng `calculatePlayerLevel`, **không ghi vào `fq_daily_stats`**). **Milestone 5C — Giai đoạn 5C-1 (`UPGRADE_BUILDING`, hoàn tiền phá dỡ 50%, giới hạn 4 công trình kinh tế)** đã hoàn thiện; bước tiếp theo là `5C-2` (Bronze Age) và hệ thống `Awards` thật.
+## 13. Hệ thống Nhiệm vụ Hàng ngày & Hàng tuần (Quest Pool — Stages 2b, 5c, 6–7 & Milestone 5D-1)
+> **Trạng thái tích hợp:** Nền tảng **Milestone 5B.5** (domain thuần `src/core/quests/`, `QuestCoordinator`, `QuestView`, badge `Navbar`) đã được nâng cấp ở **Milestone 5D-1 (`Quest Pool`, `CURRENT_SCHEMA_VERSION = 5`, `CURRENT_QUEST_STATE_VERSION = 2`)** để mỗi kỳ (`00:00` Daily / `00:00` Thứ Hai Weekly) chọn ngẫu nhiên xác định 1 nhiệm vụ mỗi khe từ pool `19` nhiệm vụ trong khi **giữ nguyên bất biến 100% trần thưởng (`40C·100XP` Daily / `150C·370XP` Weekly)**. Phần thưởng khi Claim chỉ cộng phẳng Coins/XP vào `ECONOMY` (dùng đúng `calculatePlayerLevel`, **không ghi vào `fq_daily_stats`**). **Giai đoạn `5C-2` (Bronze Age)** tạm hoãn chờ asset.
 
-- **Nhiệm vụ Hàng ngày (Daily Quests — Cap: `40 Coins · 100 XP / ngày`):**
-  1. `daily_first_spark` (*First Spark*): Hoàn thành `1` phiên Focus hợp lệ → `10 Coins · 25 XP`.
-  2. `daily_steady_rhythm` (*Steady Rhythm*): Tích lũy `60` phút Focus từ các phiên hoàn thành hôm nay → `15 Coins · 35 XP`.
-  3. `daily_double_tap` (*Double Tap*): Hoàn thành `2` phiên Focus hợp lệ trong ngày → `15 Coins · 40 XP`.
-- **Nhiệm vụ Hàng tuần (Weekly Quests — 3 trục độc lập, Cap: `150 Coins · 370 XP / tuần`):**
-  1. `weekly_habit_builder` (*Habit Builder*): Hoàn thành phiên trên `4` ngày phân biệt trong tuần (Thứ Hai–Chủ Nhật) → `50 Coins · 120 XP`.
-  2. `weekly_deep_diver` (*Deep Diver*): Hoàn thành `3` phiên sâu (`>= 45 phút`) → `60 Coins · 150 XP`.
-  3. `weekly_tenacity_10` (*Weekly Tenacity*): Hoàn thành tổng `10` phiên Focus hợp lệ trong tuần → `40 Coins · 100 XP`.
-- **Quy tắc Cân bằng & Bảo vệ:**
+- **Cơ chế 3 Khe & Quest Pool Hàng ngày (Daily Pool — `9` nhiệm vụ, Cap cố định `40 Coins · 100 XP / ngày`):**
+  - **Khe A — Khởi động (`10 Coins · 25 XP`):**
+    1. `daily_first_spark` (*First Spark*): Hoàn thành `1` phiên Focus hợp lệ (giữ legacy).
+    2. `daily_warm_up` (*Warm Up*): Hoàn thành `1` phiên Focus `>= 25` phút.
+    3. `daily_quick_start` (*Quick Start*): Tích lũy `25` phút Focus trong ngày.
+  - **Khe B — Nhịp độ (`15 Coins · 35 XP`):**
+    1. `daily_steady_rhythm` (*Steady Rhythm*): Tích lũy `60` phút Focus trong ngày (giữ legacy).
+    2. `daily_forty_five` (*Solid Block*): Tích lũy `45` phút Focus trong ngày.
+    3. `daily_deep_hour` (*Full Hour*): Hoàn thành `1` phiên Focus `>= 60` phút *(thay cho đề xuất `2×30m` để bảo đảm hồ sơ `1×60m`/ngày hoàn thành được 100% Khe A & B)*.
+  - **Khe C — Thử thách (`15 Coins · 40 XP`):**
+    1. `daily_double_tap` (*Double Tap*): Hoàn thành `2` phiên Focus hợp lệ trong ngày (giữ legacy).
+    2. `daily_deep_dive` (*Deep Dive*): Hoàn thành `1` phiên Focus `>= 45` phút.
+    3. `daily_pomodoro_pair` (*Pomodoro Pair*): Hoàn thành `>= 2` chu kỳ Focus của chế độ Pomodoro trong ngày (`POMODORO_FOCUS_INTERVALS`; **không** đếm interval dở dang của Pomodoro Stopwatch).
+- **Cơ chế 3 Khe & Quest Pool Hàng tuần (Weekly Pool — `10` nhiệm vụ, Cap cố định `150 Coins · 370 XP / tuần`):**
+  - **Khe A — Đều đặn (`50 Coins · 120 XP`):**
+    1. `weekly_habit_builder` (*Habit Builder*): Tập trung trên `4` ngày phân biệt trong tuần (giữ legacy).
+    2. `weekly_five_days` (*Five-Day Streak*): Tập trung trên `5` ngày phân biệt trong tuần.
+    3. `weekly_three_days` (*Steady Trio*): Đạt tối thiểu `25` phút Focus mỗi ngày trên `3` ngày phân biệt trong tuần (`minDailyMinutes: 25`, theo dõi qua `weeklyDailyMinutes`).
+  - **Khe B — Chiều sâu (`60 Coins · 150 XP`):**
+    1. `weekly_deep_diver` (*Deep Diver*): Hoàn thành `3` phiên sâu `>= 45` phút (giữ legacy).
+    2. `weekly_two_long_60` (*Long-Form Pairs*): Hoàn thành `2` phiên dài `>= 60` phút.
+    3. `weekly_five_half_hour` (*Five Blocks*): Hoàn thành `5` phiên `>= 30` phút.
+  - **Khe C — Khối lượng (`40 Coins · 100 XP`):**
+    1. `weekly_tenacity_10` (*Weekly Tenacity*): Hoàn thành `10` phiên Focus hợp lệ (giữ legacy; gắn nhãn `difficulty: 'hard'` — hồ sơ `1×60m/ngày` đạt tối đa 7 phiên/tuần).
+    2. `weekly_six_sessions` (*Steady Six*): Hoàn thành `6` phiên Focus hợp lệ (`standard`).
+    3. `weekly_seven_sessions` (*Full-Week Seven*): Hoàn thành `7` phiên Focus hợp lệ (`standard`).
+    4. `weekly_three_hundred_minutes` (*300-Minute Mark*): Tích lũy `300` phút Focus trong tuần (`standard`).
+- **Quy tắc Chọn ngẫu nhiên, Chống Reroll & Bảo vệ Kinh tế (`5D-1`):**
+  - **Xác định theo Seed & Chống lặp liên tiếp:** `selectQuestsForPeriod(period, periodKey, salt, previousSelection)` dùng hàm băm FNV-1a + Murmur3 thuần (`hashQuestSeed`, `0` lời gọi `Date.now()` / `Math.random()`) trên `(salt, period, periodKey, slot)` để chọn đúng 1 nhiệm vụ mỗi khe và loại nhiệm vụ kỳ trước nếu khe có `>= 2` lựa chọn. Không đổi/reroll giữa kỳ khi Service Worker khởi động lại hoặc đồng hồ lùi, **không có nút Reroll cho người dùng**, và không dùng nhiệm vụ theo khung giờ trong ngày hay lịch sử web.
+  - **Migration Schema v4 → v5 (`v5_questPoolSchema.ts`):** Sinh `salt` cho người dùng nâng cấp, giữ nguyên nguyên vẹn bộ 3+3 nhiệm vụ legacy đang chạy dở giữa ngày/tuần (tiến độ, claim, ledger, streak) và bắt đầu xoay sang Quest Pool ở lần rollover `00:00` / Thứ Hai tiếp theo.
   - **Thưởng cố định (Flat Rewards) & Manual Claim:** Thưởng Quest không nhân với Session Multiplier hay Civilization `CoinBonus`; người dùng bấm nhận thủ công và phần thưởng chưa nhận sẽ hết hạn khi rollover qua `00:00` (Daily) hoặc `00:00` Thứ Hai (Weekly).
-  - **All-or-Nothing Session Eligibility (`toQuestOutcomeDelta`):** Chỉ phiên `COMPLETED` mới cộng tiến độ Quest (Countdown / Pomodoro Countdown Give Up hoặc `INTERRUPTED` = `0`; Stopwatch `< 5 phút` hoặc `INTERRUPTED` = `0`; Pomodoro Stopwatch chỉ tính `completedFocusCount × intervalDuration`, **không** cộng interval đang dở dang).
+  - **All-or-Nothing Session Eligibility (`toQuestOutcomeDelta`):** Chỉ phiên `COMPLETED` mới cộng tiến độ Quest (Countdown / Pomodoro Countdown Give Up hoặc `INTERRUPTED` = `0`; Stopwatch `< 5 phút` hoặc `INTERRUPTED` = `0`; Pomodoro Stopwatch chỉ tính `completedFocusCount` đã xong trọn vẹn và `completedFocusCount × intervalDuration`, **không** cộng interval đang dở dang).
   - **Streak & Chống tua đồng hồ (Anti-Clock-Rollback):** Chuỗi ngày tập trung (`currentDays`, `longestDays`) chỉ tăng khi hoàn thành phiên ở ngày mới kế tiếp (nhiều phiên cùng ngày giữ nguyên, gián đoạn >= 2 ngày reset về `1`) và **không sinh Coin thụ động**; hệ thống lưu `lastSettledTimestamp`, `processedPeriodKeys` và `recentClaimedKeys` (ring buffer tối đa `14` mục) để chặn reset ngoài ý muốn hoặc claim trùng khi đồng hồ hệ thống lùi lại.
