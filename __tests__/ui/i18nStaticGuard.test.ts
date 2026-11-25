@@ -107,8 +107,9 @@ test('i18n Static Key-Usage Guard: every t(...) and translate(...) key in src/ e
   const { VILLAGER_ROLES } = await import('../../src/ui/components/civilization/spriteRegistry.ts');
   const { CIVILIZATION_ERAS } = await import('../../src/core/civilization/buildingTypes.ts');
 
+  const devPrefix = `${path.join(ROOT_DIR, 'src', 'dev')}${path.sep}`;
   const srcFiles = collectFilesRecursive(path.join(ROOT_DIR, 'src'), new Set(['.ts', '.tsx'])).filter(
-    (filePath) => !filePath.endsWith(`${path.sep}SpriteGallery.tsx`)
+    (filePath) => !filePath.endsWith(`${path.sep}SpriteGallery.tsx`) && !filePath.startsWith(devPrefix)
   );
   assert.ok(srcFiles.length >= 20, `Expected at least 20 files in src/, found ${srcFiles.length}`);
 

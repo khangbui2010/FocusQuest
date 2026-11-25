@@ -228,6 +228,26 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   (async () => {
     await civilizationCoordinator.ensureInitialized();
     await sessionCoordinator.ensureInitialized();
+
+    if (
+      typeof import.meta !== 'undefined' &&
+      typeof import.meta.env !== 'undefined' &&
+      import.meta.env.DEV === true
+    ) {
+      const devMod = await import('../dev/devBackground.ts').catch(() => null);
+      if (devMod) {
+        const devResponse = await devMod.handleDevBackgroundMessage(message, {
+          storageManager,
+          sessionCoordinator,
+          civilizationCoordinator,
+          questCoordinator,
+        });
+        if (devResponse !== null) {
+          return devResponse;
+        }
+      }
+    }
+
     return messageHandler.handleMessage(message);
   })()
     .then((response) => {

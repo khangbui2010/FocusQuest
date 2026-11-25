@@ -243,4 +243,94 @@ test('5E-2b Part A Hand-Held Tools: tool renders inside villager element on hand
   assert.ok(sceneSrc.includes("from './civilization/civilizationScale.ts'"));
   assert.strictEqual(sceneSrc.includes('Math.random'), false);
   assert.strictEqual(sceneSrc.includes('Date.now'), false);
+
+  // Verify all 3 tool tile specs (hammer #117, pickaxe #115, axe #127) render inside villagers
+  const multiJobsCiv = {
+    ...baseCiv,
+    founderRole: 'crafter' as const,
+    villagers: makeVillagers(4),
+    jobs: [
+      {
+        id: 'job_hammer',
+        kind: 'place' as const,
+        status: 'ACTIVE' as const,
+        definitionId: 'stone_age_elder_hut',
+        buildingId: 'b_hut_1',
+        crewRequired: 1,
+        totalSeconds: 3600,
+        remainingSeconds: 1800,
+        paidCoins: 20,
+        createdAt: 1,
+      },
+      {
+        id: 'job_pickaxe',
+        kind: 'place' as const,
+        status: 'ACTIVE' as const,
+        definitionId: 'stone_age_study_cave',
+        buildingId: 'b_cave_1',
+        crewRequired: 1,
+        totalSeconds: 3600,
+        remainingSeconds: 1800,
+        paidCoins: 12,
+        createdAt: 2,
+      },
+      {
+        id: 'job_axe',
+        kind: 'expand' as const,
+        status: 'ACTIVE' as const,
+        origin: { x: 8, y: 0 },
+        purchaseIndex: 1,
+        crewRequired: 2,
+        totalSeconds: 3600,
+        remainingSeconds: 1800,
+        paidCoins: 30,
+        createdAt: 3,
+      },
+    ],
+  };
+
+  const multiHtml = renderEn(
+    React.createElement(FocusSceneArea, {
+      era: 'STONE_AGE',
+      sceneState: 'working',
+      statusLabel: 'FOCUSING',
+      chimeEnabled: true,
+      onToggleChime: () => {},
+      chimeAriaLabel: 'Mute',
+      chimeTitle: 'Sound',
+      civilizationState: multiJobsCiv,
+    })
+  );
+
+  const hammerToolIdx = multiHtml.indexOf('data-testid="focus-work-tool-job_hammer"');
+  const hammerSubIdx = multiHtml.indexOf('data-testid="focus-work-subject-job_hammer"');
+  assert.ok(hammerToolIdx > 0 && hammerToolIdx < hammerSubIdx);
+  assert.ok(multiHtml.slice(hammerToolIdx, hammerSubIdx).includes('data-tile-pack="tiny-dungeon"'));
+  assert.ok(multiHtml.slice(hammerToolIdx, hammerSubIdx).includes('data-tile-index="117"'));
+
+  const pickaxeToolIdx = multiHtml.indexOf('data-testid="focus-work-tool-job_pickaxe"');
+  const pickaxeSubIdx = multiHtml.indexOf('data-testid="focus-work-subject-job_pickaxe"');
+  assert.ok(pickaxeToolIdx > 0 && pickaxeToolIdx < pickaxeSubIdx);
+  assert.ok(multiHtml.slice(pickaxeToolIdx, pickaxeSubIdx).includes('data-tile-pack="tiny-town"'));
+  assert.ok(multiHtml.slice(pickaxeToolIdx, pickaxeSubIdx).includes('data-tile-index="115"'));
+
+  const axeToolIdx = multiHtml.indexOf('data-testid="focus-work-tool-job_axe"');
+  const axeSubIdx = multiHtml.indexOf('data-testid="focus-work-subject-job_axe"');
+  assert.ok(axeToolIdx > 0 && axeToolIdx < axeSubIdx);
+  assert.ok(multiHtml.slice(axeToolIdx, axeSubIdx).includes('data-tile-pack="tiny-town"'));
+  assert.ok(multiHtml.slice(axeToolIdx, axeSubIdx).includes('data-tile-index="127"'));
+
+  // Verify hand grip transform-origin & reduced-motion overrides in index.css
+  const cssSrc = fs.readFileSync(
+    path.resolve(import.meta.dirname, '../../src/index.css'),
+    'utf8'
+  );
+  assert.ok(cssSrc.includes('.fq-work-hand-tool-strike-right'));
+  assert.ok(cssSrc.includes('transform-origin: 20% 85%'));
+  assert.ok(cssSrc.includes('.fq-work-hand-tool-strike-left'));
+  assert.ok(cssSrc.includes('transform-origin: 80% 85%'));
+  const reducedIdx = cssSrc.indexOf('@media (prefers-reduced-motion: reduce)');
+  assert.ok(reducedIdx !== -1);
+  assert.ok(cssSrc.slice(reducedIdx).includes('.fq-work-hand-tool-strike-right'));
+  assert.ok(cssSrc.slice(reducedIdx).includes('.fq-work-hand-tool-strike-left'));
 });

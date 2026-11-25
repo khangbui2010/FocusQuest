@@ -70,24 +70,28 @@ npm install
 # Start local interactive dev preview (Port 3000)
 npm run dev
 
-# Run comprehensive test suite (725/725 PASS — 0 failures)
+# Run comprehensive test suite (738/738 PASS — 0 failures)
 npm test
 
 # Typecheck and lint codebase (0 TypeScript errors)
 npm run lint
 
-# Build extension artifacts (outputs to dist/)
+# Build extension artifacts (outputs to dist/ with zero dev God Mode code)
 npm run build
 ```
 
-> **Verification scope:** Automated tests execute on Node.js (`tsx --test`) using React SSR (`renderToString`), mock 2D canvas context, and mock Chrome adapters for background services. Previously completed milestones (`UX-1`–`UX-6`, `UX-5` terrain canvas, `UX-5.1` persistent camera, `LOFI-1`/`1b`/`2`, and `Milestone 5B.5` stages `1a`–`7` including `2b`, `5c`, `6+7`) have been verified and accepted in unpacked Chrome (`>= 116`). **Stage 5C-1**, **Milestone Villager V2–V5.2**, **CLEANUP-1**, **Milestone 5D-1 (Quest Pool)**, **Milestone 5E-1/1b/1c**, and **Milestone 5E-2 (Job Assignment & Multi-Site Focus Scene)** (`725/725 PASS`, `npm run lint` `0` errors, Vite build **PASS**) await visual/runtime verification in unpacked Chrome.
+### Development Tools (`GOD MODE (dev)`)
+- When running `npm run dev` (or an explicit `vite build --mode development`), a collapsed **`GOD MODE (dev)`** chip appears in the bottom-right corner outside the `400×600` popup shell for testing Coins, Player Level, Focus minutes, time speed (`1× / 10× / 60× / 600×`), Focus skip, instant building/land/villager placement, Era readiness (`STONE_AGE` preserved), Quest rollover/completion, and JSON state export/import/reset.
+- Production builds (`npm run build` / `npm run clean && npm run build`) strip 100% of `/src/dev/` modules, UI, and `DEV_*` handlers from `dist/`.
+
+> **Verification scope:** Automated tests execute on Node.js (`tsx --test`) using React SSR (`renderToString`), mock 2D canvas context, and mock Chrome adapters for background services. Previously completed milestones (`UX-1`–`UX-6`, `UX-5` terrain canvas, `UX-5.1` persistent camera, `LOFI-1`/`1b`/`2`, and `Milestone 5B.5` stages `1a`–`7` including `2b`, `5c`, `6+7`) have been verified and accepted in unpacked Chrome (`>= 116`). **Stage 5C-1**, **Milestone Villager V2–V5.2**, **CLEANUP-1**, **Milestone 5D-1 (Quest Pool)**, **Milestone 5E-1/1b/1c**, **Milestone 5E-2**, and **Milestone 5E-2b (Map-True Focus Work Sub-Scenes & Dev-Only God Mode)** (`738/738 PASS`, `npm run lint` `0` errors, Vite build **PASS**) await visual/runtime verification in unpacked Chrome.
 
 ---
 
 ## 🗺️ Roadmap
 
 - **Milestone 5C — Stage 5C-2 Era Progression:** Advance civilization progression from the Stone Age into the **Bronze Age** and subsequent historical eras (currently paused awaiting sprites/assets).
-- **Awards System:** Implement achievement tracking and milestones to replace the remaining `Awards` tab `"Coming soon"` placeholder (`Quests`, `Stats`, `5E-1`, and `5E-2` are complete).
+- **Awards System:** Implement achievement tracking and milestones to replace the remaining `Awards` tab `"Coming soon"` placeholder (`Quests`, `Stats`, `5E-1`, `5E-2`, and `5E-2b` are complete).
 
 ---
 

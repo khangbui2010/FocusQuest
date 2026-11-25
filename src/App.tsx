@@ -876,6 +876,53 @@ export const App: React.FC<AppProps> = ({
   const inLiveExtension = isChromeExtension();
   const activeLocale = resolveLocale(settings?.language ?? initialLocale);
 
+  type DevOverlayProps = {
+    onRefreshState: () => Promise<void>;
+    activeTab: ActiveTab;
+    onSetActiveTab: (tab: ActiveTab) => void;
+    session: SessionSnapshot | null;
+    economy: PlayerEconomy;
+    civState: CivilizationState | null;
+  };
+  const [DevOverlayComponent, setDevOverlayComponent] =
+    useState<React.ComponentType<DevOverlayProps> | null>(null);
+
+  useEffect(() => {
+    if (
+      typeof import.meta !== 'undefined' &&
+      typeof import.meta.env !== 'undefined' &&
+      import.meta.env.DEV === true
+    ) {
+      let mounted = true;
+      void import('./dev/DevGodModeMount.tsx')
+        .then((mod) => {
+          if (mounted) {
+            setDevOverlayComponent(() => mod.DevGodModeMount);
+          }
+        })
+        .catch(() => undefined);
+      return () => {
+        mounted = false;
+      };
+    }
+    return undefined;
+  }, []);
+
+  const devOverlayNode =
+    typeof import.meta !== 'undefined' &&
+    typeof import.meta.env !== 'undefined' &&
+    import.meta.env.DEV === true &&
+    DevOverlayComponent ? (
+      <DevOverlayComponent
+        onRefreshState={refreshState}
+        activeTab={activeTab}
+        onSetActiveTab={setActiveTab}
+        session={session}
+        economy={economy}
+        civState={civState}
+      />
+    ) : null;
+
   const popupContent = hasResolvedInitialSession ? (
     <PopupShell
       onToggleLanguage={handleSetLanguage}
@@ -946,6 +993,7 @@ export const App: React.FC<AppProps> = ({
     return (
       <I18nProvider locale={activeLocale} onChangeLocale={handleSetLanguage}>
         {popupContent}
+        {devOverlayNode}
       </I18nProvider>
     );
   }
@@ -1012,6 +1060,7 @@ export const App: React.FC<AppProps> = ({
           {/* 400px Extension Popup UI */}
           {popupContent}
         </div>
+        {devOverlayNode}
       </div>
     </I18nProvider>
   );

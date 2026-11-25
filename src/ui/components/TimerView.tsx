@@ -45,6 +45,7 @@ import { soundEffects, isChimeEnabled, playPhaseTransitionChime } from '../servi
 import { extractCivilizationCoinBonuses } from '../../core/civilization/civilizationBonusHelper.ts';
 import { aggregateCoinBonus } from '../../core/economy/coinBonus.ts';
 import { getCivilizationStateClient, sendExtensionMessage } from '../services/extensionClient.ts';
+import { getActiveTimeScale, notifySimTick } from '../services/devRuntimeBridge.ts';
 import { useTranslation } from '../../i18n/I18nContext.tsx';
 import { CivilizationEra } from '../../core/civilization/buildingTypes.ts';
 import { CivilizationState } from '../../core/civilization/civilizationState.ts';
@@ -350,11 +351,43 @@ export const TimerView: React.FC<TimerViewProps> = ({
       return;
     }
     setCurrentTime(Date.now());
+    if (
+      typeof import.meta !== 'undefined' &&
+      typeof import.meta.env !== 'undefined' &&
+      import.meta.env.DEV === true
+    ) {
+      let cancelled = false;
+      let timerId: ReturnType<typeof setTimeout> | null = null;
+      let lastRealTick = Date.now();
+      const scheduleNext = () => {
+        if (cancelled) return;
+        const speed = getActiveTimeScale();
+        timerId = setTimeout(() => {
+          if (cancelled) return;
+          const now = Date.now();
+          const deltaMs = Math.max(0, now - lastRealTick);
+          lastRealTick = now;
+          const activeSpeed = getActiveTimeScale();
+          if (activeSpeed > 1 && session?.status === 'RUNNING') {
+            notifySimTick(deltaMs);
+            void onRefreshSession();
+          }
+          setCurrentTime(Date.now());
+          scheduleNext();
+        }, speed > 1 ? 200 : 1000);
+      };
+      scheduleNext();
+      return () => {
+        cancelled = true;
+        if (timerId !== null) clearTimeout(timerId);
+      };
+    }
+
     const timer = setInterval(() => {
       setCurrentTime(Date.now());
     }, 1000);
     return () => clearInterval(timer);
-  }, [isActiveTimer, session?.id, session?.status]);
+  }, [isActiveTimer, session?.id, session?.status, onRefreshSession]);
 
   // Track phase transitions for audio cues
   const lastPhaseRef = useRef<PomodoroPhase | null>(null);

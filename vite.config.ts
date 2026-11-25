@@ -3,9 +3,17 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig} from 'vite';
 
-export default defineConfig(() => {
+export default defineConfig(({command, mode}) => {
+  const isDevRuntime = command === 'serve' || mode === 'development';
   return {
     plugins: [react(), tailwindcss()],
+    define: isDevRuntime
+      ? undefined
+      : {
+          'import.meta.env.DEV': 'false',
+          'import.meta.env.PROD': 'true',
+          'process.env.NODE_ENV': JSON.stringify('production'),
+        },
     resolve: {
       alias: {
         '@': path.resolve(import.meta.dirname, '.'),

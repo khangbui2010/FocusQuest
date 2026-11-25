@@ -114,6 +114,7 @@ import {
   rolloverQuestState,
   toQuestOutcomeDelta,
 } from '../../core/quests/questEngine.ts';
+import { dispatchSimMessagePlugin, registerSimStateAdapter } from './devRuntimeBridge.ts';
 
 const rewardEngine = new RewardEngine();
 
@@ -217,7 +218,8 @@ export function createInitialMockState(
 }
 
 // Fallback in-memory mock state for web browser preview
-const mockState: FullSessionStateResponse = createInitialMockState();
+let mockState: FullSessionStateResponse = createInitialMockState();
+let mockCustomDailyStats: Record<string, DailyStatRecord> | null = null;
 
 const SIM_DURATION_PATTERN = [25, 45, 60, 30, 85, 50, 70] as const;
 
@@ -762,6 +764,18 @@ export async function sendExtensionMessage<T = unknown>(
     });
   }
 
+  if (
+    typeof import.meta !== 'undefined' &&
+    typeof import.meta.env !== 'undefined' &&
+    import.meta.env.DEV === true
+  ) {
+    await import('../../dev/devSimulatorPlugin.ts').catch(() => undefined);
+    const pluginRes = await dispatchSimMessagePlugin<T>(message);
+    if (pluginRes !== null) {
+      return pluginRes;
+    }
+  }
+
   if (message.action.startsWith('MUSIC_')) {
     await ensureMockCatalogLoaded(message.action === 'MUSIC_REFRESH_CATALOG');
   }
@@ -817,6 +831,9 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
             mockState.todayStats.completedSessions += 1;
             mockState.todayStats.coinsEarned += rewardResult.coinsEarned;
             mockState.todayStats.xpEarned += rewardResult.xpEarned;
+            if (mockCustomDailyStats) {
+              mockCustomDailyStats[mockState.todayStats.date] = { ...mockState.todayStats };
+            }
           }
           const questDelta = toQuestOutcomeDelta(completedSession, getLocalDateKey(now));
           if (questDelta) {
@@ -1081,6 +1098,15 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
             mockState.economy.level = calculatePlayerLevel(mockState.economy.totalXP);
             mockState.lifetimeFocusMinutes =
               (mockState.lifetimeFocusMinutes ?? 0) + plannedFocusMinutes;
+            if (mockState.todayStats) {
+              mockState.todayStats.totalFocusMinutes += plannedFocusMinutes;
+              mockState.todayStats.completedSessions += 1;
+              mockState.todayStats.coinsEarned += totalCoins;
+              mockState.todayStats.xpEarned += totalXp;
+              if (mockCustomDailyStats) {
+                mockCustomDailyStats[mockState.todayStats.date] = { ...mockState.todayStats };
+              }
+            }
             const questDelta = toQuestOutcomeDelta(completedSession, getLocalDateKey(now));
             if (questDelta) {
               mockQuestState = applyCompletedSession(mockQuestState, questDelta, now);
@@ -1475,6 +1501,9 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
             : actualFocusMins >= 5;
         if (isCompletedSession) {
           mockState.todayStats.completedSessions += 1;
+        }
+        if (mockCustomDailyStats) {
+          mockCustomDailyStats[mockState.todayStats.date] = { ...mockState.todayStats };
         }
       }
 
@@ -2854,7 +2883,14 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         mockState.todayStats?.date && isValidDateKey(mockState.todayStats.date)
           ? mockState.todayStats.date
           : getLocalDateKey();
-      const stats = buildSimulatedDailyStats(todayKey, mockState.todayStats);
+      const stats = mockCustomDailyStats
+        ? {
+            ...mockCustomDailyStats,
+            ...(mockState.todayStats?.date === todayKey
+              ? { [todayKey]: { ...mockState.todayStats } }
+              : {}),
+          }
+        : buildSimulatedDailyStats(todayKey, mockState.todayStats);
       return { success: true, data: stats as unknown as T };
     }
 
@@ -3155,4 +3191,42 @@ export function seedMockCivilizationForTest(
       ...economyPatch,
     };
   }
+}
+
+if (
+  typeof import.meta !== 'undefined' &&
+  typeof import.meta.env !== 'undefined' &&
+  import.meta.env.DEV === true
+) {
+  registerSimStateAdapter({
+    getFullState: () => mockState,
+    setFullState: (next) => {
+      mockState = next;
+    },
+    getProfiles: () => mockProfiles,
+    setProfiles: (next) => {
+      mockProfiles = next;
+    },
+    getCivState: () => mockCivilizationState,
+    setCivState: (next) => {
+      mockCivilizationState = next;
+      mockGridMap = GridMap.fromSnapshot(next.grid);
+    },
+    getQuestState: () => mockQuestState,
+    setQuestState: (next) => {
+      mockQuestState = next;
+    },
+    getMusicState: () => mockMusicState,
+    setMusicState: (next) => {
+      mockMusicState = next;
+    },
+    getCustomDailyStats: () => mockCustomDailyStats,
+    setCustomDailyStats: (next) => {
+      mockCustomDailyStats = next;
+    },
+    buildDefaultDailyStats: (todayDateKey, liveTodayStats, useMaxPreset = false) =>
+      buildSimulatedDailyStats(todayDateKey, liveTodayStats, useMaxPreset),
+    runCoreMessage: <R = unknown>(msg: ExtensionMessage) => simulateMessageResponse<R>(msg),
+    syncMusicWithSession: () => syncSimulatedMusicWithSession(),
+  });
 }
