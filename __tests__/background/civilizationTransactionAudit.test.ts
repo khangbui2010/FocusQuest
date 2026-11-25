@@ -41,7 +41,12 @@ function createAuditHarness(initialCoins = 500, initialLevel = 3, initialMinutes
     notifications,
     badge,
     blockingCoordinator,
-    () => civilizationCoordinator.getActiveCoinBonuses()
+    () => civilizationCoordinator.getActiveCoinBonuses(),
+    undefined,
+    undefined,
+    (civState) => {
+      civilizationCoordinator.refreshCachedBonuses(civState);
+    }
   );
 
   const handler = new MessageHandler(
@@ -51,7 +56,12 @@ function createAuditHarness(initialCoins = 500, initialLevel = 3, initialMinutes
     civilizationCoordinator
   );
 
-  const seedPrerequisites = async (coins = initialCoins, level = initialLevel, mins = initialMinutes) => {
+  const seedPrerequisites = async (
+    coins = initialCoins,
+    level = initialLevel,
+    mins = initialMinutes,
+    seedCrew = true
+  ) => {
     await storage.setEconomy({
       focusCoins: coins,
       totalXP: 500,
@@ -68,6 +78,26 @@ function createAuditHarness(initialCoins = 500, initialLevel = 3, initialMinutes
         xpEarned: 200,
       },
     });
+    if (seedCrew) {
+      const initCiv = createInitialCivilizationState();
+      const gm = GridMap.fromSnapshot(initCiv.grid);
+      gm.placeBuilding('cave_audit_seed', { x: 5, y: 0 }, { width: 3, height: 3 });
+      await storage.setCivilizationState({
+        ...initCiv,
+        grid: gm.toSnapshot(),
+        buildings: [
+          {
+            id: 'cave_audit_seed',
+            definitionId: 'stone_age_study_cave',
+            position: { x: 5, y: 0 },
+            level: 1,
+            placedAt: 1,
+          },
+        ],
+        villagers: [{ id: 'v_audit_seed', role: 'woodworker', recruitedAt: 1 }],
+        founderRole: 'woodworker',
+      });
+    }
   };
 
   return {
@@ -292,7 +322,7 @@ test('Audit 5: Storage read failure on transaction start aborts cleanly under mu
 // -----------------------------------------------------------------------------
 test('Audit 6: Concurrent mutation arriving while prior transaction is handling rollback serializes safely', async () => {
   const h = createAuditHarness(300, 3, 300);
-  await h.seedPrerequisites(300, 3, 300);
+  await h.seedPrerequisites(300, 3, 300, false);
 
   const originalSetMultiple = h.adapter.setMultiple.bind(h.adapter);
   let failFirstAttempt = true;
@@ -347,51 +377,50 @@ test('Audit 6: Concurrent mutation arriving while prior transaction is handling 
 // -----------------------------------------------------------------------------
 // Test 7: Race condition verification — Settlement at exact boundary of CoinBonus commit
 // -----------------------------------------------------------------------------
-test('Audit 7: Settlement occurring concurrently with building placement receives new CoinBonus with zero stale window', async () => {
+test('Audit 7: Settlement occurring concurrently with Campfire placement or completed job receives consistent state with zero stale window', async () => {
   const h = createAuditHarness(300, 3, 300);
   await h.seedPrerequisites(300, 3, 300);
   const profile = await h.profileManager.createProfile('Bonus Settlement Race', []);
 
-  // 1. Start a 20-minute Countdown session
-  await h.sessionCoordinator.startSession('COUNTDOWN', 20, profile.id);
+  // Place Foraging Post (60m) first, then start 60m session so completing it finishes the job and refreshes CoinBonus
+  const placeResp = await h.handler.handleMessage({
+    action: 'PLACE_BUILDING',
+    payload: {
+      buildingDefinitionId: 'stone_age_foraging_post',
+      position: { x: 0, y: 0 },
+    },
+  });
+  assert.strictEqual(placeResp.success, true);
+  await h.sessionCoordinator.startSession('COUNTDOWN', 60, profile.id);
+  await h.sessionCoordinator.completeCountdown();
+  await h.sessionCoordinator.resetSession();
 
-  // 2. Dispatch PLACE_BUILDING (costs 15, gives +2% bonus) and completeCountdown concurrently
-  const [placeResp, compResp] = await Promise.all([
+  const coinsBefore = (await h.storage.getEconomy()).focusCoins;
+  const xpBefore = (await h.storage.getEconomy()).totalXP;
+
+  // Next 20-minute Countdown session runs concurrently with Campfire placement (4 Coins, 0% CoinBonus)
+  await h.sessionCoordinator.startSession('COUNTDOWN', 20, profile.id);
+  const [campResp, compResp] = await Promise.all([
     h.handler.handleMessage({
       action: 'PLACE_BUILDING',
       payload: {
-        buildingDefinitionId: 'stone_age_foraging_post',
-        position: { x: 0, y: 0 },
+        buildingDefinitionId: 'stone_age_campfire',
+        position: { x: 2, y: 2 },
       },
     }),
     h.sessionCoordinator.completeCountdown(),
   ]);
 
-  assert.strictEqual(placeResp.success, true);
+  assert.strictEqual(campResp.success, true);
   assert.ok(compResp);
 
-  // Both operations were serialized under StorageMutex.
-  // Whichever ran first, because onCommitted runs INSIDE the mutex lock before release:
-  // If placeBuilding committed first:
-  //   - Balance was 300 - 15 = 285
-  //   - completeCountdown ran second, saw +2% bonus
-  //   - Coins earned: 20 * 1.5 * 1.02 = 30.6
-  //   - Final balance: 285 + 30.6 = 315.6
-  // If completeCountdown committed first:
-  //   - Coins earned: 20 * 1.5 * 1.0 = 30
-  //   - Balance became 300 + 30 = 330
-  //   - placeBuilding ran second: balance = 330 - 15 = 315.0
-  // Crucially, coins must be either 315.6 or 315.0 (strictly serialized, no lost update or negative balance)
+  // 20 * 1.5 * 1.02 = 30.6 earned, -4 Campfire cost => coinsBefore + 26.6
   const finalEcon = await h.storage.getEconomy();
-  const validBalances = [315.6, 315.0];
-  const matched = validBalances.some((b) => Math.abs(finalEcon.focusCoins - b) < EPSILON);
   assert.ok(
-    matched,
-    `Final balance ${finalEcon.focusCoins} must be strictly serialized (either 315.6 or 315.0)`
+    Math.abs(finalEcon.focusCoins - (coinsBefore + 26.6)) < EPSILON,
+    `Final balance ${finalEcon.focusCoins} expected ${coinsBefore + 26.6}`
   );
-
-  // XP is completely unchanged by CoinBonus: 500 initial + 100 earned = 600
-  assert.strictEqual(finalEcon.totalXP, 600);
+  assert.strictEqual(finalEcon.totalXP, xpBefore + 100);
 });
 
 // -----------------------------------------------------------------------------
@@ -402,7 +431,7 @@ test('Audit 8: Settlement occurring concurrently with building removal immediate
   await h.seedPrerequisites(300, 3, 300);
   const profile = await h.profileManager.createProfile('Bonus Revoke Race', []);
 
-  // 1. Place building (+2% bonus)
+  // 1. Place Foraging Post (60m job)
   const placeResp = await h.handler.handleMessage({
     action: 'PLACE_BUILDING',
     payload: {
@@ -413,6 +442,12 @@ test('Audit 8: Settlement occurring concurrently with building removal immediate
   assert.strictEqual(placeResp.success, true);
   const bldId = (placeResp.data as { building: { id: string } }).building.id;
 
+  // Complete 60m Focus session to finish construction and activate +2% bonus
+  await h.sessionCoordinator.startSession('COUNTDOWN', 60, profile.id);
+  await h.sessionCoordinator.completeCountdown();
+  await h.sessionCoordinator.resetSession();
+
+  const econAfterBuild = (await h.storage.getEconomy()).focusCoins;
   // Active bonuses must contain +2% bonus
   assert.strictEqual(h.civilizationCoordinator.getActiveCoinBonuses().length, 1);
 
@@ -436,13 +471,9 @@ test('Audit 8: Settlement occurring concurrently with building removal immediate
 
   // Final economy must be serialized accurately (Stage 5C-1 includes 50% demolish refund = +7.5 Coins)
   const econ = await h.storage.getEconomy();
-  // Initial 300 -> place Foraging Post (-15) = 285.
-  // Remove refunds 50% (+7.5 Coins -> 292.5).
-  // If remove ran first: 285 + 7.5 + (20 * 1.5 * 1.0) = 322.5
-  // If complete ran first: 285 + (20 * 1.5 * 1.02) + 7.5 = 323.1
-  const validBalances = [322.5, 323.1];
+  const validBalances = [econAfterBuild + 7.5 + 30.0, econAfterBuild + 30.6 + 7.5];
   const matched = validBalances.some((b) => Math.abs(econ.focusCoins - b) < EPSILON);
-  assert.ok(matched, `Final balance ${econ.focusCoins} must be either 322.5 or 323.1`);
+  assert.ok(matched, `Final balance ${econ.focusCoins} must match serialized outcomes`);
 });
 
 // -----------------------------------------------------------------------------
@@ -451,8 +482,9 @@ test('Audit 8: Settlement occurring concurrently with building removal immediate
 test('Audit 9: Fresh Service Worker instance rehydrates CoinBonus cache accurately from persisted state', async () => {
   const h = createAuditHarness(300, 3, 300);
   await h.seedPrerequisites(300, 3, 300);
+  const profile = await h.profileManager.createProfile('SW Restart', []);
 
-  // 1. Place 2 buildings:
+  // 1. Queue 2 buildings (1 crew 60m + 2 crew 120m = 180m total Focus):
   // - stone_age_foraging_post (+2% coin bonus)
   // - stone_age_food_cache (+3% coin bonus)
   const r1 = await h.handler.handleMessage({
@@ -471,6 +503,13 @@ test('Audit 9: Fresh Service Worker instance rehydrates CoinBonus cache accurate
   });
   assert.strictEqual(r1.success, true);
   assert.strictEqual(r2.success, true);
+
+  // Under construction -> 0 bonuses before completion
+  assert.strictEqual(h.civilizationCoordinator.getActiveCoinBonuses().length, 0);
+
+  // Finish both constructions via 180m Focus session
+  await h.sessionCoordinator.startSession('COUNTDOWN', 180, profile.id);
+  await h.sessionCoordinator.completeCountdown();
 
   // 2. Simulate Service Worker termination and restart with fresh coordinator instance
   const newCivCoordinator = new CivilizationCoordinator(h.storage);

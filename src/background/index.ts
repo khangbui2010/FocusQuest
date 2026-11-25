@@ -48,6 +48,9 @@ const sessionCoordinator = new SessionCoordinator(
   },
   async (session, reason) => {
     await musicCoordinator.sync(session, reason);
+  },
+  (civState) => {
+    civilizationCoordinator.refreshCachedBonuses(civState);
   }
 );
 

@@ -5,13 +5,47 @@ import {
   STONE_AGE_SPRITE_DATA,
   TINY_TOWN_SHEET_PATH,
 } from './spriteData.ts';
+import {
+  CONSTRUCTION_STAGE_COUNT,
+  CONSTRUCTION_SPRITE_STAGES,
+  getConstructionSprite,
+  getConstructionStageIndex,
+} from './constructionSpriteData.ts';
 import { PixelSprite } from './PixelSprite.tsx';
-import { TileImage, SpriteSheetPack } from './TileImage.tsx';
+import {
+  TileImage,
+  SpriteSheetPack,
+  ClockTileIcon,
+  ClockTileIconProps,
+  ClockTileIndex,
+  CLOCK_TILE_INDEX,
+  CLOCK_TILES_SHEET_PATH,
+} from './TileImage.tsx';
 import { CellDecor, TERRAIN_DECOR_SEED, getCellDecor } from './terrainDecor.ts';
 import { VillagerSprite, VillagerSpriteProps } from './VillagerSprite.tsx';
 
-export { PixelSprite, TileImage, getCellDecor, TERRAIN_DECOR_SEED, VillagerSprite };
-export type { PixelSpriteMatrix, SpriteSheetPack, CellDecor, VillagerSpriteProps };
+export {
+  PixelSprite,
+  TileImage,
+  ClockTileIcon,
+  CLOCK_TILE_INDEX,
+  CLOCK_TILES_SHEET_PATH,
+  CONSTRUCTION_STAGE_COUNT,
+  CONSTRUCTION_SPRITE_STAGES,
+  getConstructionSprite,
+  getConstructionStageIndex,
+  getCellDecor,
+  TERRAIN_DECOR_SEED,
+  VillagerSprite,
+};
+export type {
+  PixelSpriteMatrix,
+  SpriteSheetPack,
+  ClockTileIconProps,
+  ClockTileIndex,
+  CellDecor,
+  VillagerSpriteProps,
+};
 
 export const VILLAGER_CELL_PX = 16;
 export const VILLAGER_SHEET_COLUMNS = 4;

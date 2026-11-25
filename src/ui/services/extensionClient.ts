@@ -8,11 +8,15 @@ import {
   UpgradeBuildingPayload,
   ExpandLandPayload,
   RecruitVillagerPayload,
+  CancelConstructionJobPayload,
+  SelectFounderPayload,
   PlaceBuildingResponseData,
   RemoveBuildingResponseData,
   UpgradeBuildingResponseData,
   ExpandLandResponseData,
   RecruitVillagerResponseData,
+  CancelConstructionJobResponseData,
+  SelectFounderResponseData,
   MusicStateResponseData,
   MusicPlayPayload,
   MusicSeekPayload,
@@ -51,13 +55,16 @@ import {
   createInitialCivilizationState,
 } from '../../core/civilization/civilizationState.ts';
 import { GridMap } from '../../core/civilization/gridMap.ts';
-import { CHUNK_WIDTH, CHUNK_HEIGHT } from '../../core/civilization/constants.ts';
+import {
+  BUILDING_DEMOLISH_REFUND_RATE,
+  CHUNK_WIDTH,
+  CHUNK_HEIGHT,
+} from '../../core/civilization/constants.ts';
 import { isValidCoordinate } from '../../core/civilization/placementValidator.ts';
 import { evaluateExpansion } from '../../core/civilization/landExpansion.ts';
 import { getBuildingDefinition } from '../../core/civilization/buildingCatalog.ts';
 import { BuildingInstance, isEraUnlocked } from '../../core/civilization/buildingTypes.ts';
 import {
-  applyBuildingUpgrade,
   calculateBuildingDemolishRefund,
   canPlaceAnotherBuildingOfCategory,
   evaluateBuildingUpgrade,
@@ -69,6 +76,19 @@ import {
   evaluateRecruitment,
   findVillageCave,
 } from '../../core/civilization/villager.ts';
+import {
+  ConstructionJob,
+  EXPAND_JOB_SPEC,
+  advanceJobs,
+  assignJobsFifo,
+  getClearingOrigins,
+  getExpandJobAtOrigin,
+  getPlaceJobForBuilding,
+  getPlaceJobSpec,
+  getTotalVillagerCount,
+  getUpgradeJobSpec,
+  getUpgradeJobsForBuilding,
+} from '../../core/civilization/jobs.ts';
 import { isVillagerRole } from '../components/civilization/spriteRegistry.ts';
 import { calculatePlayerLevel } from '../../core/economy/levelSystem.ts';
 import { DEFAULT_REWARD_CONFIG, RewardEngine } from '../../core/reward/rewardEngine.ts';
@@ -764,7 +784,9 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         if (now >= targetFinish && !currentSession.rewardProcessed) {
           const coinBonuses = extractCivilizationCoinBonuses(
             mockCivilizationState.buildings,
-            mockCivilizationState.villagers
+            mockCivilizationState.villagers,
+            mockCivilizationState.jobs,
+            mockCivilizationState.founderRole
           );
           const rewardResult = rewardEngine.calculateReward({
             mode: 'COUNTDOWN',
@@ -798,6 +820,11 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
           const questDelta = toQuestOutcomeDelta(completedSession, getLocalDateKey(now));
           if (questDelta) {
             mockQuestState = applyCompletedSession(mockQuestState, questDelta, now);
+            mockCivilizationState = {
+              ...advanceJobs(mockCivilizationState, questDelta.completedFocusMinutes * 60),
+              lastUpdated: now,
+            };
+            mockGridMap = GridMap.fromSnapshot(mockCivilizationState.grid);
           }
           syncSimulatedMusicWithSession();
         }
@@ -882,7 +909,9 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         lockedMultiplier = MultiplierRules.getCountdownMultiplier(totalQuestMinutes);
         const coinBonuses = extractCivilizationCoinBonuses(
           mockCivilizationState.buildings,
-          mockCivilizationState.villagers
+          mockCivilizationState.villagers,
+          mockCivilizationState.jobs,
+          mockCivilizationState.founderRole
         );
         const coinBonusFactor = getCoinBonusMultiplier(coinBonuses);
         initialCoins =
@@ -971,7 +1000,9 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         const newTotalFocus = completed * focusDuration;
         const coinBonuses = extractCivilizationCoinBonuses(
           mockCivilizationState.buildings,
-          mockCivilizationState.villagers
+          mockCivilizationState.villagers,
+          mockCivilizationState.jobs,
+          mockCivilizationState.founderRole
         );
         const coinBonusFactor = getCoinBonusMultiplier(coinBonuses);
 
@@ -1018,6 +1049,11 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
             const questDelta = toQuestOutcomeDelta(completedSession, getLocalDateKey(now));
             if (questDelta) {
               mockQuestState = applyCompletedSession(mockQuestState, questDelta, now);
+              mockCivilizationState = {
+                ...advanceJobs(mockCivilizationState, questDelta.completedFocusMinutes * 60),
+                lastUpdated: now,
+              };
+              mockGridMap = GridMap.fromSnapshot(mockCivilizationState.grid);
             }
             syncSimulatedMusicWithSession();
             return { success: true, data: completedSession as unknown as T };
@@ -1268,7 +1304,9 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
 
       const coinBonuses = extractCivilizationCoinBonuses(
         mockCivilizationState.buildings,
-        mockCivilizationState.villagers
+        mockCivilizationState.villagers,
+        mockCivilizationState.jobs,
+        mockCivilizationState.founderRole
       );
       let coinsEarned = 0;
       let xpEarned = 0;
@@ -1396,6 +1434,11 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
       const questDelta = toQuestOutcomeDelta(updatedSession, getLocalDateKey(now));
       if (questDelta) {
         mockQuestState = applyCompletedSession(mockQuestState, questDelta, now);
+        mockCivilizationState = {
+          ...advanceJobs(mockCivilizationState, questDelta.completedFocusMinutes * 60),
+          lastUpdated: now,
+        };
+        mockGridMap = GridMap.fromSnapshot(mockCivilizationState.grid);
       }
 
       syncSimulatedMusicWithSession();
@@ -1789,6 +1832,23 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         };
       }
 
+      const placeSpec = getPlaceJobSpec(def.id);
+      const totalCrew = getTotalVillagerCount(
+        mockCivilizationState.villagers,
+        mockCivilizationState.founderRole
+      );
+      if (totalCrew < placeSpec.crew) {
+        return {
+          success: false,
+          error: `Requires at least ${placeSpec.crew} villagers for this job (currently ${totalCrew}).`,
+          errorCode: 'CIV_NOT_ENOUGH_VILLAGERS',
+          errorParams: {
+            requiredCrew: placeSpec.crew,
+            totalVillagers: totalCrew,
+          },
+        };
+      }
+
       if (mockState.economy.focusCoins < def.baseCost) {
         return {
           success: false,
@@ -1830,20 +1890,42 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         definitionId: def.id,
         position: { x: position.x, y: position.y },
         level: 1,
-        placedAt: Date.now(),
+        placedAt: now,
       };
+
+      const existingJobs = mockCivilizationState.jobs ?? [];
+      let nextJobs: readonly ConstructionJob[] = existingJobs;
+      let createdJob: ConstructionJob | undefined;
+      if (placeSpec.durationSeconds > 0) {
+        const rawJob: ConstructionJob = {
+          id: `job_${now}_${Math.random().toString(36).slice(2, 8)}`,
+          kind: 'place',
+          status: 'PENDING',
+          definitionId: def.id,
+          buildingId: instanceId,
+          crewRequired: placeSpec.crew,
+          totalSeconds: placeSpec.durationSeconds,
+          remainingSeconds: placeSpec.durationSeconds,
+          paidCoins: def.baseCost,
+          createdAt: now,
+        };
+        nextJobs = assignJobsFifo([...existingJobs, rawJob], totalCrew).jobs;
+        createdJob = nextJobs.find((j) => j.id === rawJob.id) ?? rawJob;
+      }
 
       mockCivilizationState = {
         ...mockCivilizationState,
         grid: mockGridMap.toSnapshot(),
         buildings: [...mockCivilizationState.buildings, newBuilding],
-        lastUpdated: Date.now(),
+        jobs: nextJobs,
+        lastUpdated: now,
       };
 
       const resData: PlaceBuildingResponseData = {
         building: newBuilding,
         civilizationState: mockCivilizationState,
         economy: { ...mockState.economy },
+        ...(createdJob ? { job: createdJob } : {}),
       };
 
       return {
@@ -1872,7 +1954,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
       if (existingInstance.definitionId === VILLAGE_CAVE_DEFINITION_ID && villagerCount > 0) {
         return {
           success: false,
-          error: `Cannot demolish Meditation Cave while ${villagerCount} villagers live in the village.`,
+          error: `Cannot demolish Rock Shelter while ${villagerCount} villagers live in the village.`,
           errorCode: 'CIV_CAVE_HAS_VILLAGERS',
           errorParams: { count: villagerCount },
         };
@@ -1888,19 +1970,33 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         };
       }
 
+      const existingJobs = mockCivilizationState.jobs ?? [];
+      const placeJob = getPlaceJobForBuilding(buildingInstanceId, existingJobs);
+      const upgradeJobs = getUpgradeJobsForBuilding(buildingInstanceId, existingJobs);
+
       const def = getBuildingDefinition(existingInstance.definitionId);
-      const refundedCoins = calculateBuildingDemolishRefund(def, existingInstance.level);
+      const refundedCoins = calculateBuildingDemolishRefund(def, existingInstance.level, {
+        placeJob,
+        upgradeJobs,
+      });
       mockState.economy.focusCoins += refundedCoins;
 
       const updatedBuildings = mockCivilizationState.buildings.filter(
         (b) => b.id !== buildingInstanceId
       );
+      const remainingJobs = existingJobs.filter((j) => j.buildingId !== buildingInstanceId);
+      const totalCrew = getTotalVillagerCount(
+        mockCivilizationState.villagers,
+        mockCivilizationState.founderRole
+      );
+      const nextJobs = assignJobsFifo(remainingJobs, totalCrew).jobs;
 
       mockCivilizationState = {
         ...mockCivilizationState,
         grid: mockGridMap.toSnapshot(),
         buildings: updatedBuildings,
-        lastUpdated: Date.now(),
+        jobs: nextJobs,
+        lastUpdated: now,
       };
 
       const resData: RemoveBuildingResponseData = {
@@ -1959,7 +2055,15 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         calculatePlayerLevel(mockState.economy.totalXP)
       );
 
-      const buffSummary = getVillagerBuffSummary(mockCivilizationState.villagers);
+      const existingJobs = mockCivilizationState.jobs ?? [];
+      const totalCrew = getTotalVillagerCount(
+        mockCivilizationState.villagers,
+        mockCivilizationState.founderRole
+      );
+      const buffSummary = getVillagerBuffSummary(
+        mockCivilizationState.villagers,
+        mockCivilizationState.founderRole
+      );
       const effectiveMaxLevel = getEffectiveMaxLevel(definition, mockCivilizationState.era);
       const evalResult = evaluateBuildingUpgrade({
         instance,
@@ -1969,19 +2073,28 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         playerCoins: mockState.economy.focusCoins,
         expectedLevel: payload.expectedLevel,
         upgradeDiscountRate: buffSummary.upgradeDiscountRate,
+        jobs: existingJobs,
+        totalVillagers: totalCrew,
       });
 
       if (!evalResult.canUpgrade) {
         switch (evalResult.reason) {
+          case 'BUILDING_UNDER_CONSTRUCTION':
+            return {
+              success: false,
+              error: 'This building is still under construction and cannot be upgraded yet.',
+              errorCode: 'CIV_BUILDING_UNDER_CONSTRUCTION',
+              errorParams: { buildingId: instance.id, buildingName: definition.name },
+            };
           case 'LEVEL_MISMATCH':
             return {
               success: false,
-              error: `Building level changed concurrently (expected Lv. ${payload.expectedLevel}, current Lv. ${instance.level}). Please try again.`,
+              error: `Building level changed concurrently (expected Lv. ${payload.expectedLevel}, current Lv. ${evalResult.currentLevel}). Please try again.`,
               errorCode: 'BUILDING_LEVEL_MISMATCH',
               errorParams: {
                 buildingId: instance.id,
                 expectedLevel: payload.expectedLevel,
-                currentLevel: instance.level,
+                currentLevel: evalResult.currentLevel,
               },
             };
           case 'NON_UPGRADEABLE_CATEGORY':
@@ -2016,6 +2129,15 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
                 currentLevel: playerLevel,
               },
             };
+          case 'NOT_ENOUGH_VILLAGERS': {
+            const reqCrew = getUpgradeJobSpec(evalResult.currentLevel).crew;
+            return {
+              success: false,
+              error: `Requires at least ${reqCrew} villagers for this job (currently ${totalCrew}).`,
+              errorCode: 'CIV_NOT_ENOUGH_VILLAGERS',
+              errorParams: { requiredCrew: reqCrew, totalVillagers: totalCrew },
+            };
+          }
           case 'INSUFFICIENT_COINS':
             return {
               success: false,
@@ -2037,22 +2159,38 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         }
       }
 
-      const upgraded = applyBuildingUpgrade(instance);
+      const targetLevel = evalResult.nextLevel!;
+      const upgradeSpec = getUpgradeJobSpec(evalResult.currentLevel);
+      const rawJob: ConstructionJob = {
+        id: `job_${now}_${Math.random().toString(36).slice(2, 8)}`,
+        kind: 'upgrade',
+        status: 'PENDING',
+        definitionId: definition.id,
+        buildingId: instance.id,
+        targetLevel,
+        crewRequired: upgradeSpec.crew,
+        totalSeconds: upgradeSpec.durationSeconds,
+        remainingSeconds: upgradeSpec.durationSeconds,
+        paidCoins: evalResult.cost,
+        createdAt: now,
+      };
+      const nextJobs = assignJobsFifo([...existingJobs, rawJob], totalCrew).jobs;
+      const finalJob = nextJobs.find((j) => j.id === rawJob.id) ?? rawJob;
+
       mockState.economy.focusCoins -= evalResult.cost;
       mockCivilizationState = {
         ...mockCivilizationState,
-        buildings: mockCivilizationState.buildings.map((b) =>
-          b.id === instance.id ? upgraded : b
-        ),
-        lastUpdated: Date.now(),
+        jobs: nextJobs,
+        lastUpdated: now,
       };
 
       const resData: UpgradeBuildingResponseData = {
         civilizationState: mockCivilizationState,
         economy: { ...mockState.economy },
-        building: upgraded,
-        newLevel: upgraded.level,
+        building: instance,
+        newLevel: targetLevel,
         cost: evalResult.cost,
+        job: finalJob,
       };
 
       return {
@@ -2098,13 +2236,26 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         };
       }
 
+      const existingJobs = mockCivilizationState.jobs ?? [];
+      if (getExpandJobAtOrigin(payload.origin, existingJobs)) {
+        return {
+          success: false,
+          error: 'This territory chunk is already being cleared.',
+          errorCode: 'CIV_EXPAND_ALREADY_QUEUED',
+        };
+      }
+
       const playerLevel = Math.min(
         mockState.economy.level ?? calculatePlayerLevel(mockState.economy.totalXP),
         calculatePlayerLevel(mockState.economy.totalXP)
       );
-      const expandBuffSummary = getVillagerBuffSummary(mockCivilizationState.villagers);
+      const expandBuffSummary = getVillagerBuffSummary(
+        mockCivilizationState.villagers,
+        mockCivilizationState.founderRole
+      );
+      const clearingCount = getClearingOrigins(existingJobs).length;
       const evalResult = evaluateExpansion({
-        chunkCount: mockCivilizationState.grid.chunks.length,
+        chunkCount: mockCivilizationState.grid.chunks.length + clearingCount,
         playerLevel,
         coins: mockState.economy.focusCoins,
         discountRate: expandBuffSummary.expansionDiscountRate,
@@ -2134,29 +2285,148 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
             };
       }
 
-      const expansion = mockGridMap.expandChunk(payload.origin);
-      if (!expansion.success || !expansion.chunk) {
+      const totalCrew = getTotalVillagerCount(
+        mockCivilizationState.villagers,
+        mockCivilizationState.founderRole
+      );
+      if (totalCrew < EXPAND_JOB_SPEC.crew) {
         return {
           success: false,
-          error: `Land expansion failed: ${expansion.reason || 'cannot expand chunk'}`,
+          error: `Requires at least ${EXPAND_JOB_SPEC.crew} villagers for this job (currently ${totalCrew}).`,
+          errorCode: 'CIV_NOT_ENOUGH_VILLAGERS',
+          errorParams: { requiredCrew: EXPAND_JOB_SPEC.crew, totalVillagers: totalCrew },
+        };
+      }
+
+      const expCheck = mockGridMap.canExpandChunk(payload.origin);
+      if (!expCheck.canExpand) {
+        return {
+          success: false,
+          error: `Land expansion failed: ${expCheck.reason || 'cannot expand chunk'}`,
           errorCode: 'CIV_LAND_EXPANSION_FAILED',
-          errorParams: { reason: expansion.reason || 'cannot expand chunk' },
+          errorParams: { reason: expCheck.reason || 'cannot expand chunk' },
         };
       }
 
       mockState.economy.focusCoins -= evalResult.cost;
 
+      const originCopy = { x: payload.origin.x, y: payload.origin.y };
+      const rawJob: ConstructionJob = {
+        id: `job_${now}_${Math.random().toString(36).slice(2, 8)}`,
+        kind: 'expand',
+        status: 'PENDING',
+        origin: originCopy,
+        purchaseIndex: evalResult.purchaseIndex,
+        crewRequired: EXPAND_JOB_SPEC.crew,
+        totalSeconds: EXPAND_JOB_SPEC.durationSeconds,
+        remainingSeconds: EXPAND_JOB_SPEC.durationSeconds,
+        paidCoins: evalResult.cost,
+        createdAt: now,
+      };
+      const nextJobs = assignJobsFifo([...existingJobs, rawJob], totalCrew).jobs;
+      const finalJob = nextJobs.find((j) => j.id === rawJob.id) ?? rawJob;
+
       mockCivilizationState = {
         ...mockCivilizationState,
-        grid: mockGridMap.toSnapshot(),
-        lastUpdated: Date.now(),
+        jobs: nextJobs,
+        lastUpdated: now,
       };
 
       const resData: ExpandLandResponseData = {
-        newChunk: expansion.chunk.origin,
+        newChunk: originCopy,
         civilizationState: mockCivilizationState,
         economy: { ...mockState.economy },
         cost: evalResult.cost,
+        job: finalJob,
+      };
+
+      return {
+        success: true,
+        data: resData as unknown as T,
+      };
+    }
+
+    case 'CANCEL_CONSTRUCTION_JOB': {
+      const payload = (message as { payload?: CancelConstructionJobPayload }).payload;
+      if (
+        !payload ||
+        typeof payload !== 'object' ||
+        typeof payload.jobId !== 'string' ||
+        payload.jobId.trim().length === 0
+      ) {
+        return {
+          success: false,
+          error: 'CANCEL_CONSTRUCTION_JOB requires a valid jobId.',
+          errorCode: 'CIV_INVALID_CANCEL_JOB_PAYLOAD',
+        };
+      }
+
+      const existingJobs = mockCivilizationState.jobs ?? [];
+      const targetJob = existingJobs.find((j) => j.id === payload.jobId);
+      if (!targetJob) {
+        return {
+          success: false,
+          error: `Construction job "${payload.jobId}" not found.`,
+          errorCode: 'CIV_JOB_NOT_FOUND',
+          errorParams: { jobId: payload.jobId },
+        };
+      }
+
+      const jobsToCancel =
+        targetJob.kind === 'upgrade' &&
+        targetJob.buildingId &&
+        typeof targetJob.targetLevel === 'number'
+          ? existingJobs.filter(
+              (j) =>
+                j.kind === 'upgrade' &&
+                j.buildingId === targetJob.buildingId &&
+                typeof j.targetLevel === 'number' &&
+                j.targetLevel >= targetJob.targetLevel!
+            )
+          : [targetJob];
+
+      const cancelledSet = new Set(jobsToCancel.map((j) => j.id));
+      let refundedCoins = 0;
+      for (const j of jobsToCancel) {
+        const rate = j.remainingSeconds === j.totalSeconds ? 1 : BUILDING_DEMOLISH_REFUND_RATE;
+        refundedCoins += j.paidCoins * rate;
+      }
+
+      let nextBuildings = mockCivilizationState.buildings;
+      if (targetJob.kind === 'place' && targetJob.buildingId) {
+        const removalRes = mockGridMap.removeBuilding(targetJob.buildingId);
+        if (!removalRes.success) {
+          return {
+            success: false,
+            error: `Building removal failed: ${removalRes.reason || 'unknown'}`,
+            errorCode: 'CIV_BUILDING_REMOVAL_FAILED',
+            errorParams: { reason: removalRes.reason || 'unknown' },
+          };
+        }
+        nextBuildings = mockCivilizationState.buildings.filter((b) => b.id !== targetJob.buildingId);
+      }
+
+      mockState.economy.focusCoins += refundedCoins;
+      const remainingJobs = existingJobs.filter((j) => !cancelledSet.has(j.id));
+      const totalCrew = getTotalVillagerCount(
+        mockCivilizationState.villagers,
+        mockCivilizationState.founderRole
+      );
+      const nextJobs = assignJobsFifo(remainingJobs, totalCrew).jobs;
+
+      mockCivilizationState = {
+        ...mockCivilizationState,
+        grid: mockGridMap.toSnapshot(),
+        buildings: nextBuildings,
+        jobs: nextJobs,
+        lastUpdated: now,
+      };
+
+      const resData: CancelConstructionJobResponseData = {
+        cancelledJobIds: Array.from(cancelledSet),
+        refundedCoins,
+        civilizationState: mockCivilizationState,
+        economy: { ...mockState.economy },
       };
 
       return {
@@ -2180,10 +2450,12 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
 
       const role = payload.role;
       const currentVillagers = mockCivilizationState.villagers ?? [];
-      const caveBuilding = findVillageCave(mockCivilizationState.buildings);
+      const existingJobs = mockCivilizationState.jobs ?? [];
+      const caveBuilding = findVillageCave(mockCivilizationState.buildings, existingJobs);
       const evalResult = evaluateRecruitment({
         caveBuilding,
         villagers: currentVillagers,
+        founderRole: mockCivilizationState.founderRole,
         playerCoins: mockState.economy.focusCoins,
         role,
       });
@@ -2193,13 +2465,13 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
           case 'CIV_NO_VILLAGE_CAVE':
             return {
               success: false,
-              error: 'You need a Meditation Cave to recruit villagers.',
+              error: 'You need a Rock Shelter to recruit villagers.',
               errorCode: 'CIV_NO_VILLAGE_CAVE',
             };
           case 'CIV_VILLAGER_CAPACITY_REACHED':
             return {
               success: false,
-              error: `Village capacity reached (${evalResult.currentCount}/${evalResult.capacity}). Upgrade your Meditation Cave to house more villagers.`,
+              error: `Village capacity reached (${evalResult.currentCount}/${evalResult.capacity}). Upgrade your Rock Shelter to house more villagers.`,
               errorCode: 'CIV_VILLAGER_CAPACITY_REACHED',
               errorParams: {
                 currentCount: evalResult.currentCount,
@@ -2232,9 +2504,13 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
       };
 
       mockState.economy.focusCoins -= evalResult.cost;
+      const nextVillagers = applyRecruitment(currentVillagers, villager);
+      const nextTotalCrew = getTotalVillagerCount(nextVillagers, mockCivilizationState.founderRole);
+      const nextJobs = assignJobsFifo(existingJobs, nextTotalCrew).jobs;
       mockCivilizationState = {
         ...mockCivilizationState,
-        villagers: applyRecruitment(currentVillagers, villager),
+        villagers: nextVillagers,
+        jobs: nextJobs,
         lastUpdated: now,
       };
 
@@ -2243,6 +2519,55 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         civilizationState: mockCivilizationState,
         economy: { ...mockState.economy },
         cost: evalResult.cost,
+      };
+
+      return {
+        success: true,
+        data: resData as unknown as T,
+      };
+    }
+
+    case 'SELECT_FOUNDER': {
+      const payload = (message as { payload?: SelectFounderPayload }).payload;
+      if (!payload || typeof payload !== 'object' || !isVillagerRole(payload.role)) {
+        return {
+          success: false,
+          error: 'SELECT_FOUNDER requires a valid villager role (elder | crafter | woodworker).',
+          errorCode: 'CIV_INVALID_FOUNDER_PAYLOAD',
+          errorParams: {
+            role:
+              payload && typeof payload === 'object'
+                ? String((payload as { role?: unknown }).role)
+                : '',
+          },
+        };
+      }
+
+      if (
+        mockCivilizationState.founderRole &&
+        isVillagerRole(mockCivilizationState.founderRole)
+      ) {
+        return {
+          success: false,
+          error: 'Founder villager has already been selected.',
+          errorCode: 'CIV_FOUNDER_ALREADY_SELECTED',
+        };
+      }
+
+      const role = payload.role;
+      const existingJobs = mockCivilizationState.jobs ?? [];
+      const nextTotalCrew = getTotalVillagerCount(mockCivilizationState.villagers, role);
+      const nextJobs = assignJobsFifo(existingJobs, nextTotalCrew).jobs;
+      mockCivilizationState = {
+        ...mockCivilizationState,
+        founderRole: role,
+        jobs: nextJobs,
+        lastUpdated: now,
+      };
+
+      const resData: SelectFounderResponseData = {
+        founderRole: role,
+        civilizationState: mockCivilizationState,
       };
 
       return {
@@ -2680,13 +3005,37 @@ export async function expandLandClient(
 }
 
 /**
- * Typed client helper: recruit 1 villager into the Meditation Cave.
+ * Typed client helper: recruit 1 villager into the Rock Shelter.
  */
 export async function recruitVillagerClient(
   payload: RecruitVillagerPayload
 ): Promise<MessageResponse<RecruitVillagerResponseData>> {
   return sendExtensionMessage<RecruitVillagerResponseData>({
     action: 'RECRUIT_VILLAGER',
+    payload,
+  });
+}
+
+/**
+ * Typed client helper: select the permanent free Founder Villager once.
+ */
+export async function selectFounderClient(
+  payload: SelectFounderPayload
+): Promise<MessageResponse<SelectFounderResponseData>> {
+  return sendExtensionMessage<SelectFounderResponseData>({
+    action: 'SELECT_FOUNDER',
+    payload,
+  });
+}
+
+/**
+ * Typed client helper: cancel a queued/active construction job and refund coins.
+ */
+export async function cancelConstructionJobClient(
+  payload: CancelConstructionJobPayload
+): Promise<MessageResponse<CancelConstructionJobResponseData>> {
+  return sendExtensionMessage<CancelConstructionJobResponseData>({
+    action: 'CANCEL_CONSTRUCTION_JOB',
     payload,
   });
 }
@@ -2732,3 +3081,19 @@ export async function claimQuestRewardClient(
   });
 }
 
+/**
+ * Test-only helper to seed the in-memory simulator CivilizationState & Economy.
+ */
+export function seedMockCivilizationForTest(
+  civState: CivilizationState,
+  economyPatch?: Partial<PlayerEconomy>
+): void {
+  mockCivilizationState = civState;
+  mockGridMap = GridMap.fromSnapshot(civState.grid);
+  if (economyPatch) {
+    mockState.economy = {
+      ...mockState.economy,
+      ...economyPatch,
+    };
+  }
+}

@@ -243,6 +243,7 @@ export const PopupShell: React.FC<PopupShellProps> = ({
             </div>
             <CivilizationScreen
               lifetimeFocusMinutes={lifetimeFocusMinutes}
+              session={session}
               onStateMutated={refreshState}
             />
           </div>
@@ -302,7 +303,7 @@ export const PopupShell: React.FC<PopupShellProps> = ({
         )}
 
         {effectiveTab === 'stats' && (
-          <StatsView todayStats={todayStats} buildings={civBuildings} />
+          <StatsView todayStats={todayStats} buildings={civBuildings} jobs={civState?.jobs} />
         )}
       </main>
 
@@ -464,7 +465,12 @@ export const App: React.FC<AppProps> = ({
           setCivBuildings(civRes.data.buildings);
           setCivBonusRate(
             aggregateCoinBonus(
-              extractCivilizationCoinBonuses(civRes.data.buildings, civRes.data.villagers)
+              extractCivilizationCoinBonuses(
+                civRes.data.buildings,
+                civRes.data.villagers,
+                civRes.data.jobs,
+                civRes.data.founderRole
+              )
             )
           );
         }

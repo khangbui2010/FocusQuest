@@ -17,3 +17,5 @@ export * from './villager.ts';
 export * from './villagerBuffs.ts';
 export * from './eraRules.ts';
 export * from './villagerWander.ts';
+export * from './jobs.ts';
+

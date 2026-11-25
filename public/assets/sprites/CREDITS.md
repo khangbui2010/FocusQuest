@@ -30,6 +30,9 @@
 - **Milestone Villager — Animated Villager Sprite Sheets (`public/assets/sprites/villagers/`):**
   - Character sprite sheets (`elder.png`, `crafter.png`, `woodworker.png`) are 64×64 pixel sheets (16×16 cell, 4 columns × 4 rows) procedurally generated from CC0 `kenney-tiny-dungeon/tilemap_packed.png`: tile `100` (tribal elder), tile `88` (crafter/settler), tile `86` (woodworker/craftsman).
   - Row 0: `idle` (2 frames, 600ms/frame), Row 1: `walk_down` (4 frames, 150ms/frame), Row 2: `walk_right` (4 frames, 150ms/frame), Row 3: `walk_left` (4 frames, 150ms/frame).
+- **Milestone 5E-1 — Construction Stages & Clock Tiles:**
+  - `public/assets/sprites/clock_tiles_16.png`: Project-original 48×16 pixel sheet (three 16×16 tiles: `0` = clock for active jobs, `1` = hourglass for waiting jobs, `2` = stopwatch icon).
+  - `src/ui/components/civilization/constructionSpriteData.ts`: Project-original 4-stage progressive blueprint/scaffolding pixel matrices derived from the Tiny Town Stone Age building palette for `stone_age_totem`, `stone_age_study_cave`, `stone_age_elder_hut`, `stone_age_foraging_post`, and `stone_age_food_cache`.
 
 ## Rule for adding new assets
 

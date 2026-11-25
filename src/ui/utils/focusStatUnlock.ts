@@ -6,12 +6,17 @@ import {
   BuildingDefinition,
   BuildingInstance,
 } from '../../core/civilization/buildingTypes.ts';
+import {
+  ConstructionJob,
+  isBuildingUnderConstruction,
+} from '../../core/civilization/jobs.ts';
 
 export const STREAK_ANALYSIS_STAT_ID = 'focus_metric_streak_analysis';
 
 export function hasFocusStatUnlock(
   buildings: readonly BuildingInstance[] | null | undefined,
-  statId: string
+  statId: string,
+  jobs?: readonly ConstructionJob[] | null
 ): boolean {
   if (!Array.isArray(buildings) || typeof statId !== 'string' || statId.length === 0) {
     return false;
@@ -19,6 +24,9 @@ export function hasFocusStatUnlock(
 
   return buildings.some((instance) => {
     if (!instance || typeof instance.definitionId !== 'string') {
+      return false;
+    }
+    if (isBuildingUnderConstruction(instance.id, jobs)) {
       return false;
     }
     const def = getBuildingDefinition(instance.definitionId);

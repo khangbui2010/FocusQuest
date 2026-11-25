@@ -13,6 +13,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { BuildingInstance } from '../../core/civilization/buildingTypes.ts';
+import { ConstructionJob } from '../../core/civilization/jobs.ts';
 import {
   aggregateDayStats,
   aggregateMonthStats,
@@ -52,6 +53,7 @@ import { StatsBarChart, StatsBarDatum } from './StatsBarChart.tsx';
 export interface StatsViewProps {
   todayStats: DailyStatRecord | null;
   buildings?: readonly BuildingInstance[];
+  jobs?: readonly ConstructionJob[];
   initialAllDailyStats?: Record<string, DailyStatRecord> | null;
   initialPeriod?: StatsPeriodMode;
   initialPeriodKey?: string;
@@ -61,6 +63,7 @@ export interface StatsViewProps {
 export const StatsView: React.FC<StatsViewProps> = ({
   todayStats,
   buildings,
+  jobs,
   initialAllDailyStats = null,
   initialPeriod = 'day',
   initialPeriodKey,
@@ -103,6 +106,9 @@ export const StatsView: React.FC<StatsViewProps> = ({
   const [fetchedBuildings, setFetchedBuildings] = useState<readonly BuildingInstance[]>(
     buildings ?? []
   );
+  const [fetchedJobs, setFetchedJobs] = useState<readonly ConstructionJob[]>(
+    jobs ?? []
+  );
   const [isLoading, setIsLoading] = useState<boolean>(initialAllDailyStats === null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -132,6 +138,7 @@ export const StatsView: React.FC<StatsViewProps> = ({
         const civRes = await getCivilizationStateClient();
         if (isMountedRef.current && civRes.success && civRes.data) {
           setFetchedBuildings(civRes.data.buildings);
+          setFetchedJobs(civRes.data.jobs ?? []);
         }
       }
     } catch {
@@ -169,7 +176,12 @@ export const StatsView: React.FC<StatsViewProps> = ({
   }, [allDailyStats, todayDateKey, todayStats]);
 
   const effectiveBuildings = buildings !== undefined ? buildings : fetchedBuildings;
-  const isStreakUnlocked = hasFocusStatUnlock(effectiveBuildings, STREAK_ANALYSIS_STAT_ID);
+  const effectiveJobs = jobs !== undefined ? jobs : fetchedJobs;
+  const isStreakUnlocked = hasFocusStatUnlock(
+    effectiveBuildings,
+    STREAK_ANALYSIS_STAT_ID,
+    effectiveJobs
+  );
   const unlockingBuildingDef = getUnlockingBuildingDefinition(STREAK_ANALYSIS_STAT_ID);
   const unlockingBuildingName = getLocalizedBuildingName(
     locale,

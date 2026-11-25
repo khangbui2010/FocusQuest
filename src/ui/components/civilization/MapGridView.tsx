@@ -9,14 +9,30 @@ import { GridCoordinate, PlacementFailureReason } from '../../../core/civilizati
 import { CHUNK_WIDTH, CHUNK_HEIGHT } from '../../../core/civilization/constants.ts';
 import { GridMap } from '../../../core/civilization/gridMap.ts';
 import { getBuildingDefinition } from '../../../core/civilization/buildingCatalog.ts';
-import { Villager } from '../../../core/civilization/villager.ts';
+import {
+  Villager,
+  getEffectiveVillagersForDisplay,
+} from '../../../core/civilization/villager.ts';
 import { VILLAGER_WANDER_TICK_MS } from '../../../core/civilization/villagerWander.ts';
+import {
+  ConstructionJob,
+  getPlaceJobForBuilding,
+  getUpgradeJobsForBuilding,
+  isChunkClearing,
+} from '../../../core/civilization/jobs.ts';
 import { renderBuildingIcon } from './BuildingCatalogPanel.tsx';
 import {
+  CLOCK_TILE_INDEX,
+  ClockTileIcon,
   PixelSprite,
+  SpriteSheetPack,
+  TileImage,
   VillagerSprite,
   getBuildingSprite,
+  getConstructionSprite,
 } from './spriteRegistry.ts';
+import { REUSED_TINY_TOWN_TILES } from './spriteData.ts';
+import { formatJobCountdown } from './jobProjection.ts';
 import { useVillagerWander } from './useVillagerWander.ts';
 import { TERRAIN_DECOR_SEED } from './terrainDecor.ts';
 import { TerrainBitmapCanvas } from './TerrainBitmapCanvas.tsx';
@@ -60,6 +76,8 @@ export interface MapGridViewProps {
   placementDef: BuildingDefinition | null;
   onPlaceBuilding: (pos: GridCoordinate) => void;
   onInspectBuilding: (inst: BuildingInstance) => void;
+  projectedJobs?: readonly ConstructionJob[];
+  onInspectClearingChunk?: (job: ConstructionJob) => void;
   isSubmitting?: boolean;
   isExpansionMode?: boolean;
   expansionFlowState?: ExpansionFlowState;
@@ -84,8 +102,45 @@ const ZOOM_STEP = 0.25;
 const WHEEL_ZOOM_STEP = 0.125;
 const DRAG_THRESHOLD_PX = 4;
 const EMPTY_VILLAGERS: readonly Villager[] = [];
+const EMPTY_JOBS: readonly ConstructionJob[] = [];
 
 const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
+
+export const CONSTRUCTION_TOOL_TILES = Object.freeze({
+  HAMMER_PACK: 'tiny-dungeon' as SpriteSheetPack,
+  HAMMER_TILE: 117,
+  AXE_PACK: 'tiny-town' as SpriteSheetPack,
+  AXE_TILE: REUSED_TINY_TOWN_TILES.WOODCUTTER_AXE, // 127
+  PICKAXE_PACK: 'tiny-town' as SpriteSheetPack,
+  PICKAXE_TILE: 115,
+});
+
+export interface ConstructionToolSpec {
+  readonly pack: SpriteSheetPack;
+  readonly tileIndex: number;
+}
+
+export function getConstructionToolSpec(
+  kind: 'place' | 'upgrade' | 'expand',
+  definitionId?: string
+): ConstructionToolSpec {
+  if (kind === 'expand') {
+    return {
+      pack: CONSTRUCTION_TOOL_TILES.AXE_PACK,
+      tileIndex: CONSTRUCTION_TOOL_TILES.AXE_TILE,
+    };
+  }
+  if (kind === 'place' && definitionId === 'stone_age_study_cave') {
+    return {
+      pack: CONSTRUCTION_TOOL_TILES.PICKAXE_PACK,
+      tileIndex: CONSTRUCTION_TOOL_TILES.PICKAXE_TILE,
+    };
+  }
+  return {
+    pack: CONSTRUCTION_TOOL_TILES.HAMMER_PACK,
+    tileIndex: CONSTRUCTION_TOOL_TILES.HAMMER_TILE,
+  };
+}
 
 export function snapZoomToIntegerPixels(rawZoom: number, minZoom = MIN_ZOOM): number {
   const clamped = Math.min(MAX_ZOOM, Math.max(minZoom, rawZoom));
@@ -196,6 +251,8 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
   placementDef,
   onPlaceBuilding,
   onInspectBuilding,
+  projectedJobs,
+  onInspectClearingChunk,
   isSubmitting = false,
   isExpansionMode = false,
   expansionFlowState,
@@ -208,6 +265,7 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
   onCameraReturnArrived,
 }) => {
   const { locale, t } = useTranslation();
+  const effectiveJobs = projectedJobs ?? civilizationState.jobs ?? EMPTY_JOBS;
 
   const effectiveFlowState: ExpansionFlowState =
     expansionFlowState ?? (isExpansionMode ? 'EXPANSION_SELECTING' : 'NORMAL');
@@ -223,8 +281,17 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
 
   const reducedMotion = prefersReducedMotion();
 
+  const displayVillagers = useMemo(
+    () =>
+      getEffectiveVillagersForDisplay(
+        civilizationState.villagers ?? EMPTY_VILLAGERS,
+        civilizationState.founderRole
+      ),
+    [civilizationState.villagers, civilizationState.founderRole]
+  );
+
   const villagerWanderStates = useVillagerWander({
-    villagers: civilizationState.villagers ?? EMPTY_VILLAGERS,
+    villagers: displayVillagers,
     buildings: civilizationState.buildings,
     gridMap,
     isPaused: isExpansionActive || cameraLocked,
@@ -535,8 +602,18 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
   }, [effectiveFlowState, selectedExpansionOrigin, renderBox.minX, renderBox.minY, mapWidthPx, mapHeightPx, zoom]);
 
   const availableExpansionSlots = useMemo(
-    () => (showCandidates ? gridMap.getAvailableExpansionSlots() : []),
-    [showCandidates, gridMap]
+    () =>
+      showCandidates
+        ? gridMap
+            .getAvailableExpansionSlots()
+            .filter((slot) => !isChunkClearing(slot, effectiveJobs))
+        : [],
+    [showCandidates, gridMap, effectiveJobs]
+  );
+
+  const clearingJobs = useMemo(
+    () => effectiveJobs.filter((job) => job.kind === 'expand' && Boolean(job.origin)),
+    [effectiveJobs]
   );
 
   const isCellUnlockedFn = useCallback(
@@ -877,10 +954,105 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
             );
           })}
 
+        {/* Clearing Chunks Layer (Milestone 5E-1) */}
+        {clearingJobs.map((job) => {
+          const origin = job.origin!;
+          const left = (origin.x - renderBox.minX) * CELL_SIZE;
+          const top = (origin.y - renderBox.minY) * CELL_SIZE;
+          const width = CHUNK_WIDTH * CELL_SIZE;
+          const height = CHUNK_HEIGHT * CELL_SIZE;
+          const isActive = job.status === 'ACTIVE';
+          const countdownText = formatJobCountdown(job.remainingSeconds);
+          const clearTool = getConstructionToolSpec('expand');
+          const animateTool = isActive && !reducedMotion;
+          const clearingDisabled =
+            isSubmitting || cameraLocked || Boolean(placementDef) || isExpansionActive;
+
+          return (
+            <button
+              key={job.id}
+              type="button"
+              data-clearing-chunk={`${origin.x},${origin.y}`}
+              data-clearing-status={job.status}
+              aria-label={t('civ.job.clearingAria', { x: origin.x, y: origin.y })}
+              disabled={clearingDisabled}
+              onMouseDown={(e) => {
+                hasMovedRef.current = false;
+                e.stopPropagation();
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (hasMovedRef.current || clearingDisabled) return;
+                onInspectClearingChunk?.(job);
+              }}
+              style={{ left, top, width, height }}
+              className="absolute z-[15] box-border rounded-sm border-2 border-dashed border-amber-300/90 bg-amber-950/35 hover:bg-amber-950/50 text-amber-50 flex flex-col items-center justify-center gap-1 transition-colors cursor-pointer disabled:cursor-default overflow-visible"
+            >
+              {/* Thin translucent cloth veil over clearing plot */}
+              <span
+                data-testid={`clearing-tarp-${origin.x}-${origin.y}`}
+                aria-hidden="true"
+                className="fq-construction-tarp absolute inset-0 pointer-events-none rounded-sm"
+              />
+              {/* Hovering Woodcutter Axe (Tiny Town 127) */}
+              <span
+                data-testid={`clearing-tool-${origin.x}-${origin.y}`}
+                data-tool-pack={clearTool.pack}
+                data-tool-tile={clearTool.tileIndex}
+                data-tool-animated={animateTool ? 'true' : 'false'}
+                aria-hidden="true"
+                className="relative z-[1] pointer-events-none drop-shadow-[0_1px_2px_rgba(15,23,42,0.85)]"
+              >
+                <span className={animateTool ? 'block fq-tool-strike' : 'block opacity-85'}>
+                  <TileImage
+                    pack={clearTool.pack}
+                    tileIndex={clearTool.tileIndex}
+                    size={16}
+                    className="block"
+                  />
+                </span>
+              </span>
+              <span
+                data-testid={`clearing-timer-${origin.x}-${origin.y}`}
+                className="relative z-[1] px-1.5 py-0.5 rounded bg-slate-950/85 border border-amber-400/65 inline-flex items-center gap-1 text-[10px] font-mono font-semibold tabular-nums leading-none shadow-xs"
+              >
+                <ClockTileIcon
+                  tileIndex={isActive ? CLOCK_TILE_INDEX.CLOCK : CLOCK_TILE_INDEX.HOURGLASS}
+                  size={12}
+                />
+                <span>{countdownText}</span>
+              </span>
+              <span
+                data-testid={`clearing-label-${origin.x}-${origin.y}`}
+                className="relative z-[1] px-1.5 py-[1px] rounded bg-slate-950/75 text-[9px] font-medium text-amber-200 leading-none"
+              >
+                {t('civ.job.clearingBadge')}
+              </span>
+              {!isActive && (
+                <span className="relative z-[1] px-1 py-[1px] rounded bg-slate-950/75 text-[8px] font-medium text-slate-200 leading-none">
+                  {t('civ.job.pendingShort')}
+                </span>
+              )}
+            </button>
+          );
+        })}
+
         {/* Placed Buildings (aligned to renderBox origin) */}
         {civilizationState.buildings.map((inst) => {
           const def = getBuildingDefinition(inst.definitionId);
-          const sprite = getBuildingSprite(inst.definitionId);
+          const baseSprite = getBuildingSprite(inst.definitionId);
+          const placeJob = getPlaceJobForBuilding(inst.id, effectiveJobs);
+          const upgradeJobs = getUpgradeJobsForBuilding(inst.id, effectiveJobs);
+          const nextUpgrade = upgradeJobs[0];
+          const constructionSprite = placeJob
+            ? getConstructionSprite(
+                inst.definitionId,
+                placeJob.remainingSeconds,
+                placeJob.totalSeconds
+              )
+            : null;
+          const sprite = constructionSprite ?? baseSprite;
+
           const widthCells = def?.footprint.width ?? 1;
           const heightCells = def?.footprint.height ?? 1;
           const left = (inst.position.x - renderBox.minX) * CELL_SIZE;
@@ -897,7 +1069,7 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
 
           const coinBonusEffect = def?.effects.find((e) => e.type === 'COIN_BONUS');
           const bonusPercent =
-            coinBonusEffect && coinBonusEffect.type === 'COIN_BONUS'
+            !placeJob && coinBonusEffect && coinBonusEffect.type === 'COIN_BONUS'
               ? formatRewardAmount(coinBonusEffect.rate * inst.level * 100)
               : null;
 
@@ -907,10 +1079,40 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
             def?.name ?? inst.definitionId
           );
 
+          const placeBadgeText = placeJob
+            ? formatJobCountdown(placeJob.remainingSeconds)
+            : '';
+
+          const upgradeBadgeText = nextUpgrade
+            ? t('civ.job.upgradeBadge', {
+                target: nextUpgrade.targetLevel ?? inst.level + 1,
+                time: formatJobCountdown(nextUpgrade.remainingSeconds),
+              })
+            : '';
+
+          const placeTool = placeJob
+            ? getConstructionToolSpec('place', inst.definitionId)
+            : null;
+          const animatePlaceTool = Boolean(
+            placeJob && placeJob.status === 'ACTIVE' && !reducedMotion
+          );
+          const isDiggingCave = Boolean(
+            placeJob && inst.definitionId === 'stone_age_study_cave'
+          );
+
+          const upgradeTool =
+            !placeJob && nextUpgrade ? getConstructionToolSpec('upgrade', inst.definitionId) : null;
+          const animateUpgradeTool = Boolean(
+            !placeJob && nextUpgrade && nextUpgrade.status === 'ACTIVE' && !reducedMotion
+          );
+
           return (
             <button
               key={inst.id}
               type="button"
+              data-building-id={inst.id}
+              data-building-construction={placeJob ? placeJob.status : undefined}
+              data-building-upgrade-job={nextUpgrade ? nextUpgrade.status : undefined}
               title={t('civ.map.buildingTooltip', {
                 name: localizedName,
                 level: inst.level,
@@ -928,22 +1130,112 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
               style={{ left, top, width, height }}
               className={
                 sprite
-                  ? 'absolute z-10 flex items-center justify-center rounded-xs transition-all hover:brightness-110 hover:ring-1 hover:ring-white/80 cursor-pointer overflow-visible'
-                  : `absolute z-10 border rounded-sm shadow-xs flex flex-col items-center justify-center p-0.5 transition-transform hover:brightness-105 cursor-pointer overflow-hidden ${categoryStyle}`
+                  ? `absolute z-10 flex items-center justify-center rounded-xs transition-all hover:brightness-110 hover:ring-1 hover:ring-white/80 cursor-pointer overflow-visible ${
+                      placeJob ? 'ring-1 ring-sky-400/75 bg-sky-950/15' : ''
+                    }`
+                  : `absolute z-10 border rounded-sm shadow-xs flex flex-col items-center justify-center p-0.5 transition-transform hover:brightness-105 cursor-pointer overflow-visible ${categoryStyle}`
               }
             >
               {sprite ? (
+                <PixelSprite
+                  sprite={sprite}
+                  width={width}
+                  height={height}
+                  className={`block w-full h-full pointer-events-none drop-shadow-[0_1px_1px_rgba(38,43,68,0.45)] ${
+                    placeJob ? 'opacity-95' : ''
+                  }`}
+                />
+              ) : (
+                renderBuildingIcon(def?.iconIdentifier ?? '', widthCells > 1 ? 'w-4 h-4' : 'w-3 h-3')
+              )}
+
+              {placeJob && placeTool ? (
                 <>
-                  <PixelSprite
-                    sprite={sprite}
-                    width={width}
-                    height={height}
-                    className="block w-full h-full pointer-events-none drop-shadow-[0_1px_1px_rgba(38,43,68,0.45)]"
+                  {/* Thin translucent cloth veil over blueprint */}
+                  <span
+                    data-testid={`building-tarp-${inst.id}`}
+                    aria-hidden="true"
+                    className="fq-construction-tarp absolute inset-0 pointer-events-none rounded-xs"
                   />
+                  {/* Hovering tool icon above blueprint */}
+                  <span
+                    data-testid={`building-tool-${inst.id}`}
+                    data-tool-pack={placeTool.pack}
+                    data-tool-tile={placeTool.tileIndex}
+                    data-tool-animated={animatePlaceTool ? 'true' : 'false'}
+                    aria-hidden="true"
+                    className="absolute -top-3.5 left-1/2 -translate-x-1/2 z-[12] pointer-events-none drop-shadow-[0_1px_2px_rgba(15,23,42,0.85)]"
+                  >
+                    <span className={animatePlaceTool ? 'block fq-tool-strike' : 'block opacity-85'}>
+                      <TileImage
+                        pack={placeTool.pack}
+                        tileIndex={placeTool.tileIndex}
+                        size={14}
+                        className="block"
+                      />
+                    </span>
+                  </span>
+                  {isDiggingCave && (
+                    <span
+                      data-testid={`building-digging-badge-${inst.id}`}
+                      className="absolute bottom-4 left-1/2 -translate-x-1/2 px-1 py-[1px] rounded bg-slate-950/85 border border-amber-300/70 text-[8px] font-semibold text-amber-100 leading-none whitespace-nowrap pointer-events-none shadow-xs"
+                    >
+                      {t('civ.job.diggingBadge')}
+                    </span>
+                  )}
+                  <span
+                    data-testid={`building-place-timer-${inst.id}`}
+                    className="absolute bottom-0.5 left-1/2 -translate-x-1/2 px-1 py-[1px] rounded bg-slate-950/85 border border-sky-400/70 text-[8px] font-mono font-semibold text-sky-100 leading-none tabular-nums whitespace-nowrap inline-flex items-center gap-0.5 pointer-events-none"
+                  >
+                    <ClockTileIcon
+                      tileIndex={
+                        placeJob.status === 'ACTIVE'
+                          ? CLOCK_TILE_INDEX.CLOCK
+                          : CLOCK_TILE_INDEX.HOURGLASS
+                      }
+                      size={10}
+                    />
+                    <span>{placeBadgeText}</span>
+                  </span>
+                </>
+              ) : (
+                <>
+                  {nextUpgrade && upgradeTool && (
+                    <>
+                      {/* Wooden scaffolding frame over existing building sprite during upgrade */}
+                      <span
+                        data-testid={`building-upgrade-scaffold-${inst.id}`}
+                        aria-hidden="true"
+                        className="fq-construction-scaffold absolute inset-0 pointer-events-none rounded-xs"
+                      />
+                      {/* Hovering Hammer (Tiny Dungeon 117) above upgrading building */}
+                      <span
+                        data-testid={`building-upgrade-tool-${inst.id}`}
+                        data-tool-pack={upgradeTool.pack}
+                        data-tool-tile={upgradeTool.tileIndex}
+                        data-tool-animated={animateUpgradeTool ? 'true' : 'false'}
+                        aria-hidden="true"
+                        className="absolute -top-3.5 left-1/2 -translate-x-1/2 z-[12] pointer-events-none drop-shadow-[0_1px_2px_rgba(15,23,42,0.85)]"
+                      >
+                        <span
+                          className={animateUpgradeTool ? 'block fq-tool-strike' : 'block opacity-85'}
+                        >
+                          <TileImage
+                            pack={upgradeTool.pack}
+                            tileIndex={upgradeTool.tileIndex}
+                            size={14}
+                            className="block"
+                          />
+                        </span>
+                      </span>
+                    </>
+                  )}
                   {(widthCells > 1 || inst.level > 1) && (
                     <span
                       data-building-level-badge={inst.level}
-                      className={`absolute bottom-0.5 right-0.5 px-1 py-[1px] rounded text-[8px] font-bold leading-none tabular-nums pointer-events-none ${
+                      className={`absolute ${
+                        nextUpgrade ? 'top-0.5 right-0.5' : 'bottom-0.5 right-0.5'
+                      } px-1 py-[1px] rounded text-[8px] font-bold leading-none tabular-nums pointer-events-none ${
                         inst.level > 1
                           ? 'bg-slate-950/85 text-amber-300 border border-amber-400/70'
                           : 'bg-slate-950/75 text-white'
@@ -953,17 +1245,20 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
                       {bonusPercent ? ` +${bonusPercent}%` : ''}
                     </span>
                   )}
-                </>
-              ) : (
-                <>
-                  {renderBuildingIcon(def?.iconIdentifier ?? '', widthCells > 1 ? 'w-4 h-4' : 'w-3 h-3')}
-                  {(widthCells > 1 || inst.level > 1) && (
+                  {nextUpgrade && (
                     <span
-                      data-building-level-badge={inst.level}
-                      className="mt-0.5 text-[8px] font-bold leading-none tabular-nums"
+                      data-testid={`building-upgrade-timer-${inst.id}`}
+                      className="absolute bottom-0.5 left-1/2 -translate-x-1/2 px-1 py-[1px] rounded bg-slate-950/90 border border-indigo-400/70 text-[8px] font-mono font-semibold text-indigo-100 leading-none tabular-nums whitespace-nowrap inline-flex items-center gap-0.5 pointer-events-none shadow-xs z-[13]"
                     >
-                      {t('civ.map.buildingLevelBadge', { level: inst.level })}
-                      {bonusPercent ? ` +${bonusPercent}%` : ''}
+                      <ClockTileIcon
+                        tileIndex={
+                          nextUpgrade.status === 'ACTIVE'
+                            ? CLOCK_TILE_INDEX.CLOCK
+                            : CLOCK_TILE_INDEX.HOURGLASS
+                        }
+                        size={10}
+                      />
+                      <span>{upgradeBadgeText}</span>
                     </span>
                   )}
                 </>

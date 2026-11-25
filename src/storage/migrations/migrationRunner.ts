@@ -6,8 +6,9 @@ import { v2_civilizationSchema } from './v2_civilizationSchema.ts';
 import { v3_questsSchema } from './v3_questsSchema.ts';
 import { v4_villagersSchema } from './v4_villagersSchema.ts';
 import { v5_questPoolSchema } from './v5_questPoolSchema.ts';
+import { v6_constructionJobsSchema } from './v6_constructionJobsSchema.ts';
 
-export const CURRENT_SCHEMA_VERSION = 5;
+export const CURRENT_SCHEMA_VERSION = 6;
 
 export const ALL_MIGRATIONS: Migration[] = [
   v1_initialSchema,
@@ -15,6 +16,7 @@ export const ALL_MIGRATIONS: Migration[] = [
   v3_questsSchema,
   v4_villagersSchema,
   v5_questPoolSchema,
+  v6_constructionJobsSchema,
 ];
 
 export class MigrationRunner {

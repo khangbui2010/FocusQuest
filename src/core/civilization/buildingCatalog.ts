@@ -59,7 +59,7 @@ export const STONE_AGE_BUILDING_DEFINITIONS: readonly BuildingDefinition[] = Obj
   // --- Category: FOCUS_SUPPORT ---
   {
     id: 'stone_age_study_cave',
-    name: 'Meditation Cave',
+    name: 'Rock Shelter',
     description: 'A quiet shelter shielded from wind and distractions, fostering uninterrupted study.',
     era: 'STONE_AGE',
     category: 'FOCUS_SUPPORT',

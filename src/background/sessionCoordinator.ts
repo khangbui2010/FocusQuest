@@ -27,6 +27,7 @@ import { TranslationKey } from '../i18n/types.ts';
 import { toQuestOutcomeDelta } from '../core/quests/questEngine.ts';
 import { QuestOutcomeDelta } from '../types/quests.ts';
 import { AppError } from '../types/errors.ts';
+import { CivilizationState } from '../core/civilization/civilizationState.ts';
 
 export const ALARM_NAMES = {
   COUNTDOWN_FINISH: 'FQ_ALARM_COUNTDOWN_FINISH',
@@ -121,7 +122,8 @@ export class SessionCoordinator {
     private onSessionSyncHook?: (
       session: SessionSnapshot | null,
       reason?: string
-    ) => Promise<void> | void
+    ) => Promise<void> | void,
+    private onCivilizationAdvancedHook?: (civState: CivilizationState) => Promise<void> | void
   ) {}
 
   /** Additive coin bonus factor applied exactly once per reward calculation. */
@@ -244,6 +246,19 @@ export class SessionCoordinator {
       await this.onSessionSyncHook(session, reason);
     } catch (err) {
       console.warn('[SessionCoordinator] Isolated onSessionSyncHook error:', err);
+    }
+  }
+
+  private async triggerCivilizationAdvancedHookInternal(
+    civState?: CivilizationState
+  ): Promise<void> {
+    if (!civState || !this.onCivilizationAdvancedHook) {
+      return;
+    }
+    try {
+      await this.onCivilizationAdvancedHook(civState);
+    } catch (err) {
+      console.warn('[SessionCoordinator] Isolated onCivilizationAdvancedHook error:', err);
     }
   }
 
@@ -989,8 +1004,8 @@ export class SessionCoordinator {
         const completedDateKey = this.getTodayDateKey(now);
         const questOutcomeDelta = this.buildQuestOutcomeDeltaSafe(updated, completedDateKey);
 
-        // Atomically commit session, economy, daily stats, and quests in one storage write
-        await this.storage.commitSessionOutcomeInternal({
+        // Atomically commit session, economy, daily stats, quests, and civilization jobs in one storage write
+        const commitResult = await this.storage.commitSessionOutcomeInternal({
           session: updated,
           economyDelta: {
             coins: finalCoins,
@@ -1008,7 +1023,11 @@ export class SessionCoordinator {
                 }
               : undefined,
           questOutcomeDelta,
+          advanceCivilizationJobsSeconds: questOutcomeDelta
+            ? questOutcomeDelta.completedFocusMinutes * 60
+            : 0,
         });
+        await this.triggerCivilizationAdvancedHookInternal(commitResult.civilizationState);
 
         await this.alarms.clearAll();
         await this.blockingCoordinator.syncBlocking(false, null);
@@ -1080,8 +1099,8 @@ export class SessionCoordinator {
       const completedDateKey = this.getTodayDateKey(now);
       const questOutcomeDelta = this.buildQuestOutcomeDeltaSafe(updated, completedDateKey);
 
-      // Atomically commit session, economy, daily stats, and quests in one storage write
-      await this.storage.commitSessionOutcomeInternal({
+      // Atomically commit session, economy, daily stats, quests, and civilization jobs in one storage write
+      const commitResult = await this.storage.commitSessionOutcomeInternal({
         session: updated,
         economyDelta: {
           coins: rewardResult.coinsEarned,
@@ -1099,7 +1118,11 @@ export class SessionCoordinator {
               }
             : undefined,
         questOutcomeDelta,
+        advanceCivilizationJobsSeconds: questOutcomeDelta
+          ? questOutcomeDelta.completedFocusMinutes * 60
+          : 0,
       });
+      await this.triggerCivilizationAdvancedHookInternal(commitResult.civilizationState);
 
       await this.alarms.clearAll();
       await this.blockingCoordinator.syncBlocking(false, null);
@@ -1187,8 +1210,8 @@ export class SessionCoordinator {
       const completedDateKey = this.getTodayDateKey(now);
       const questOutcomeDelta = this.buildQuestOutcomeDeltaSafe(updated, completedDateKey);
 
-      // Atomically commit session, economy, daily stats, and quests in one storage write
-      await this.storage.commitSessionOutcomeInternal({
+      // Atomically commit session, economy, daily stats, quests, and civilization jobs in one storage write
+      const commitResult = await this.storage.commitSessionOutcomeInternal({
         session: updated,
         economyDelta: {
           coins: rewardResult.coinsEarned,
@@ -1203,7 +1226,11 @@ export class SessionCoordinator {
           xp: rewardResult.xpEarned,
         },
         questOutcomeDelta,
+        advanceCivilizationJobsSeconds: questOutcomeDelta
+          ? questOutcomeDelta.completedFocusMinutes * 60
+          : 0,
       });
+      await this.triggerCivilizationAdvancedHookInternal(commitResult.civilizationState);
 
       // Send Chrome Notification strictly once per session (error-isolated)
       await this.notifySessionCompletedInternal({
@@ -1439,7 +1466,7 @@ export class SessionCoordinator {
             const questOutcomeDelta = this.buildQuestOutcomeDeltaSafe(updated, completedDateKey);
 
             // Settlement occurs ONCE at 100% mission completion
-            await this.storage.commitSessionOutcomeInternal({
+            const commitResult = await this.storage.commitSessionOutcomeInternal({
               session: updated,
               economyDelta: {
                 coins: totalCoins,
@@ -1454,7 +1481,11 @@ export class SessionCoordinator {
                 xp: totalXp,
               },
               questOutcomeDelta,
+              advanceCivilizationJobsSeconds: questOutcomeDelta
+                ? questOutcomeDelta.completedFocusMinutes * 60
+                : 0,
             });
+            await this.triggerCivilizationAdvancedHookInternal(commitResult.civilizationState);
             console.log(`[POMODORO] Focus completion persisted: completedCount=${newCompletedCount}, totalFocusMins=${plannedFocusMinutes}`);
 
             await this.alarms.clearAll();

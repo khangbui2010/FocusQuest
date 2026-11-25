@@ -26,6 +26,8 @@ import {
   UpgradeBuildingResponseData,
 } from '../../src/types/messages.ts';
 
+import { createInitialCivilizationState } from '../../src/core/civilization/civilizationState.ts';
+
 const EPSILON = 1e-9;
 
 function createV5Harness() {
@@ -42,7 +44,12 @@ function createV5Harness() {
     new MockNotificationsAdapter(),
     new MockBadgeAdapter(),
     blockingCoordinator,
-    () => civCoordinator.getActiveCoinBonuses()
+    () => civCoordinator.getActiveCoinBonuses(),
+    undefined,
+    undefined,
+    (civState) => {
+      civCoordinator.refreshCachedBonuses(civState);
+    }
   );
   const handler = new MessageHandler(
     sessionCoordinator,
@@ -53,7 +60,13 @@ function createV5Harness() {
     questCoordinator
   );
 
-  async function seed(coins = 10000, xp = 15000, level = 12, focusMinutes = 600) {
+  async function seed(
+    coins = 10000,
+    xp = 15000,
+    level = 12,
+    focusMinutes = 600,
+    founderRole: 'elder' | 'crafter' | 'woodworker' = 'woodworker'
+  ) {
     await storage.setEconomy({ focusCoins: coins, totalXP: xp, level });
     const today = formatLocalDateKey(Date.now());
     await storage.setDailyStats({
@@ -67,29 +80,51 @@ function createV5Harness() {
       },
     });
     await storage.setQuests(createInitialQuestState(Date.now()));
+    const initCiv = createInitialCivilizationState();
+    await storage.setCivilizationState({
+      ...initCiv,
+      founderRole,
+    });
   }
 
-  return { adapter, storage, profileManager, civCoordinator, sessionCoordinator, handler, seed };
+  async function runFocusMinutes(profileId: string, minutes: number) {
+    await sessionCoordinator.startSession('COUNTDOWN', minutes, profileId);
+    await sessionCoordinator.completeCountdown();
+  }
+
+  return {
+    adapter,
+    storage,
+    profileManager,
+    civCoordinator,
+    sessionCoordinator,
+    handler,
+    seed,
+    runFocusMinutes,
+  };
 }
 
 test('VillagerBuffs Integration: SW restart rehydration, Countdown/Stopwatch Coin scaling, and zero XP/Stats/Quest scaling', async () => {
   const h = createV5Harness();
-  await h.seed(5000, 15000, 12, 600);
+  await h.seed(5000, 15000, 12, 600, 'woodworker');
   const profile = await h.profileManager.createProfile('V5 Buff Session', []);
 
-  // Place Meditation Cave (12) and upgrade to Lv.2 (21) -> capacity 4
+  // Place Cave (12, 60m build) -> finish 60m -> upgrade to Lv.2 (5m build) -> finish 5m -> capacity 4
   const caveRes = await h.handler.handleMessage({
     action: 'PLACE_BUILDING',
     payload: { buildingDefinitionId: 'stone_age_study_cave', position: { x: 0, y: 0 } },
   });
   assert.strictEqual(caveRes.success, true);
   const caveId = (caveRes.data as PlaceBuildingResponseData).building.id;
+  await h.runFocusMinutes(profile.id, 60);
+
   await h.handler.handleMessage({
     action: 'UPGRADE_BUILDING',
     payload: { buildingId: caveId, expectedLevel: 1 },
   });
+  await h.runFocusMinutes(profile.id, 5);
 
-  // Recruit elder + crafter + woodworker -> Complete Tribe (+10%) + 1 Crafter (+5%) = +15%
+  // Recruit elder + crafter + woodworker (with woodworker founder) -> Complete Tribe (+10%) + 1 Crafter (+5%) = +15%
   await h.handler.handleMessage({ action: 'RECRUIT_VILLAGER', payload: { role: 'elder' } });
   await h.handler.handleMessage({ action: 'RECRUIT_VILLAGER', payload: { role: 'crafter' } });
   await h.handler.handleMessage({ action: 'RECRUIT_VILLAGER', payload: { role: 'woodworker' } });
@@ -132,35 +167,51 @@ test('VillagerBuffs Integration: SW restart rehydration, Countdown/Stopwatch Coi
 
 test('VillagerBuffs Integration: Elder discounts ONLY building upgrades (never recruit/place) & Woodworker discounts land expansion (level gate unchanged)', async () => {
   const h = createV5Harness();
-  await h.seed(5000, 15000, 12, 600);
+  await h.seed(5000, 15000, 12, 600, 'woodworker');
+  const profile = await h.profileManager.createProfile('V5 Discount Session', []);
 
-  // Place Cave (12) and upgrade Lv.1 -> Lv.4 so capacity = 8
+  // Place Cave (12, 60m build) + finish 60m
   const caveRes = await h.handler.handleMessage({
     action: 'PLACE_BUILDING',
     payload: { buildingDefinitionId: 'stone_age_study_cave', position: { x: 0, y: 0 } },
   });
   const caveId = (caveRes.data as PlaceBuildingResponseData).building.id;
+  await h.runFocusMinutes(profile.id, 60);
+
+  // Recruit 1 woodworker (34) + 1 elder (46) first so total crew = 3 >= 2 for Cave L3->L4
+  const expectedFirstTwo = [34, 46];
+  for (const [role, expCost] of [
+    ['woodworker', expectedFirstTwo[0]],
+    ['elder', expectedFirstTwo[1]],
+  ] as const) {
+    const rec = await h.handler.handleMessage({ action: 'RECRUIT_VILLAGER', payload: { role } });
+    assert.strictEqual(rec.success, true);
+    assert.strictEqual((rec.data as RecruitVillagerResponseData).cost, expCost);
+  }
+
+  // Upgrade Cave Lv.1 -> Lv.4 (5+10+15 = 30m Focus) so capacity = 8
   for (let lv = 1; lv < 4; lv += 1) {
-    await h.handler.handleMessage({
+    const upCave = await h.handler.handleMessage({
       action: 'UPGRADE_BUILDING',
       payload: { buildingId: caveId, expectedLevel: lv },
     });
+    assert.strictEqual(upCave.success, true);
   }
+  await h.runFocusMinutes(profile.id, 30);
 
-  // Recruit 5 elders (-30% upgrade discount cap) and 2 woodworkers (-10% expansion discount)
-  const expectedRecruitCosts = [25, 34, 46, 62, 83, 112, 151];
-  const roles = ['elder', 'elder', 'elder', 'elder', 'elder', 'woodworker', 'woodworker'] as const;
-  for (let i = 0; i < roles.length; i += 1) {
+  // Recruit remaining 4 elders -> total 5 elders (-30% upgrade cap) + 2 woodworkers (-10% expand)
+  const remainingCosts = [62, 83, 112, 151];
+  for (let i = 0; i < remainingCosts.length; i += 1) {
     const rec = await h.handler.handleMessage({
       action: 'RECRUIT_VILLAGER',
-      payload: { role: roles[i] },
+      payload: { role: 'elder' },
     });
     assert.strictEqual(rec.success, true);
     // Recruit cost is NOT discounted by elders or woodworkers
-    assert.strictEqual((rec.data as RecruitVillagerResponseData).cost, expectedRecruitCosts[i]);
+    assert.strictEqual((rec.data as RecruitVillagerResponseData).cost, remainingCosts[i]);
   }
 
-  // Place Foraging Post: NOT discounted (exact baseCost = 15)
+  // Place Foraging Post: NOT discounted (exact baseCost = 15, 60m build)
   const econBeforePlace = (await h.storage.getEconomy()).focusCoins;
   const placeForage = await h.handler.handleMessage({
     action: 'PLACE_BUILDING',
@@ -169,6 +220,7 @@ test('VillagerBuffs Integration: Elder discounts ONLY building upgrades (never r
   assert.strictEqual(placeForage.success, true);
   assert.strictEqual((await h.storage.getEconomy()).focusCoins, econBeforePlace - 15);
   const forageId = (placeForage.data as PlaceBuildingResponseData).building.id;
+  await h.runFocusMinutes(profile.id, 60);
 
   // Upgrade Foraging Post L1->L2: baseCost 24 with -30% Elder discount = round(24 * 0.7) = 17 Coins
   const upForage = await h.handler.handleMessage({
@@ -178,13 +230,13 @@ test('VillagerBuffs Integration: Elder discounts ONLY building upgrades (never r
   assert.strictEqual(upForage.success, true);
   assert.strictEqual((upForage.data as UpgradeBuildingResponseData).cost, 17);
 
-  // Expand land k=1: baseCost 60 with -10% Woodworker discount = round(60 * 0.9) = 54 Coins
+  // Expand land k=1: baseCost 30 with -10% Woodworker discount = round(30 * 0.9) = 27 Coins (60m clearing)
   const exp1 = await h.handler.handleMessage({
     action: 'EXPAND_LAND',
     payload: { origin: { x: 8, y: 0 } },
   });
   assert.strictEqual(exp1.success, true);
-  assert.strictEqual((exp1.data as ExpandLandResponseData).cost, 54);
+  assert.strictEqual((exp1.data as ExpandLandResponseData).cost, 27);
 
   // Level gate remains k+2 even with Woodworker discount (set level to 3 for k=2 which requires Lv.4)
   const currCoins = (await h.storage.getEconomy()).focusCoins;
@@ -199,16 +251,18 @@ test('VillagerBuffs Integration: Elder discounts ONLY building upgrades (never r
 
 test('VillagerBuffs Integration: Concurrent Promise.all mutations serialize cleanly & partial failure rolls back cache and state', async () => {
   const h = createV5Harness();
-  await h.seed(5000, 15000, 12, 600);
+  await h.seed(5000, 15000, 12, 600, 'elder');
+  const profile = await h.profileManager.createProfile('V5 Concurrent Session', []);
 
-  // Setup Cave L2 + 2 elders (-12% upgrade) + 1 woodworker (-5% expand)
+  // Setup Cave L2 (60m + 5m) + 1 elder + 1 woodworker (+ 1 elder founder = 2 elders -12%, 1 woodworker -5%, 3 crew)
   const caveRes = await h.handler.handleMessage({
     action: 'PLACE_BUILDING',
     payload: { buildingDefinitionId: 'stone_age_study_cave', position: { x: 0, y: 0 } },
   });
   const caveId = (caveRes.data as PlaceBuildingResponseData).building.id;
+  await h.runFocusMinutes(profile.id, 60);
   await h.handler.handleMessage({ action: 'UPGRADE_BUILDING', payload: { buildingId: caveId, expectedLevel: 1 } });
-  await h.handler.handleMessage({ action: 'RECRUIT_VILLAGER', payload: { role: 'elder' } });
+  await h.runFocusMinutes(profile.id, 5);
   await h.handler.handleMessage({ action: 'RECRUIT_VILLAGER', payload: { role: 'elder' } });
   await h.handler.handleMessage({ action: 'RECRUIT_VILLAGER', payload: { role: 'woodworker' } });
 
@@ -217,9 +271,12 @@ test('VillagerBuffs Integration: Concurrent Promise.all mutations serialize clea
     payload: { buildingDefinitionId: 'stone_age_foraging_post', position: { x: 4, y: 0 } },
   });
   const forageId = (fRes.data as PlaceBuildingResponseData).building.id;
+  await h.runFocusMinutes(profile.id, 60);
 
   const coinsBefore = (await h.storage.getEconomy()).focusCoins;
-  // Concurrently run: upgrade Foraging Post (round(24*0.88)=21), expand East (round(60*0.95)=57), recruit Crafter (cost at count=3 is 62)
+  // Concurrently run: upgrade Foraging Post (round(24*0.88)=21, 5m, 1 crew),
+  // expand East (round(30*0.95)=29, 60m, 2 crew), recruit Crafter (cost at total=3 is 62).
+  // Total crew = 3 (1+2 run concurrently!), then recruit brings crew to 4.
   const [upR, expR, recR] = await Promise.all([
     h.handler.handleMessage({ action: 'UPGRADE_BUILDING', payload: { buildingId: forageId, expectedLevel: 1 } }),
     h.handler.handleMessage({ action: 'EXPAND_LAND', payload: { origin: { x: 8, y: 0 } } }),
@@ -230,9 +287,14 @@ test('VillagerBuffs Integration: Concurrent Promise.all mutations serialize clea
   assert.strictEqual(expR.success, true);
   assert.strictEqual(recR.success, true);
 
-  // Coins must match exact deduction 21 + 57 + 62 = 140
+  // Coins must match exact deduction 21 + 29 + 62 = 112
+  const coinsAfterQueued = (await h.storage.getEconomy()).focusCoins;
+  assert.strictEqual(coinsAfterQueued, coinsBefore - (21 + 29 + 62));
+
+  // Complete 60m Focus -> both 5m upgrade & 60m expand complete
+  await h.runFocusMinutes(profile.id, 60);
   const coinsAfter = (await h.storage.getEconomy()).focusCoins;
-  assert.strictEqual(coinsAfter, coinsBefore - (21 + 57 + 62));
+
   // Complete Tribe (+10%) + 1 Crafter (+5%) + Lv.2 Foraging Post (+4%) = +19%
   assert.ok(Math.abs(aggregateCoinBonus(h.civCoordinator.getActiveCoinBonuses()) - 0.19) < EPSILON);
 

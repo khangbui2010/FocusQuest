@@ -14,7 +14,10 @@ import { SessionCoordinator } from '../../src/background/sessionCoordinator.ts';
 import { CivilizationCoordinator } from '../../src/background/civilizationCoordinator.ts';
 import { MessageHandler } from '../../src/background/messageHandler.ts';
 import { GridMap } from '../../src/core/civilization/gridMap.ts';
-import { CivilizationState } from '../../src/core/civilization/civilizationState.ts';
+import {
+  CivilizationState,
+  createInitialCivilizationState,
+} from '../../src/core/civilization/civilizationState.ts';
 import { STORAGE_KEYS } from '../../src/storage/storageKeys.ts';
 
 const EPSILON = 1e-9;
@@ -38,7 +41,12 @@ function createHarness(initialCoins = 500, initialLevel = 3, initialMinutes = 30
     notifications,
     badge,
     blockingCoordinator,
-    () => civilizationCoordinator.getActiveCoinBonuses()
+    () => civilizationCoordinator.getActiveCoinBonuses(),
+    undefined,
+    undefined,
+    (civState) => {
+      civilizationCoordinator.refreshCachedBonuses(civState);
+    }
   );
 
   const handler = new MessageHandler(
@@ -48,7 +56,12 @@ function createHarness(initialCoins = 500, initialLevel = 3, initialMinutes = 30
     civilizationCoordinator
   );
 
-  const seedPrerequisites = async (coins = initialCoins, level = initialLevel, mins = initialMinutes) => {
+  const seedPrerequisites = async (
+    coins = initialCoins,
+    level = initialLevel,
+    mins = initialMinutes,
+    seedCrew = true
+  ) => {
     const minXpForLevel = ((Math.max(1, level) - 1) * Math.max(1, level) * 100) / 2;
     await storage.setEconomy({
       focusCoins: coins,
@@ -66,6 +79,26 @@ function createHarness(initialCoins = 500, initialLevel = 3, initialMinutes = 30
         xpEarned: 200,
       },
     });
+    if (seedCrew) {
+      const initCiv = createInitialCivilizationState();
+      const gm = GridMap.fromSnapshot(initCiv.grid);
+      gm.placeBuilding('cave_seed', { x: 5, y: 0 }, { width: 3, height: 3 });
+      await storage.setCivilizationState({
+        ...initCiv,
+        grid: gm.toSnapshot(),
+        buildings: [
+          {
+            id: 'cave_seed',
+            definitionId: 'stone_age_study_cave',
+            position: { x: 5, y: 0 },
+            level: 1,
+            placedAt: 1,
+          },
+        ],
+        villagers: [{ id: 'v_seed', role: 'woodworker', recruitedAt: 1 }],
+        founderRole: 'elder',
+      });
+    }
   };
 
   return {
@@ -84,7 +117,7 @@ function createHarness(initialCoins = 500, initialLevel = 3, initialMinutes = 30
 // -----------------------------------------------------------------------------
 test('Test A: Concurrent placement at non-overlapping positions preserves both buildings without lost updates', async () => {
   const h = createHarness(200, 3, 300);
-  await h.seedPrerequisites(200, 3, 300);
+  await h.seedPrerequisites(200, 3, 300, false);
 
   // Send two placement requests concurrently
   // Campfire costs 4 coins each.
@@ -166,9 +199,9 @@ test('Test B: Concurrent purchase with insufficient combined balance serializes 
   const economy = await h.storage.getEconomy();
   assert.strictEqual(economy.focusCoins, 5);
 
-  // Exactly 1 building exists
+  // 1 Foraging Post added + seeded Cave = 2 buildings
   const civState = await h.storage.getCivilizationState();
-  assert.strictEqual(civState.buildings.length, 1);
+  assert.strictEqual(civState.buildings.length, 2);
 });
 
 // -----------------------------------------------------------------------------
@@ -176,7 +209,7 @@ test('Test B: Concurrent purchase with insufficient combined balance serializes 
 // -----------------------------------------------------------------------------
 test('Test C: Concurrent placement and removal preserves valid serial execution and eliminates orphaned cells', async () => {
   const h = createHarness(300, 3, 300);
-  await h.seedPrerequisites(300, 3, 300);
+  await h.seedPrerequisites(300, 3, 300, false);
 
   // Place initial building A at (0, 0)
   const placeA = await h.handler.handleMessage({
@@ -226,8 +259,15 @@ test('Test C: Concurrent placement and removal preserves valid serial execution 
 test('Test D: Concurrent building placement and land expansion preserves both mutations and accurate Coins balance', async () => {
   const h = createHarness(300, 3, 300);
   await h.seedPrerequisites(300, 3, 300);
+  // 1 woodworker gives -5% expand discount -> use elder + elder? Actually seedPrerequisites has 1 woodworker + 1 elder (-5%: round(60*0.95) = 57)
+  // Override villager role to elder so exact baseCost 30 applies cleanly
+  await h.storage.updateCivilizationState((c) => ({
+    ...c,
+    villagers: [{ id: 'v_seed', role: 'elder', recruitedAt: 1 }],
+  }));
+  const profile = await h.profileManager.createProfile('Concurrent D', []);
 
-  // Dispatch PLACE_BUILDING (4 Coins) and EXPAND_LAND (k=1 -> 60 Coins) concurrently
+  // Dispatch PLACE_BUILDING (4 Coins) and EXPAND_LAND (k=1 -> 30 Coins, 60m job) concurrently
   const [resPlace, resExpand] = await Promise.all([
     h.handler.handleMessage({
       action: 'PLACE_BUILDING',
@@ -245,21 +285,27 @@ test('Test D: Concurrent building placement and land expansion preserves both mu
   assert.strictEqual(resPlace.success, true, `Place failed: ${resPlace.error}`);
   assert.strictEqual(resExpand.success, true, `Expand failed: ${resExpand.error}`);
 
-  // Verify CivilizationState contains BOTH changes:
-  // 1. 5 chunks total (4 initial + 1 new east chunk)
-  // 2. 1 building instance at (2, 2)
+  // Coins deducted accurately for both: 300 - 4 - 30 = 266
+  const finalEcon = await h.storage.getEconomy();
+  assert.strictEqual(finalEcon.focusCoins, 266);
+
+  const midCiv = await h.storage.getCivilizationState();
+  assert.strictEqual(midCiv.grid.chunks.length, 4, 'Chunk remains locked while clearing');
+  assert.strictEqual(midCiv.jobs?.length, 1);
+
+  // Finish 60m clearing session -> 5 chunks unlocked + Campfire & Cave preserved
+  await h.sessionCoordinator.startSession('COUNTDOWN', 60, profile.id);
+  await h.sessionCoordinator.completeCountdown();
+
   const civState = await h.storage.getCivilizationState();
-  assert.strictEqual(civState.grid.chunks.length, 5, 'Expanded chunk must be preserved');
-  assert.strictEqual(civState.buildings.length, 1, 'Placed building must be preserved');
+  assert.strictEqual(civState.grid.chunks.length, 5, 'Expanded chunk must be unlocked after Focus');
+  assert.strictEqual(civState.buildings.length, 2, 'Placed Campfire + Cave must be preserved');
 
   const gridMap = GridMap.fromSnapshot(civState.grid);
   assert.strictEqual(gridMap.getUnlockedCellCount(), 80);
-  assert.strictEqual(gridMap.getOccupiedCellCount(), 1);
-  assert.strictEqual(gridMap.getOccupyingBuilding(2, 2), civState.buildings[0].id);
-
-  // Coins deducted accurately for both: 300 - 4 - 60 = 236
-  const finalEcon = await h.storage.getEconomy();
-  assert.strictEqual(finalEcon.focusCoins, 236);
+  const campfire = civState.buildings.find((b) => b.definitionId === 'stone_age_campfire');
+  assert.ok(campfire);
+  assert.strictEqual(gridMap.getOccupyingBuilding(2, 2), campfire.id);
 });
 
 // -----------------------------------------------------------------------------
@@ -268,8 +314,13 @@ test('Test D: Concurrent building placement and land expansion preserves both mu
 test('Test E: Concurrent land expansion at distinct origins serializes progressive pricing cleanly', async () => {
   const h = createHarness(500, 4, 300);
   await h.seedPrerequisites(500, 4, 300);
+  await h.storage.updateCivilizationState((c) => ({
+    ...c,
+    villagers: [{ id: 'v_seed', role: 'elder', recruitedAt: 1 }],
+  }));
+  const profile = await h.profileManager.createProfile('Concurrent E', []);
 
-  // Concurrently expand (0, -4) North and (0, 8) South (k=1 costs 60 Lv.3, k=2 costs 75 Lv.4)
+  // Concurrently expand (0, -4) North and (0, 8) South (k=1 costs 30 Lv.3, k=2 costs 40 Lv.4)
   const [resNorth, resSouth] = await Promise.all([
     h.handler.handleMessage({
       action: 'EXPAND_LAND',
@@ -283,6 +334,14 @@ test('Test E: Concurrent land expansion at distinct origins serializes progressi
 
   assert.strictEqual(resNorth.success, true, `North expand failed: ${resNorth.error}`);
   assert.strictEqual(resSouth.success, true, `South expand failed: ${resSouth.error}`);
+
+  // Coins deducted sequentially under mutex: 500 - (30 + 40) = 430
+  const finalEcon = await h.storage.getEconomy();
+  assert.strictEqual(finalEcon.focusCoins, 430);
+
+  // Two 60m jobs queued (1 ACTIVE, 1 PENDING with 2 crew) -> 120m Focus completes both
+  await h.sessionCoordinator.startSession('COUNTDOWN', 120, profile.id);
+  await h.sessionCoordinator.completeCountdown();
 
   // Total chunks should be 4 + 2 = 6
   const civState = await h.storage.getCivilizationState();
@@ -299,10 +358,6 @@ test('Test E: Concurrent land expansion at distinct origins serializes progressi
   const box = gridMap.getBoundingBox();
   assert.strictEqual(box.minY, -4, 'North expansion should unlock y=-4');
   assert.strictEqual(box.maxY, 11, 'South expansion should unlock up to y=11');
-
-  // Coins deducted sequentially under mutex: 500 - (60 + 75) = 365
-  const finalEcon = await h.storage.getEconomy();
-  assert.strictEqual(finalEcon.focusCoins, 365);
 });
 
 // -----------------------------------------------------------------------------
@@ -343,9 +398,9 @@ test('Test F: Storage adapter failure rolls back state and does not poison CoinB
   const economy = await h.storage.getEconomy();
   assert.strictEqual(economy.focusCoins, 200, 'Coins must not be deducted on failed commit');
 
-  // 2. CivilizationState must have 0 buildings
+  // 2. CivilizationState still has only seeded Cave (no new building persisted)
   const civState = await h.storage.getCivilizationState();
-  assert.strictEqual(civState.buildings.length, 0, 'No building must be persisted on failure');
+  assert.strictEqual(civState.buildings.length, 1, 'No new building must be persisted on failure');
 
   // 3. CoinBonus cache must remain completely empty (not poisoned by uncommitted transaction)
   const activeBonuses = h.civilizationCoordinator.getActiveCoinBonuses();
@@ -357,7 +412,7 @@ test('Test F: Storage adapter failure rolls back state and does not poison CoinB
 // -----------------------------------------------------------------------------
 test('Test G: Concurrent placement on the exact same coordinate rejects collision and deducts coins once', async () => {
   const h = createHarness(200, 3, 300);
-  await h.seedPrerequisites(200, 3, 300);
+  await h.seedPrerequisites(200, 3, 300, false);
 
   // Two concurrent requests to place a building at identical coordinate (4, 4)
   const [res1, res2] = await Promise.all([
@@ -393,17 +448,17 @@ test('Test G: Concurrent placement on the exact same coordinate rejects collisio
 });
 
 // -----------------------------------------------------------------------------
-// Test H — CoinBonus live consistency during in-progress Focus Session
+// Test H — CoinBonus updates immediately once Focus session finishes construction
 // -----------------------------------------------------------------------------
-test('Test H: CoinBonus cache updates immediately reflect on active focus session completion', async () => {
+test('Test H: CoinBonus cache updates immediately on construction job completion and reflects on next session', async () => {
   const h = createHarness(300, 3, 300);
   await h.seedPrerequisites(300, 3, 300);
   const profile = await h.profileManager.createProfile('Live Bonus Test', []);
 
-  // 1. Start a 25-minute Countdown session while 0 buildings exist
-  await h.sessionCoordinator.startSession('COUNTDOWN', 25, profile.id);
+  // 1. Start a 35-minute Countdown session while 0 economy buildings exist
+  await h.sessionCoordinator.startSession('COUNTDOWN', 35, profile.id);
 
-  // 2. Mid-session: player constructs an economy building (+2% coins)
+  // 2. Mid-session: player queues Foraging Post (costs 15, 60m build job)
   const placeResp = await h.handler.handleMessage({
     action: 'PLACE_BUILDING',
     payload: {
@@ -413,33 +468,49 @@ test('Test H: CoinBonus cache updates immediately reflect on active focus sessio
   });
   assert.strictEqual(placeResp.success, true);
 
-  // Current balance after build: 300 - 15 = 285 Coins
+  // Current balance after build: 300 - 15 = 285 Coins; still under construction -> 0% bonus
   const econMid = await h.storage.getEconomy();
   assert.strictEqual(econMid.focusCoins, 285);
+  assert.strictEqual(h.civilizationCoordinator.getActiveCoinBonuses().length, 0);
 
-  // 3. Session completes: settlement calls coinBonusProvider() dynamically
+  // 3. Complete 35m session: 0% bonus applied to this session, job advances 60m -> 25m remaining
+  await h.sessionCoordinator.completeCountdown();
+  await h.sessionCoordinator.resetSession();
+  const econAfter35 = await h.storage.getEconomy();
+  assert.strictEqual(h.civilizationCoordinator.getActiveCoinBonuses().length, 0);
+
+  // 4. Complete a 25m session: finishes the remaining 25m construction -> activates +2% bonus immediately on hook
+  await h.sessionCoordinator.startSession('COUNTDOWN', 25, profile.id);
+  await h.sessionCoordinator.completeCountdown();
+  await h.sessionCoordinator.resetSession();
+  assert.strictEqual(h.civilizationCoordinator.getActiveCoinBonuses().length, 1);
+
+  const coinsReady = (await h.storage.getEconomy()).focusCoins;
+  const xpReady = (await h.storage.getEconomy()).totalXP;
+
+  // 5. Subsequent 25m session receives +2% bonus (25 * 1.5 * 1.02 = 38.25 Coins, XP = +125)
+  await h.sessionCoordinator.startSession('COUNTDOWN', 25, profile.id);
   await h.sessionCoordinator.completeCountdown();
 
-  // Base reward: 25 * 1.5 = 37.5 Coins
-  // Multiplier with +2% bonus: 1.02
-  // Earned: 37.5 * 1.02 = 38.25 Coins
-  // Final balance: 285 + 38.25 = 323.25 Coins
   const econFinal = await h.storage.getEconomy();
   assert.ok(
-    Math.abs(econFinal.focusCoins - 323.25) < EPSILON,
-    `expected 323.25, got ${econFinal.focusCoins}`
+    Math.abs(econFinal.focusCoins - (coinsReady + 38.25)) < EPSILON,
+    `expected ${coinsReady + 38.25}, got ${econFinal.focusCoins}`
   );
-
-  // XP is completely unchanged by CoinBonus: 500 initial + 125 earned = 625
-  assert.strictEqual(econFinal.totalXP, 625);
+  assert.strictEqual(econFinal.totalXP - xpReady, 125);
 });
 
 // -----------------------------------------------------------------------------
-// Test I — EXPAND_LAND rollback rolls back chunk & Coins cleanly on storage failure
+// Test I — EXPAND_LAND rollback rolls back clearing job & Coins cleanly on storage failure
 // -----------------------------------------------------------------------------
 test('Test I: EXPAND_LAND storage failure rolls back chunk and Focus Coins atomically', async () => {
   const h = createHarness(200, 3, 300);
   await h.seedPrerequisites(200, 3, 300);
+  await h.storage.updateCivilizationState((c) => ({
+    ...c,
+    villagers: [{ id: 'v_seed', role: 'elder', recruitedAt: 1 }],
+  }));
+  const profile = await h.profileManager.createProfile('Rollback I', []);
 
   const beforeState = await h.storage.getCivilizationState();
   const chunksBefore = [...beforeState.grid.chunks];
@@ -464,19 +535,23 @@ test('Test I: EXPAND_LAND storage failure rolls back chunk and Focus Coins atomi
   failWrite = false;
   const afterFailure = await h.storage.getCivilizationState();
   assert.strictEqual(afterFailure.grid.chunks.length, chunksBefore.length);
-  assert.deepStrictEqual(afterFailure.grid.chunks, chunksBefore);
+  assert.strictEqual(afterFailure.jobs?.length ?? 0, 0);
   assert.strictEqual((await h.storage.getEconomy()).focusCoins, 200);
 
-  // Subsequent valid expansion after recovery succeeds cleanly
+  // Subsequent valid expansion after recovery queues cleanly and unlocks chunk after 60m Focus
   const retryRes = await h.handler.handleMessage({
     action: 'EXPAND_LAND',
     payload: { origin: { x: 8, y: 0 } },
   });
   assert.strictEqual(retryRes.success, true);
+  assert.strictEqual((await h.storage.getEconomy()).focusCoins, 170);
+
+  await h.sessionCoordinator.startSession('COUNTDOWN', 60, profile.id);
+  await h.sessionCoordinator.completeCountdown();
+
   const afterRetry = await h.storage.getCivilizationState();
   assert.strictEqual(afterRetry.grid.chunks.length, chunksBefore.length + 1);
   assert.deepStrictEqual(Object.keys(afterRetry.grid).sort(), ['buildings', 'chunks']);
-  assert.strictEqual((await h.storage.getEconomy()).focusCoins, 140);
 });
 
 // -----------------------------------------------------------------------------
@@ -485,6 +560,10 @@ test('Test I: EXPAND_LAND storage failure rolls back chunk and Focus Coins atomi
 test('Test J: Concurrent EXPAND_LAND on identical origin succeeds once and deducts Coins once', async () => {
   const h = createHarness(500, 4, 300);
   await h.seedPrerequisites(500, 4, 300);
+  await h.storage.updateCivilizationState((c) => ({
+    ...c,
+    villagers: [{ id: 'v_seed', role: 'elder', recruitedAt: 1 }],
+  }));
 
   const [res1, res2] = await Promise.all([
     h.handler.handleMessage({
@@ -502,21 +581,25 @@ test('Test J: Concurrent EXPAND_LAND on identical origin succeeds once and deduc
 
   assert.strictEqual(successes.length, 1);
   assert.strictEqual(failures.length, 1);
-  assert.ok(failures[0].error?.includes('CHUNK_ALREADY_EXISTS'));
+  assert.strictEqual(failures[0].errorCode, 'CIV_EXPAND_ALREADY_QUEUED');
 
   const econ = await h.storage.getEconomy();
-  assert.strictEqual(econ.focusCoins, 440);
+  assert.strictEqual(econ.focusCoins, 470);
   const civ = await h.storage.getCivilizationState();
-  assert.strictEqual(civ.grid.chunks.length, 5);
+  assert.strictEqual(civ.jobs?.length, 1);
 });
 
 // -----------------------------------------------------------------------------
 // Test K — Concurrent EXPAND_LAND on different origins with Coins sufficient for only 1
 // -----------------------------------------------------------------------------
 test('Test K: Concurrent EXPAND_LAND on different origins with Coins for 1 blocks second safely', async () => {
-  // k=1 costs 60, k=2 costs 75 (total 135). Seed 100 Coins, Lv. 4.
-  const h = createHarness(100, 4, 300);
-  await h.seedPrerequisites(100, 4, 300);
+  // k=1 costs 30, k=2 costs 40 (total 70). Seed 55 Coins, Lv. 4.
+  const h = createHarness(55, 4, 300);
+  await h.seedPrerequisites(55, 4, 300);
+  await h.storage.updateCivilizationState((c) => ({
+    ...c,
+    villagers: [{ id: 'v_seed', role: 'elder', recruitedAt: 1 }],
+  }));
 
   const [res1, res2] = await Promise.all([
     h.handler.handleMessage({
@@ -537,7 +620,7 @@ test('Test K: Concurrent EXPAND_LAND on different origins with Coins for 1 block
   assert.ok(failures[0].error?.includes('Insufficient coins'));
 
   const econ = await h.storage.getEconomy();
-  assert.strictEqual(econ.focusCoins, 40);
+  assert.strictEqual(econ.focusCoins, 25);
   const civ = await h.storage.getCivilizationState();
-  assert.strictEqual(civ.grid.chunks.length, 5);
+  assert.strictEqual(civ.jobs?.length, 1);
 });

@@ -1,13 +1,19 @@
 import React from 'react';
-import { X, Compass, Coins, ShieldAlert, Award, Wallet } from 'lucide-react';
+import { X, Compass, Coins, ShieldAlert, Award, Wallet, Users } from 'lucide-react';
 import { CHUNK_HEIGHT, CHUNK_WIDTH } from '../../../core/civilization/constants.ts';
 import { GridCoordinate } from '../../../core/civilization/types.ts';
 import {
   evaluateExpansion,
   getExpansionFocusMinuteEstimate,
 } from '../../../core/civilization/landExpansion.ts';
+import {
+  EXPAND_JOB_SPEC,
+  getTotalVillagerCount,
+} from '../../../core/civilization/jobs.ts';
 import { Villager } from '../../../core/civilization/villager.ts';
 import { getVillagerBuffSummary } from '../../../core/civilization/villagerBuffs.ts';
+import { CLOCK_TILE_INDEX, ClockTileIcon, VillagerRole } from './spriteRegistry.ts';
+import { formatJobDurationMinutes } from './jobProjection.ts';
 import { formatRewardAmount } from '../../utils/formatters.ts';
 import { useTranslation } from '../../../i18n/I18nContext.tsx';
 
@@ -18,6 +24,7 @@ export interface LandExpansionModalProps {
   playerLevel: number;
   playerCoins: number;
   villagers?: readonly Villager[];
+  founderRole?: VillagerRole | null;
   onConfirm: (origin: GridCoordinate) => Promise<void>;
   onClose: () => void;
   isSubmitting?: boolean;
@@ -30,6 +37,7 @@ export const LandExpansionModal: React.FC<LandExpansionModalProps> = ({
   playerLevel,
   playerCoins,
   villagers = [],
+  founderRole = null,
   onConfirm,
   onClose,
   isSubmitting = false,
@@ -38,7 +46,8 @@ export const LandExpansionModal: React.FC<LandExpansionModalProps> = ({
 
   if (!isOpen || !selectedOrigin) return null;
 
-  const buffSummary = getVillagerBuffSummary(villagers);
+  const buffSummary = getVillagerBuffSummary(villagers, founderRole);
+  const totalCrew = getTotalVillagerCount(villagers, founderRole);
   const evaluation = evaluateExpansion({
     chunkCount: chunksCount,
     playerLevel,
@@ -50,6 +59,9 @@ export const LandExpansionModal: React.FC<LandExpansionModalProps> = ({
 
   const hasEnoughLevel = playerLevel >= evaluation.requiredLevel;
   const hasEnoughCoins = playerCoins >= evaluation.cost;
+  const hasEnoughCrew = totalCrew >= EXPAND_JOB_SPEC.crew;
+  const clearingMinutes = formatJobDurationMinutes(EXPAND_JOB_SPEC.durationSeconds);
+  const canConfirmExpand = evaluation.canExpand && hasEnoughCrew;
 
   const failureMessage = !evaluation.canExpand
     ? evaluation.reason === 'LEVEL_TOO_LOW'
@@ -61,6 +73,11 @@ export const LandExpansionModal: React.FC<LandExpansionModalProps> = ({
           cost: evaluation.cost,
           balance: formatRewardAmount(playerCoins),
         })
+    : !hasEnoughCrew
+    ? t('civ.expand.reasonNotEnoughVillagers', {
+        required: EXPAND_JOB_SPEC.crew,
+        current: totalCrew,
+      })
     : null;
 
   return (
@@ -120,7 +137,7 @@ export const LandExpansionModal: React.FC<LandExpansionModalProps> = ({
             </span>
           </div>
 
-          {/* Cost, Level & Balance Breakdown */}
+          {/* Cost, Level, Clearing Crew & Balance Breakdown */}
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 divide-y divide-slate-200/80 dark:divide-slate-800 bg-slate-50/60 dark:bg-slate-800/40 text-xs">
             {/* Cost */}
             <div className="px-3 py-2.5 flex items-start justify-between gap-2">
@@ -185,6 +202,30 @@ export const LandExpansionModal: React.FC<LandExpansionModalProps> = ({
               </div>
             </div>
 
+            {/* Clearing Crew & Focus Time */}
+            <div className="px-3 py-2 flex items-center justify-between gap-2">
+              <span className="inline-flex items-center gap-1.5 text-slate-600 dark:text-slate-300 font-medium">
+                <Users className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                <span>{t('civ.expand.clearingLabel')}</span>
+              </span>
+              <span
+                data-testid="expand-clearing-spec"
+                className={`inline-flex items-center gap-1 font-semibold tabular-nums ${
+                  hasEnoughCrew
+                    ? 'text-slate-800 dark:text-slate-200'
+                    : 'text-rose-600 dark:text-rose-400'
+                }`}
+              >
+                <ClockTileIcon tileIndex={CLOCK_TILE_INDEX.CLOCK} size={11} />
+                <span>
+                  {t('civ.expand.clearingValue', {
+                    crew: EXPAND_JOB_SPEC.crew,
+                    minutes: clearingMinutes,
+                  })}
+                </span>
+              </span>
+            </div>
+
             {/* Balance */}
             <div className="px-3 py-2 flex items-center justify-between gap-2">
               <span className="inline-flex items-center gap-1.5 text-slate-600 dark:text-slate-300 font-medium">
@@ -203,7 +244,7 @@ export const LandExpansionModal: React.FC<LandExpansionModalProps> = ({
             </div>
           </div>
 
-          {/* Insufficient Level / Coins Banner */}
+          {/* Insufficient Level / Coins / Crew Banner */}
           {failureMessage && (
             <div
               role="note"
@@ -226,7 +267,7 @@ export const LandExpansionModal: React.FC<LandExpansionModalProps> = ({
             </button>
             <button
               type="button"
-              disabled={!evaluation.canExpand || isSubmitting}
+              disabled={!canConfirmExpand || isSubmitting}
               onClick={() => onConfirm(selectedOrigin)}
               className="flex-1 py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 dark:disabled:bg-slate-700 text-xs font-semibold text-white disabled:text-slate-500 dark:disabled:text-slate-400 transition-colors cursor-pointer disabled:cursor-not-allowed shadow-2xs"
             >

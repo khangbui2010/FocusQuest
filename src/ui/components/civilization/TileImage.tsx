@@ -99,3 +99,77 @@ export const TileImage: React.FC<TileImageProps> = ({
     </span>
   );
 };
+
+export const CLOCK_TILES_SHEET_PATH = '/assets/sprites/clock_tiles_16.png';
+export const CLOCK_TILES_COUNT = 3;
+export const CLOCK_TILE_INDEX = Object.freeze({
+  CLOCK: 0,
+  HOURGLASS: 1,
+  STOPWATCH: 2,
+} as const);
+export type ClockTileIndex = 0 | 1 | 2;
+
+export interface ClockTileIconProps {
+  tileIndex: ClockTileIndex;
+  size?: number;
+  className?: string;
+  alt?: string;
+  style?: React.CSSProperties;
+}
+
+/**
+ * Displays one 16x16 icon tile from clock_tiles_16.png (48x16, 3 tiles: 0=clock, 1=hourglass, 2=stopwatch).
+ * Uses pixelated rendering and zero-overlap overflow crop. Safe for SSR.
+ */
+export const ClockTileIcon: React.FC<ClockTileIconProps> = ({
+  tileIndex,
+  size = PACKED_TILE_PX,
+  className = '',
+  alt = '',
+  style,
+}) => {
+  const safeIndex = Math.max(0, Math.min(CLOCK_TILES_COUNT - 1, Math.floor(tileIndex)));
+  const hasPositionClass = /\b(absolute|fixed|sticky|relative)\b/.test(className);
+  const hasDisplayClass = /\b(block|inline-block|inline|flex|inline-flex|grid|hidden)\b/.test(
+    className
+  );
+  const spanClassName = [
+    hasPositionClass ? '' : 'relative',
+    hasDisplayClass ? '' : 'inline-block',
+    'overflow-hidden select-none shrink-0',
+    className,
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  return (
+    <span
+      data-clock-tile-index={safeIndex}
+      className={spanClassName}
+      style={{
+        width: size,
+        height: size,
+        ...style,
+      }}
+    >
+      <img
+        src={CLOCK_TILES_SHEET_PATH}
+        alt={alt}
+        draggable={false}
+        aria-hidden={alt ? undefined : true}
+        style={{
+          position: 'absolute',
+          left: -safeIndex * size,
+          top: 0,
+          width: CLOCK_TILES_COUNT * size,
+          height: size,
+          maxWidth: 'none',
+          maxHeight: 'none',
+          imageRendering: 'pixelated',
+          pointerEvents: 'none',
+        }}
+      />
+    </span>
+  );
+};
+

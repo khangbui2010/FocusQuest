@@ -3,6 +3,9 @@ import { ArrowLeft } from 'lucide-react';
 import { STONE_AGE_BUILDING_DEFINITIONS } from '../../../core/civilization/buildingCatalog.ts';
 import { REUSED_TINY_TOWN_TILES } from './spriteData.ts';
 import {
+  CLOCK_TILE_INDEX,
+  CONSTRUCTION_SPRITE_STAGES,
+  ClockTileIcon,
   PixelSprite,
   TileImage,
   getBuildingSprite,
@@ -742,6 +745,105 @@ export const SpriteGallery: React.FC<SpriteGalleryProps> = ({ onBack }) => {
                 </div>
               </div>
             ))}
+          </div>
+        </section>
+
+        {/* Section 6: Milestone 5E-1 Construction Stages & Clock Tiles */}
+        <section
+          data-testid="gallery-construction-section"
+          className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 space-y-5"
+        >
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-bold">
+                Construction Stages &amp; Clock Tiles (Milestone 5E-1)
+              </h2>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                4 progressive scaffolding/build stages (0%→100% Focus completion) across 5 timed buildings + 48×16px clock_tiles_16.png sheet (0=clock, 1=hourglass, 2=stopwatch).
+              </p>
+            </div>
+            <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
+              clock_tiles_16.png · 48×16 PNG
+            </span>
+          </div>
+
+          {/* Clock Tiles at 1x, 2x, 4x */}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-2 bg-slate-50/50 dark:bg-slate-800/30">
+            <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100">
+              Clock Tile Icons (0=Clock · 1=Hourglass · 2=Stopwatch)
+            </h3>
+            <div className="flex flex-wrap gap-4">
+              {(
+                [
+                  { idx: CLOCK_TILE_INDEX.CLOCK, label: '0 · Clock (Active)' },
+                  { idx: CLOCK_TILE_INDEX.HOURGLASS, label: '1 · Hourglass (Waiting)' },
+                  { idx: CLOCK_TILE_INDEX.STOPWATCH, label: '2 · Stopwatch (Reserved)' },
+                ] as const
+              ).map((item) => (
+                <div
+                  key={item.idx}
+                  data-testid={`gallery-clock-tile-${item.idx}`}
+                  className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-2"
+                >
+                  <div className="text-[11px] font-mono font-semibold text-slate-700 dark:text-slate-200">
+                    {item.label}
+                  </div>
+                  <div className="flex items-end gap-3">
+                    {SCALES.map((scale) => (
+                      <div key={scale} className="flex flex-col items-center gap-1">
+                        <span className="text-[9px] font-mono text-slate-400">{`${scale}× (${16 * scale}px)`}</span>
+                        <div className="p-1 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center">
+                          <ClockTileIcon tileIndex={item.idx} size={16 * scale} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 4 Construction Stages for 5 Timed Buildings */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {STONE_AGE_BUILDING_DEFINITIONS.filter((def) =>
+              Boolean(CONSTRUCTION_SPRITE_STAGES[def.id])
+            ).map((def) => {
+              const stages = CONSTRUCTION_SPRITE_STAGES[def.id];
+              return (
+                <div
+                  key={def.id}
+                  data-testid={`gallery-construction-${def.id}`}
+                  className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-2 bg-slate-50/50 dark:bg-slate-800/30"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                      {def.name}
+                    </h3>
+                    <span className="text-[10px] font-mono text-slate-500">
+                      {`${stages[0].width}×${stages[0].height}px · 4 stages`}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-3">
+                    {stages.map((stageMatrix, idx) => (
+                      <div key={idx} className="flex flex-col items-center gap-1">
+                        <span className="text-[9px] font-mono text-slate-500">{`Stage ${idx}`}</span>
+                        <div
+                          style={{ backgroundColor: '#84c669' }}
+                          className="rounded border border-slate-300 dark:border-slate-700 flex items-center justify-center overflow-hidden p-0.5"
+                        >
+                          <PixelSprite
+                            sprite={stageMatrix}
+                            width={stageMatrix.width}
+                            height={stageMatrix.height}
+                            ariaLabel={`${def.name} stage ${idx}`}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </section>
       </div>

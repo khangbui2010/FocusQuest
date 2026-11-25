@@ -128,6 +128,15 @@ export const ALL_KNOWN_ERROR_CODES: readonly ErrorCode[] = [
   'CIV_VILLAGER_INSUFFICIENT_COINS',
   'CIV_CAVE_HAS_VILLAGERS',
   'CIV_VILLAGE_CAVE_LIMIT_REACHED',
+  'CIV_NOT_ENOUGH_VILLAGERS',
+  'CIV_BUILDING_UNDER_CONSTRUCTION',
+  'CIV_JOB_NOT_FOUND',
+  'CIV_EXPAND_ALREADY_QUEUED',
+  'CIV_INVALID_CANCEL_JOB_PAYLOAD',
+  'CIV_CANCEL_JOB_REQUEST_FAILED',
+  'CIV_INVALID_FOUNDER_PAYLOAD',
+  'CIV_FOUNDER_ALREADY_SELECTED',
+  'CIV_FOUNDER_NOT_SELECTED',
   'INVALID_LANGUAGE',
   'INVALID_CHIME_FLAG',
   'INVALID_MUSIC_PLAYER_EXPANDED_FLAG',
@@ -268,10 +277,15 @@ const EXACT_VI_ERROR_MAP: Record<string, string> = {
     'Yêu cầu nâng cấp cần mã công trình và cấp hiện tại hợp lệ.',
   'Could not expand territory.': 'Không thể mở rộng lãnh thổ.',
   'Expansion request failed.': 'Yêu cầu mở rộng lãnh thổ thất bại.',
-  'You need a Meditation Cave to recruit villagers.': 'Bạn cần xây Hang Thiền định trước khi tuyển dân làng.',
+  'You need a Rock Shelter to recruit villagers.': 'Bạn cần xây Hang trú ẩn trước khi tuyển dân làng.',
+  'You need a Meditation Cave to recruit villagers.': 'Bạn cần xây Hang trú ẩn trước khi tuyển dân làng.',
   'RECRUIT_VILLAGER requires a valid villager role (elder | crafter | woodworker).':
     'Vai trò dân làng không hợp lệ (chỉ hỗ trợ elder | crafter | woodworker).',
   'RECRUIT_VILLAGER requires a valid villager role.': 'Vai trò dân làng không hợp lệ.',
+  'SELECT_FOUNDER requires a valid villager role (elder | crafter | woodworker).':
+    'Vai trò dân làng khởi đầu không hợp lệ (chỉ hỗ trợ elder | crafter | woodworker).',
+  'Founder villager has already been selected.': 'Dân làng khởi đầu đã được chọn trước đó.',
+  'Select a founder villager first.': 'Hãy chọn dân làng khởi đầu trước.',
   'Could not recruit villager.': 'Không thể tuyển dân làng.',
   'Recruitment request failed.': 'Yêu cầu tuyển dân làng thất bại.',
   'Invalid payload: expected object for PLACE_BUILDING': 'Dữ liệu đặt công trình không hợp lệ.',
@@ -819,18 +833,18 @@ function translateByErrorCode(
     }
     case 'CIV_NO_VILLAGE_CAVE':
       return isVi
-        ? 'Bạn cần xây Hang Thiền định trước khi tuyển dân làng.'
-        : 'You need a Meditation Cave to recruit villagers.';
+        ? 'Bạn cần xây Hang trú ẩn trước khi tuyển dân làng.'
+        : 'You need a Rock Shelter to recruit villagers.';
     case 'CIV_VILLAGER_CAPACITY_REACHED': {
       const current = str('currentCount');
       const capacity = str('capacity');
       return isVi
         ? current && capacity
-          ? `Làng đã đạt sức chứa tối đa (${current}/${capacity}). Hãy nâng cấp Hang Thiền định để thêm chỗ.`
-          : 'Làng đã đạt sức chứa tối đa. Hãy nâng cấp Hang Thiền định để thêm chỗ.'
+          ? `Làng đã đạt sức chứa tối đa (${current}/${capacity}). Hãy nâng cấp Hang trú ẩn để thêm chỗ.`
+          : 'Làng đã đạt sức chứa tối đa. Hãy nâng cấp Hang trú ẩn để thêm chỗ.'
         : current && capacity
-          ? `Village capacity reached (${current}/${capacity}). Upgrade your Meditation Cave to house more villagers.`
-          : 'Village capacity reached. Upgrade your Meditation Cave to house more villagers.';
+          ? `Village capacity reached (${current}/${capacity}). Upgrade your Rock Shelter to house more villagers.`
+          : 'Village capacity reached. Upgrade your Rock Shelter to house more villagers.';
     }
     case 'CIV_VILLAGER_INSUFFICIENT_COINS': {
       const cost = str('cost');
@@ -847,11 +861,11 @@ function translateByErrorCode(
       const count = str('count');
       return isVi
         ? count
-          ? `Không thể phá dỡ Hang Thiền định khi đang có ${count} dân làng sinh sống.`
-          : 'Không thể phá dỡ Hang Thiền định khi vẫn còn dân làng sinh sống.'
+          ? `Không thể phá dỡ Hang trú ẩn khi đang có ${count} dân làng sinh sống.`
+          : 'Không thể phá dỡ Hang trú ẩn khi vẫn còn dân làng sinh sống.'
         : count
-          ? `Cannot demolish Meditation Cave while ${count} villagers live in the village.`
-          : 'Cannot demolish Meditation Cave while villagers still live in the village.';
+          ? `Cannot demolish Rock Shelter while ${count} villagers live in the village.`
+          : 'Cannot demolish Rock Shelter while villagers still live in the village.';
     }
     case 'CIV_VILLAGE_CAVE_LIMIT_REACHED': {
       const limit = str('limit', '1');
@@ -861,11 +875,56 @@ function translateByErrorCode(
       return isVi
         ? bName
           ? `Chỉ được xây tối đa ${limit} "${bName}" trên bản đồ (${current}/${limit}).`
-          : `Chỉ được xây tối đa ${limit} Hang Thiền định trên bản đồ (${current}/${limit}).`
+          : `Chỉ được xây tối đa ${limit} Hang trú ẩn trên bản đồ (${current}/${limit}).`
         : bName
           ? `Only ${limit} "${bName}" may be built on the map (${current}/${limit} placed).`
-          : `Only ${limit} Meditation Cave may be built on the map (${current}/${limit} placed).`;
+          : `Only ${limit} Rock Shelter may be built on the map (${current}/${limit} placed).`;
     }
+    case 'CIV_NOT_ENOUGH_VILLAGERS': {
+      const required = str('requiredCrew', '1');
+      const total = str('totalVillagers', '0');
+      return isVi
+        ? `Cần tối thiểu ${required} dân làng để thực hiện việc này (hiện có ${total}).`
+        : `Requires at least ${required} villagers for this job (currently ${total}).`;
+    }
+    case 'CIV_BUILDING_UNDER_CONSTRUCTION':
+      return isVi
+        ? 'Công trình đang được xây dựng và chưa thể nâng cấp.'
+        : 'This building is still under construction and cannot be upgraded yet.';
+    case 'CIV_JOB_NOT_FOUND':
+      return isVi
+        ? 'Không tìm thấy công việc xây dựng cần hủy.'
+        : 'Construction job not found.';
+    case 'CIV_EXPAND_ALREADY_QUEUED':
+      return isVi
+        ? 'Ô đất này đang được khai phá.'
+        : 'This territory chunk is already being cleared.';
+    case 'CIV_INVALID_CANCEL_JOB_PAYLOAD':
+      return isVi
+        ? 'Thiếu mã công việc hợp lệ để hủy.'
+        : 'CANCEL_CONSTRUCTION_JOB requires a valid jobId.';
+    case 'CIV_CANCEL_JOB_REQUEST_FAILED':
+      return isVi
+        ? 'Không thể hủy công việc xây dựng.'
+        : 'Could not cancel construction job.';
+    case 'CIV_INVALID_FOUNDER_PAYLOAD': {
+      const role = str('role');
+      return isVi
+        ? role
+          ? `Vai trò dân làng khởi đầu không hợp lệ ("${role}").`
+          : 'Vai trò dân làng khởi đầu không hợp lệ.'
+        : role
+          ? `Invalid starting villager role ("${role}").`
+          : 'SELECT_FOUNDER requires a valid villager role.';
+    }
+    case 'CIV_FOUNDER_ALREADY_SELECTED':
+      return isVi
+        ? 'Dân làng khởi đầu đã được chọn trước đó và không thể thay đổi.'
+        : 'Starting villager has already been selected and cannot be changed.';
+    case 'CIV_FOUNDER_NOT_SELECTED':
+      return isVi
+        ? 'Hãy chọn dân làng khởi đầu trước.'
+        : 'Please select your starting villager first.';
     case 'INVALID_LANGUAGE':
       return isVi ? "Ngôn ngữ không hợp lệ (chỉ hỗ trợ 'en' hoặc 'vi')." : "SET_LANGUAGE requires valid language ('en' | 'vi').";
     case 'INVALID_CHIME_FLAG':

@@ -8,9 +8,9 @@
 import {
   INITIAL_CHUNK_COUNT,
   LAND_EXPANSION_BASE_COST,
-  LAND_EXPANSION_RATIO_BASE,
-  LAND_EXPANSION_RATIO_STEP,
-  LAND_EXPANSION_RATIO_CAP,
+  LAND_EXPANSION_INITIAL_INCREMENT,
+  LAND_EXPANSION_STEP_BONUS,
+  LAND_EXPANSION_STEP_GROUP_SIZE,
   LAND_EXPANSION_LEVEL_OFFSET,
 } from './constants.ts';
 import { applyCostDiscount } from './villagerBuffs.ts';
@@ -40,21 +40,10 @@ export function getExpansionPurchaseIndex(chunkCount: number): number {
 }
 
 /**
- * Computes the marginal growth ratio r_i for step i (1-based) in the expansion cost product:
- * r_i = min(CAP, RATIO_BASE + RATIO_STEP * (i - 1))
- */
-export function getExpansionStepRatio(stepIndex: number): number {
-  const safeStep = Number.isFinite(stepIndex) ? Math.max(1, Math.floor(stepIndex)) : 1;
-  return Math.min(
-    LAND_EXPANSION_RATIO_CAP,
-    LAND_EXPANSION_RATIO_BASE + LAND_EXPANSION_RATIO_STEP * (safeStep - 1)
-  );
-}
-
-/**
- * Computes the Focus Coins cost for the k-th land expansion purchase:
- * cost(k) = Math.round(BASE_COST * Π_{i=1}^{k-1} r_i)
- * Keeps floating-point product across intermediate steps and rounds once at the end.
+ * Computes the Focus Coins cost for the k-th land expansion purchase (arithmetic progression):
+ * cost(1) = BASE_COST (30)
+ * cost(k) = BASE_COST + sum_{j=1}^{k-1} (INITIAL_INCREMENT + STEP_BONUS * floor((j - 1) / GROUP_SIZE))
+ * k = 1..20 -> [30, 40, 50, 60, 70, 80, 95, 110, 125, 140, 155, 175, 195, 215, 235, 255, 280, 305, 330, 355].
  */
 export function getExpansionCost(purchaseIndex: number): number {
   const k =
@@ -62,11 +51,13 @@ export function getExpansionCost(purchaseIndex: number): number {
       ? Math.max(1, Math.floor(purchaseIndex))
       : 1;
 
-  let product = LAND_EXPANSION_BASE_COST;
-  for (let i = 1; i < k; i++) {
-    product *= getExpansionStepRatio(i);
+  let cost = LAND_EXPANSION_BASE_COST;
+  for (let j = 1; j < k; j++) {
+    cost +=
+      LAND_EXPANSION_INITIAL_INCREMENT +
+      LAND_EXPANSION_STEP_BONUS * Math.floor((j - 1) / LAND_EXPANSION_STEP_GROUP_SIZE);
   }
-  return Math.round(product);
+  return Math.round(cost);
 }
 
 /**

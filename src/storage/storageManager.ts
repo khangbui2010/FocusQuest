@@ -11,6 +11,7 @@ import {
   validateCivilizationState,
   sanitizeCivilizationState,
 } from '../core/civilization/civilizationState.ts';
+import { advanceJobs } from '../core/civilization/jobs.ts';
 import { GridMap } from '../core/civilization/gridMap.ts';
 import { calculatePlayerLevel } from '../core/economy/levelSystem.ts';
 import { CachedMusicCatalog, MusicPlayerState } from '../types/music.ts';
@@ -188,11 +189,13 @@ export class StorageManager {
       xp: number;
     };
     questOutcomeDelta?: QuestOutcomeDelta;
+    advanceCivilizationJobsSeconds?: number;
   }): Promise<{
     session: SessionSnapshot;
     economy: PlayerEconomy;
     dailyStats: Record<string, DailyStatRecord>;
     questState?: QuestState;
+    civilizationState?: CivilizationState;
   }> {
     const items: Record<string, unknown> = {
       [STORAGE_KEYS.CURRENT_SESSION]: params.session,
@@ -270,6 +273,34 @@ export class StorageManager {
       }
     }
 
+    let finalCivilizationState: CivilizationState | undefined;
+    const validJobSeconds =
+      typeof params.advanceCivilizationJobsSeconds === 'number' &&
+      Number.isFinite(params.advanceCivilizationJobsSeconds) &&
+      params.advanceCivilizationJobsSeconds > 0
+        ? Math.floor(params.advanceCivilizationJobsSeconds)
+        : 0;
+
+    if (validJobSeconds > 0) {
+      const rawCiv = await this.getCivilizationStateInternal();
+      const sanitizedCiv = sanitizeCivilizationState(rawCiv);
+      if (sanitizedCiv && Array.isArray(sanitizedCiv.jobs) && sanitizedCiv.jobs.length > 0) {
+        const advancedCiv = advanceJobs(sanitizedCiv, validJobSeconds);
+        const validation = validateCivilizationState(advancedCiv);
+        if (validation.isValid) {
+          finalCivilizationState = {
+            ...advancedCiv,
+            lastUpdated:
+              typeof params.session.completedAt === 'number' &&
+              Number.isFinite(params.session.completedAt)
+                ? params.session.completedAt
+                : Date.now(),
+          };
+          items[STORAGE_KEYS.CIVILIZATION] = finalCivilizationState;
+        }
+      }
+    }
+
     const keysToWrite = Object.keys(items);
     const previousSnapshot = await this.adapter.getMultiple<Record<string, unknown>>(keysToWrite);
 
@@ -316,12 +347,13 @@ export class StorageManager {
       economy: finalEconomy,
       dailyStats: finalDailyStats,
       questState: finalQuestState,
+      civilizationState: finalCivilizationState,
     };
   }
 
   /**
    * Atomically commits session state changes together with optional economy, daily stats,
-   * and quest updates in a single batch write (setMultiple) under mutex lock.
+   * quest updates, and civilization construction jobs in a single batch write (setMultiple) under mutex lock.
    */
   async commitSessionOutcome(
     params: Parameters<typeof this.commitSessionOutcomeInternal>[0]
@@ -330,6 +362,7 @@ export class StorageManager {
     economy: PlayerEconomy;
     dailyStats: Record<string, DailyStatRecord>;
     questState?: QuestState;
+    civilizationState?: CivilizationState;
   }> {
     return this.mutex.runExclusive(() => this.commitSessionOutcomeInternal(params));
   }

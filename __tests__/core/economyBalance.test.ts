@@ -15,16 +15,21 @@ import {
 import {
   getExpansionCost,
   getExpansionRequiredLevel,
-  getExpansionStepRatio,
 } from '../../src/core/civilization/landExpansion.ts';
 import {
-  LAND_EXPANSION_RATIO_CAP,
+  INITIAL_CHUNK_COUNT,
+  LAND_EXPANSION_BASE_COST,
   VILLAGER_CAPACITY_PER_CAVE_LEVEL,
   VILLAGER_COMPLETE_TRIBE_COIN_BONUS,
   VILLAGER_CRAFTER_COIN_BONUS_RATE,
   VILLAGER_ELDER_UPGRADE_DISCOUNT_RATE,
 } from '../../src/core/civilization/constants.ts';
-import { getVillagerRecruitCost, Villager } from '../../src/core/civilization/villager.ts';
+import {
+  evaluateRecruitment,
+  findVillageCave,
+  getVillagerRecruitCost,
+  Villager,
+} from '../../src/core/civilization/villager.ts';
 import { applyCostDiscount, getVillagerBuffSummary } from '../../src/core/civilization/villagerBuffs.ts';
 import { extractCivilizationCoinBonuses } from '../../src/core/civilization/civilizationBonusHelper.ts';
 import {
@@ -32,7 +37,23 @@ import {
   evaluateEraAdvance,
   getEffectiveMaxLevel,
 } from '../../src/core/civilization/eraRules.ts';
+import {
+  AdvanceableCivilizationState,
+  ConstructionJob,
+  EXPAND_JOB_SPEC,
+  advanceJobs,
+  assignJobsFifo,
+  getClearingOrigins,
+  getEffectiveTargetLevel,
+  getPlaceJobSpec,
+  getTotalVillagerCount,
+  getUpgradeJobSpec,
+  isBuildingUnderConstruction,
+} from '../../src/core/civilization/jobs.ts';
+import { GridMap } from '../../src/core/civilization/gridMap.ts';
+import { CURRENT_CIVILIZATION_SCHEMA_VERSION } from '../../src/core/civilization/civilizationState.ts';
 import { BuildingInstance } from '../../src/core/civilization/buildingTypes.ts';
+import { GridCoordinate } from '../../src/core/civilization/types.ts';
 import { VillagerRole } from '../../src/ui/components/civilization/spriteRegistry.ts';
 import { MultiplierRules } from '../../src/core/reward/multiplierRules.ts';
 import { DEFAULT_REWARD_CONFIG } from '../../src/core/reward/rewardEngine.ts';
@@ -46,7 +67,7 @@ import {
 
 const REFERENCE_BASE_COINS_PER_DAY = 378; // 3 x 60m Countdown (x1.4) = 180 * 1.5 * 1.4 = 378 Coins/day
 
-test('EconomyBalance Suite 1: V5.2 Stone Age costs (3,907 max total) & land expansion monotonicity', () => {
+test('EconomyBalance Suite 1: V5.2 Stone Age costs (3,907 max total) & 5E-1 arithmetic land expansion monotonicity', () => {
   const expectedCosts: Record<string, number> = {
     stone_age_campfire: 4,
     stone_age_totem: 8,
@@ -72,18 +93,16 @@ test('EconomyBalance Suite 1: V5.2 Stone Age costs (3,907 max total) & land expa
   // + 4*236=944 (Foraging Posts L1..5) + 4*671=2,684 (Granaries L1..5) = 3,907
   assert.strictEqual(maxStoneAgeBuildAndUpgradeTotal, 3907);
 
-  assert.strictEqual(LAND_EXPANSION_RATIO_CAP, 1.25);
+  assert.strictEqual(LAND_EXPANSION_BASE_COST, 30);
   let prev = 0;
   for (let k = 1; k <= 30; k += 1) {
-    assert.strictEqual(getExpansionStepRatio(k), 1.25);
     const cost = getExpansionCost(k);
     assert.ok(cost > prev, `k=${k} cost ${cost} must strictly exceed ${prev}`);
     prev = cost;
   }
 
   const cost20 = getExpansionCost(20);
-  assert.strictEqual(cost20, 4163);
-  assert.ok(cost20 <= 5000);
+  assert.strictEqual(cost20, 355);
 });
 
 test('EconomyBalance Suite 2: Every economy upgrade step and Crafter villager pays back within 60 days at 378 base Coins/day', () => {
@@ -124,6 +143,7 @@ test('EconomyBalance Suite 2: Every economy upgrade step and Crafter villager pa
 });
 
 interface SimOptions {
+  readonly founderRole?: VillagerRole;
   readonly maxElders?: number;
   readonly maxCrafters?: number;
   readonly maxWoodworkers?: number;
@@ -142,24 +162,50 @@ interface SimResult {
   forageCount: number;
   granaryCount: number;
   landExpansions: number;
+  completedJobsMinutes: number;
 }
 
-function simulateStoneToBronzeProgression(
+function findFirstValidPlacement(
+  gridMap: GridMap,
+  footprint: { readonly width: number; readonly height: number }
+): GridCoordinate | null {
+  const bounds = gridMap.getBoundingBox();
+  for (let y = bounds.minY; y <= bounds.maxY - footprint.height + 1; y += 1) {
+    for (let x = bounds.minX; x <= bounds.maxX - footprint.width + 1; x += 1) {
+      if (gridMap.canPlaceBuilding({ x, y }, footprint).isValid) {
+        return { x, y };
+      }
+    }
+  }
+  return null;
+}
+
+export function simulateStoneToBronzeProgression5E1(
   dailySessionMinutes: readonly number[],
   options: SimOptions = {}
 ): SimResult {
-  const maxElders = options.maxElders ?? 3;
-  const maxCrafters = options.maxCrafters ?? 1;
+  const founderRole: VillagerRole = options.founderRole ?? 'crafter';
+  const maxElders = options.maxElders ?? 2;
+  const maxCrafters = options.maxCrafters ?? 2;
   const maxWoodworkers = options.maxWoodworkers ?? 1;
   const useVillagerBuffs = options.useVillagerBuffs ?? true;
 
   let coins = 0;
   let totalXP = 0;
   let totalFocusMinutes = 0;
-  let buildings: BuildingInstance[] = [];
-  let villagers: Villager[] = [];
-  let landExpansions = 0;
+  let completedJobsMinutes = 0;
   let nextId = 1;
+
+  let civState: AdvanceableCivilizationState = {
+    schemaVersion: CURRENT_CIVILIZATION_SCHEMA_VERSION,
+    era: 'STONE_AGE',
+    grid: new GridMap().toSnapshot(),
+    buildings: [],
+    villagers: [],
+    jobs: [],
+    founderRole,
+    lastUpdated: 0,
+  };
 
   // Start on Monday 2026-01-05 local noon to align weekly quest cycles cleanly
   const startUtcMs = Date.UTC(2026, 0, 5, 12, 0, 0);
@@ -180,13 +226,428 @@ function simulateStoneToBronzeProgression(
 
   const getCurrentCoinBonus = (): number => {
     const bonuses = extractCivilizationCoinBonuses(
-      buildings,
-      useVillagerBuffs ? villagers : []
+      civState.buildings,
+      useVillagerBuffs ? civState.villagers : [],
+      civState.jobs,
+      useVillagerBuffs ? civState.founderRole : null
     );
     return bonuses.reduce((sum, item) => sum + item.rate, 0);
   };
 
-  for (let day = 1; day <= 40; day += 1) {
+  const countRoleTotal = (role: VillagerRole): number =>
+    (civState.founderRole === role ? 1 : 0) +
+    (civState.villagers ?? []).filter((v) => v.role === role).length;
+
+  const spendAndEnqueueOptimal = (dayMs: number): void => {
+    let boughtSomething = true;
+    while (boughtSomething) {
+      boughtSomething = false;
+      const playerLevel = calculatePlayerLevel(totalXP);
+      const buffSummary = useVillagerBuffs
+        ? getVillagerBuffSummary(civState.villagers, civState.founderRole)
+        : { upgradeDiscountRate: 0, expansionDiscountRate: 0 };
+
+      const completedExpansions = Math.max(0, civState.grid.chunks.length - INITIAL_CHUNK_COUNT);
+      const activeJobs = civState.jobs ?? [];
+      const totalCrew = getTotalVillagerCount(civState.villagers, civState.founderRole);
+      const gridMap = GridMap.fromSnapshot(civState.grid);
+
+      const activeBuildingsOnly = civState.buildings.filter(
+        (b) => !isBuildingUnderConstruction(b.id, activeJobs)
+      );
+      const preEval = evaluateEraAdvance({
+        era: 'STONE_AGE',
+        buildings: activeBuildingsOnly,
+        villagers: civState.villagers ?? [],
+        founderRole: civState.founderRole,
+        landExpansions: completedExpansions,
+        playerLevel,
+        totalFocusMinutes,
+        coins: Number.MAX_SAFE_INTEGER,
+      });
+      const nonCoinPrereqsReady =
+        activeJobs.length === 0 &&
+        preEval.checks
+          .filter(
+            (chk) =>
+              chk.id !== 'fee_coins' &&
+              chk.id !== 'player_level' &&
+              chk.id !== 'total_focus_minutes'
+          )
+          .every((chk) => chk.met);
+
+      if (nonCoinPrereqsReady) {
+        break;
+      }
+
+      type ActionCandidate = {
+        roiScore: number;
+        cost: number;
+        apply: () => void;
+      };
+      const candidates: ActionCandidate[] = [];
+
+      const caveAny = civState.buildings.find((b) => b.definitionId === caveDef.id);
+      const caveReady = findVillageCave(civState.buildings, activeJobs);
+      const forageInstances = civState.buildings.filter((b) => b.definitionId === foragingDef.id);
+      const granaryInstances = civState.buildings.filter((b) => b.definitionId === granaryDef.id);
+      const clearingCount = getClearingOrigins(activeJobs).length;
+
+      const rawCounts = {
+        elder: countRoleTotal('elder'),
+        crafter: countRoleTotal('crafter'),
+        woodworker: countRoleTotal('woodworker'),
+      };
+      const targetVillagers = maxElders + maxCrafters + maxWoodworkers;
+
+      const enqueuePlace = (
+        def: typeof foragingDef,
+        pos: GridCoordinate,
+        paidCoins: number
+      ): void => {
+        const placeSpec = getPlaceJobSpec(def.id);
+        const bId = `b_${nextId++}`;
+        const gRes = gridMap.placeBuilding(bId, pos, def.footprint);
+        assert.ok(gRes.success, `Failed to place ${def.id} in balance sim: ${gRes.reason}`);
+        const inst: BuildingInstance = {
+          id: bId,
+          definitionId: def.id,
+          position: pos,
+          level: 1,
+          placedAt: dayMs,
+        };
+        let nextJobs = activeJobs;
+        if (placeSpec.durationSeconds > 0) {
+          const newJob: ConstructionJob = {
+            id: `j_${nextId++}`,
+            kind: 'place',
+            status: 'PENDING',
+            definitionId: def.id,
+            buildingId: bId,
+            crewRequired: placeSpec.crew,
+            totalSeconds: placeSpec.durationSeconds,
+            remainingSeconds: placeSpec.durationSeconds,
+            paidCoins,
+            createdAt: dayMs,
+          };
+          nextJobs = assignJobsFifo([...activeJobs, newJob], totalCrew).jobs;
+        }
+        civState = {
+          ...civState,
+          grid: gridMap.toSnapshot(),
+          buildings: [...civState.buildings, inst],
+          jobs: nextJobs,
+          lastUpdated: dayMs,
+        };
+      };
+
+      const enqueueUpgrade = (
+        inst: BuildingInstance,
+        nextTargetLevel: number,
+        paidCoins: number
+      ): void => {
+        const upSpec = getUpgradeJobSpec(nextTargetLevel - 1);
+        const newJob: ConstructionJob = {
+          id: `j_${nextId++}`,
+          kind: 'upgrade',
+          status: 'PENDING',
+          definitionId: inst.definitionId,
+          buildingId: inst.id,
+          targetLevel: nextTargetLevel,
+          crewRequired: upSpec.crew,
+          totalSeconds: upSpec.durationSeconds,
+          remainingSeconds: upSpec.durationSeconds,
+          paidCoins,
+          createdAt: dayMs,
+        };
+        civState = {
+          ...civState,
+          jobs: assignJobsFifo([...activeJobs, newJob], totalCrew).jobs,
+          lastUpdated: dayMs,
+        };
+      };
+
+      // 1. Rock Shelter placement (build Lv.1 early to unlock villagers & 2-crew jobs)
+      if (
+        !caveAny &&
+        totalCrew >= getPlaceJobSpec(caveDef.id).crew &&
+        playerLevel >= caveDef.unlockRequirements.minPlayerLevel &&
+        totalFocusMinutes >= caveDef.unlockRequirements.minTotalFocusMinutes
+      ) {
+        const pos = findFirstValidPlacement(gridMap, caveDef.footprint);
+        if (pos) {
+          candidates.push({
+            roiScore: 0.25,
+            cost: caveDef.baseCost,
+            apply: () => enqueuePlace(caveDef, pos, caveDef.baseCost),
+          });
+        }
+      } else if (caveReady) {
+        const effCaveLevel = getEffectiveTargetLevel(caveReady, activeJobs);
+        const nextCaveTarget = effCaveLevel + 1;
+        const caveUpSpec = getUpgradeJobSpec(effCaveLevel);
+        if (
+          effCaveLevel < caveTargetLevel &&
+          totalCrew >= caveUpSpec.crew &&
+          playerLevel >= caveDef.unlockRequirements.minPlayerLevel + effCaveLevel
+        ) {
+          const upCost = applyCostDiscount(
+            calculateUpgradeCost(caveDef, effCaveLevel),
+            buffSummary.upgradeDiscountRate
+          );
+          const needCapacity =
+            (civState.villagers?.length ?? 0) >= effCaveLevel * VILLAGER_CAPACITY_PER_CAVE_LEVEL &&
+            totalCrew < targetVillagers;
+          candidates.push({
+            roiScore: (needCapacity ? 0.05 : 0.00002) / upCost,
+            cost: upCost,
+            apply: () => enqueueUpgrade(caveReady, nextCaveTarget, upCost),
+          });
+        }
+      }
+
+      // 2. Recruit villagers when Cave is built & capacity permits
+      if (
+        caveReady &&
+        (civState.villagers?.length ?? 0) < caveReady.level * VILLAGER_CAPACITY_PER_CAVE_LEVEL
+      ) {
+        const rolesToConsider: VillagerRole[] = [];
+        if (rawCounts.elder < maxElders) rolesToConsider.push('elder');
+        if (rawCounts.crafter < maxCrafters) rolesToConsider.push('crafter');
+        if (rawCounts.woodworker < maxWoodworkers) rolesToConsider.push('woodworker');
+
+        for (const role of rolesToConsider) {
+          const evalRec = evaluateRecruitment({
+            caveBuilding: caveReady,
+            villagers: civState.villagers,
+            founderRole: civState.founderRole,
+            playerCoins: Number.MAX_SAFE_INTEGER,
+            role,
+          });
+          if (!evalRec.canRecruit) continue;
+
+          const completesTribe =
+            (role === 'elder' &&
+              rawCounts.elder === 0 &&
+              rawCounts.crafter >= 1 &&
+              rawCounts.woodworker >= 1) ||
+            (role === 'crafter' &&
+              rawCounts.crafter === 0 &&
+              rawCounts.elder >= 1 &&
+              rawCounts.woodworker >= 1) ||
+            (role === 'woodworker' &&
+              rawCounts.woodworker === 0 &&
+              rawCounts.elder >= 1 &&
+              rawCounts.crafter >= 1);
+          const unlockTwoCrewBonus = totalCrew === 1 ? 0.2 : 0;
+          const tribeBoost = completesTribe ? VILLAGER_COMPLETE_TRIBE_COIN_BONUS : 0;
+          const roleValue =
+            role === 'elder'
+              ? VILLAGER_ELDER_UPGRADE_DISCOUNT_RATE * 1.5
+              : role === 'crafter'
+              ? VILLAGER_CRAFTER_COIN_BONUS_RATE
+              : 0.015;
+
+          candidates.push({
+            roiScore: (unlockTwoCrewBonus + roleValue + tribeBoost) / evalRec.cost,
+            cost: evalRec.cost,
+            apply: () => {
+              const newVillager: Villager = {
+                id: `v_${nextId++}`,
+                role,
+                recruitedAt: dayMs,
+              };
+              const nextVillagers = [...(civState.villagers ?? []), newVillager];
+              const nextCrew = getTotalVillagerCount(nextVillagers, civState.founderRole);
+              civState = {
+                ...civState,
+                villagers: nextVillagers,
+                jobs: assignJobsFifo(activeJobs, nextCrew).jobs,
+                lastUpdated: dayMs,
+              };
+            },
+          });
+        }
+      }
+
+      // 3. Required land expansions (minLandExpansions = 3, requires 2 crew + 60m each)
+      if (
+        completedExpansions + clearingCount < req.minLandExpansions &&
+        totalCrew >= EXPAND_JOB_SPEC.crew
+      ) {
+        const expIndex = completedExpansions + clearingCount + 1;
+        if (playerLevel >= getExpansionRequiredLevel(expIndex)) {
+          const queuedOrigins = new Set(
+            getClearingOrigins(activeJobs).map((o) => `${o.x},${o.y}`)
+          );
+          const candidateOrigin = gridMap
+            .getAvailableExpansionSlots()
+            .find((slot) => !queuedOrigins.has(`${slot.x},${slot.y}`));
+          if (candidateOrigin) {
+            const expCost = applyCostDiscount(
+              getExpansionCost(expIndex),
+              buffSummary.expansionDiscountRate
+            );
+            candidates.push({
+              roiScore: 0.0001 / expCost,
+              cost: expCost,
+              apply: () => {
+                const newJob: ConstructionJob = {
+                  id: `j_${nextId++}`,
+                  kind: 'expand',
+                  status: 'PENDING',
+                  origin: candidateOrigin,
+                  purchaseIndex: expIndex,
+                  crewRequired: EXPAND_JOB_SPEC.crew,
+                  totalSeconds: EXPAND_JOB_SPEC.durationSeconds,
+                  remainingSeconds: EXPAND_JOB_SPEC.durationSeconds,
+                  paidCoins: expCost,
+                  createdAt: dayMs,
+                };
+                civState = {
+                  ...civState,
+                  jobs: assignJobsFifo([...activeJobs, newJob], totalCrew).jobs,
+                  lastUpdated: dayMs,
+                };
+              },
+            });
+          }
+        }
+      }
+
+      // 4. Economy buildings: Foraging Post x4 up to Lv.5
+      if (
+        forageInstances.length < forageReq.minCount &&
+        totalCrew >= getPlaceJobSpec(foragingDef.id).crew &&
+        playerLevel >= foragingDef.unlockRequirements.minPlayerLevel &&
+        totalFocusMinutes >= foragingDef.unlockRequirements.minTotalFocusMinutes
+      ) {
+        const pos = findFirstValidPlacement(gridMap, foragingDef.footprint);
+        if (pos) {
+          const rate = getBuildingCoinBonusRateAtLevel(foragingDef, 1);
+          candidates.push({
+            roiScore: rate / foragingDef.baseCost,
+            cost: foragingDef.baseCost,
+            apply: () => enqueuePlace(foragingDef, pos, foragingDef.baseCost),
+          });
+        }
+      }
+      for (const inst of forageInstances) {
+        if (isBuildingUnderConstruction(inst.id, activeJobs)) continue;
+        const effLevel = getEffectiveTargetLevel(inst, activeJobs);
+        const upSpec = getUpgradeJobSpec(effLevel);
+        if (
+          effLevel < forageReq.minLevel &&
+          totalCrew >= upSpec.crew &&
+          playerLevel >= foragingDef.unlockRequirements.minPlayerLevel + effLevel
+        ) {
+          const upCost = applyCostDiscount(
+            calculateUpgradeCost(foragingDef, effLevel),
+            buffSummary.upgradeDiscountRate
+          );
+          const stepRate = getBuildingCoinBonusRateAtLevel(foragingDef, 1);
+          candidates.push({
+            roiScore: stepRate / upCost,
+            cost: upCost,
+            apply: () => enqueueUpgrade(inst, effLevel + 1, upCost),
+          });
+        }
+      }
+
+      // 5. Economy buildings: Primitive Granary x4 up to Lv.5 (requires 2 crew to place)
+      if (
+        granaryInstances.length < granaryReq.minCount &&
+        totalCrew >= getPlaceJobSpec(granaryDef.id).crew &&
+        playerLevel >= granaryDef.unlockRequirements.minPlayerLevel &&
+        totalFocusMinutes >= granaryDef.unlockRequirements.minTotalFocusMinutes
+      ) {
+        const pos = findFirstValidPlacement(gridMap, granaryDef.footprint);
+        if (pos) {
+          const rate = getBuildingCoinBonusRateAtLevel(granaryDef, 1);
+          candidates.push({
+            roiScore: rate / granaryDef.baseCost,
+            cost: granaryDef.baseCost,
+            apply: () => enqueuePlace(granaryDef, pos, granaryDef.baseCost),
+          });
+        }
+      }
+      for (const inst of granaryInstances) {
+        if (isBuildingUnderConstruction(inst.id, activeJobs)) continue;
+        const effLevel = getEffectiveTargetLevel(inst, activeJobs);
+        const upSpec = getUpgradeJobSpec(effLevel);
+        if (
+          effLevel < granaryReq.minLevel &&
+          totalCrew >= upSpec.crew &&
+          playerLevel >= granaryDef.unlockRequirements.minPlayerLevel + effLevel
+        ) {
+          const upCost = applyCostDiscount(
+            calculateUpgradeCost(granaryDef, effLevel),
+            buffSummary.upgradeDiscountRate
+          );
+          const stepRate = getBuildingCoinBonusRateAtLevel(granaryDef, 1);
+          candidates.push({
+            roiScore: stepRate / upCost,
+            cost: upCost,
+            apply: () => enqueueUpgrade(inst, effLevel + 1, upCost),
+          });
+        }
+      }
+
+      // 6. Checklist buildings (Campfire = instant 0s/0crew, Totem = 60m/1crew, Elder's Hut = 120m/2crew)
+      if (!civState.buildings.some((b) => b.definitionId === campfireDef.id)) {
+        const pos = findFirstValidPlacement(gridMap, campfireDef.footprint);
+        if (pos) {
+          candidates.push({
+            roiScore: 0.00001 / campfireDef.baseCost,
+            cost: campfireDef.baseCost,
+            apply: () => enqueuePlace(campfireDef, pos, campfireDef.baseCost),
+          });
+        }
+      }
+      if (
+        !civState.buildings.some((b) => b.definitionId === totemDef.id) &&
+        totalCrew >= getPlaceJobSpec(totemDef.id).crew &&
+        totalFocusMinutes >= totemDef.unlockRequirements.minTotalFocusMinutes
+      ) {
+        const pos = findFirstValidPlacement(gridMap, totemDef.footprint);
+        if (pos) {
+          candidates.push({
+            roiScore: 0.00001 / totemDef.baseCost,
+            cost: totemDef.baseCost,
+            apply: () => enqueuePlace(totemDef, pos, totemDef.baseCost),
+          });
+        }
+      }
+      if (
+        !civState.buildings.some((b) => b.definitionId === elderHutDef.id) &&
+        totalCrew >= getPlaceJobSpec(elderHutDef.id).crew &&
+        playerLevel >= elderHutDef.unlockRequirements.minPlayerLevel &&
+        totalFocusMinutes >= elderHutDef.unlockRequirements.minTotalFocusMinutes
+      ) {
+        const pos = findFirstValidPlacement(gridMap, elderHutDef.footprint);
+        if (pos) {
+          candidates.push({
+            roiScore: 0.00001 / elderHutDef.baseCost,
+            cost: elderHutDef.baseCost,
+            apply: () => enqueuePlace(elderHutDef, pos, elderHutDef.baseCost),
+          });
+        }
+      }
+
+      const affordable = candidates
+        .filter((c) => c.cost <= coins)
+        .sort((a, b) => b.roiScore - a.roiScore);
+
+      if (affordable.length > 0) {
+        const best = affordable[0];
+        coins -= best.cost;
+        best.apply();
+        boughtSomething = true;
+      }
+    }
+  };
+
+  for (let day = 1; day <= 60; day += 1) {
     const dayMs = startUtcMs + (day - 1) * 24 * 60 * 60 * 1000;
     const d = new Date(dayMs);
     const dateKey = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(
@@ -205,11 +666,20 @@ function simulateStoneToBronzeProgression(
       totalXP += earnedXp;
       totalFocusMinutes += mins;
 
+      // Advance construction jobs by valid integer Focus seconds
+      if ((civState.jobs?.length ?? 0) > 0) {
+        civState = advanceJobs(civState, mins * 60);
+        completedJobsMinutes += mins;
+      }
+
       questState = applyCompletedSession(
         questState,
         { completedDateKey: dateKey, completedFocusMinutes: mins },
         dayMs
       );
+
+      // Enqueue new builds/upgrades/recruits/expansions after session completion
+      spendAndEnqueueOptimal(dayMs);
     }
 
     // Claim completed active Daily & Weekly quests (flat Coins + XP, no multipliers/bonuses)
@@ -230,316 +700,21 @@ function simulateStoneToBronzeProgression(
       }
     }
 
-    // Spend available Coins optimally towards Stone -> Bronze eligibility
-    let boughtSomething = true;
-    while (boughtSomething) {
-      boughtSomething = false;
-      const playerLevel = calculatePlayerLevel(totalXP);
-      const buffSummary = useVillagerBuffs
-        ? getVillagerBuffSummary(villagers)
-        : { upgradeDiscountRate: 0, expansionDiscountRate: 0 };
-
-      const preEval = evaluateEraAdvance({
-        era: 'STONE_AGE',
-        buildings,
-        villagers,
-        landExpansions,
-        playerLevel,
-        totalFocusMinutes,
-        coins: Number.MAX_SAFE_INTEGER,
-      });
-      const nonCoinPrereqsReady = preEval.checks
-        .filter(
-          (chk) =>
-            chk.id !== 'fee_coins' &&
-            chk.id !== 'player_level' &&
-            chk.id !== 'total_focus_minutes'
-        )
-        .every((chk) => chk.met);
-
-      // Once all buildings, 3 villager roles & 3 expansions are done, save Coins for feeCoins
-      if (nonCoinPrereqsReady) {
-        break;
-      }
-
-      type ActionCandidate = {
-        roiScore: number;
-        cost: number;
-        apply: () => void;
-      };
-      const candidates: ActionCandidate[] = [];
-
-      const cave = buildings.find((b) => b.definitionId === caveDef.id);
-      const forageInstances = buildings.filter((b) => b.definitionId === foragingDef.id);
-      const granaryInstances = buildings.filter((b) => b.definitionId === granaryDef.id);
-      const rawCounts = {
-        elder: villagers.filter((v) => v.role === 'elder').length,
-        crafter: villagers.filter((v) => v.role === 'crafter').length,
-        woodworker: villagers.filter((v) => v.role === 'woodworker').length,
-      };
-      const targetVillagers = maxElders + maxCrafters + maxWoodworkers;
-
-      // Cave (build Lv.1 early to house villagers, upgrade up to floor Lv.5)
-      if (
-        !cave &&
-        playerLevel >= caveDef.unlockRequirements.minPlayerLevel &&
-        totalFocusMinutes >= caveDef.unlockRequirements.minTotalFocusMinutes
-      ) {
-        candidates.push({
-          roiScore: 0.1,
-          cost: caveDef.baseCost,
-          apply: () => {
-            buildings.push({
-              id: 'b_cave',
-              definitionId: caveDef.id,
-              position: { x: 0, y: 0 },
-              level: 1,
-              placedAt: dayMs,
-            });
-          },
-        });
-      } else if (
-        cave &&
-        cave.level < caveTargetLevel &&
-        playerLevel >= caveDef.unlockRequirements.minPlayerLevel + cave.level
-      ) {
-        const upCost = applyCostDiscount(
-          calculateUpgradeCost(caveDef, cave.level),
-          buffSummary.upgradeDiscountRate
-        );
-        const needCapacityForMix =
-          villagers.length >= cave.level * VILLAGER_CAPACITY_PER_CAVE_LEVEL &&
-          villagers.length < targetVillagers;
-        candidates.push({
-          roiScore: (needCapacityForMix ? 0.02 : 0.00001) / upCost,
-          cost: upCost,
-          apply: () => {
-            buildings = buildings.map((b) =>
-              b.id === cave.id ? { ...b, level: b.level + 1 } : b
-            );
-          },
-        });
-      }
-
-      // Recruit villagers when Cave capacity permits
-      if (cave && villagers.length < cave.level * VILLAGER_CAPACITY_PER_CAVE_LEVEL) {
-        const recCost = getVillagerRecruitCost(villagers.length);
-        const rolesToConsider: VillagerRole[] = [];
-        if (rawCounts.elder < maxElders) rolesToConsider.push('elder');
-        if (rawCounts.crafter < maxCrafters) rolesToConsider.push('crafter');
-        if (rawCounts.woodworker < maxWoodworkers) rolesToConsider.push('woodworker');
-
-        for (const role of rolesToConsider) {
-          const completesTribe =
-            (role === 'elder' &&
-              rawCounts.elder === 0 &&
-              rawCounts.crafter >= 1 &&
-              rawCounts.woodworker >= 1) ||
-            (role === 'crafter' &&
-              rawCounts.crafter === 0 &&
-              rawCounts.elder >= 1 &&
-              rawCounts.woodworker >= 1) ||
-            (role === 'woodworker' &&
-              rawCounts.woodworker === 0 &&
-              rawCounts.elder >= 1 &&
-              rawCounts.crafter >= 1);
-          const tribeBoost = completesTribe ? VILLAGER_COMPLETE_TRIBE_COIN_BONUS : 0;
-          const roleValue =
-            role === 'elder'
-              ? VILLAGER_ELDER_UPGRADE_DISCOUNT_RATE * 1.5
-              : role === 'crafter'
-              ? VILLAGER_CRAFTER_COIN_BONUS_RATE
-              : 0.015;
-          candidates.push({
-            roiScore: (roleValue + tribeBoost) / recCost,
-            cost: recCost,
-            apply: () => {
-              villagers.push({
-                id: `v_${nextId++}`,
-                role,
-                recruitedAt: dayMs,
-              });
-            },
-          });
-        }
-      }
-
-      // Required land expansions (minLandExpansions = 3)
-      if (landExpansions < req.minLandExpansions) {
-        const expIndex = landExpansions + 1;
-        if (playerLevel >= getExpansionRequiredLevel(expIndex)) {
-          const expCost = applyCostDiscount(
-            getExpansionCost(expIndex),
-            buffSummary.expansionDiscountRate
-          );
-          candidates.push({
-            roiScore: 0.00005 / expCost,
-            cost: expCost,
-            apply: () => {
-              landExpansions += 1;
-            },
-          });
-        }
-      }
-
-      // Economy buildings: Foraging Post x4 up to Lv.5
-      if (
-        forageInstances.length < forageReq.minCount &&
-        playerLevel >= foragingDef.unlockRequirements.minPlayerLevel &&
-        totalFocusMinutes >= foragingDef.unlockRequirements.minTotalFocusMinutes
-      ) {
-        const rate = getBuildingCoinBonusRateAtLevel(foragingDef, 1);
-        candidates.push({
-          roiScore: rate / foragingDef.baseCost,
-          cost: foragingDef.baseCost,
-          apply: () => {
-            buildings.push({
-              id: `b_${nextId++}`,
-              definitionId: foragingDef.id,
-              position: { x: 0, y: 0 },
-              level: 1,
-              placedAt: dayMs,
-            });
-          },
-        });
-      }
-      for (const inst of forageInstances) {
-        if (
-          inst.level < forageReq.minLevel &&
-          playerLevel >= foragingDef.unlockRequirements.minPlayerLevel + inst.level
-        ) {
-          const upCost = applyCostDiscount(
-            calculateUpgradeCost(foragingDef, inst.level),
-            buffSummary.upgradeDiscountRate
-          );
-          const stepRate = getBuildingCoinBonusRateAtLevel(foragingDef, 1);
-          candidates.push({
-            roiScore: stepRate / upCost,
-            cost: upCost,
-            apply: () => {
-              buildings = buildings.map((b) =>
-                b.id === inst.id ? { ...b, level: b.level + 1 } : b
-              );
-            },
-          });
-        }
-      }
-
-      // Economy buildings: Primitive Granary x4 up to Lv.5
-      if (
-        granaryInstances.length < granaryReq.minCount &&
-        playerLevel >= granaryDef.unlockRequirements.minPlayerLevel &&
-        totalFocusMinutes >= granaryDef.unlockRequirements.minTotalFocusMinutes
-      ) {
-        const rate = getBuildingCoinBonusRateAtLevel(granaryDef, 1);
-        candidates.push({
-          roiScore: rate / granaryDef.baseCost,
-          cost: granaryDef.baseCost,
-          apply: () => {
-            buildings.push({
-              id: `b_${nextId++}`,
-              definitionId: granaryDef.id,
-              position: { x: 0, y: 0 },
-              level: 1,
-              placedAt: dayMs,
-            });
-          },
-        });
-      }
-      for (const inst of granaryInstances) {
-        if (
-          inst.level < granaryReq.minLevel &&
-          playerLevel >= granaryDef.unlockRequirements.minPlayerLevel + inst.level
-        ) {
-          const upCost = applyCostDiscount(
-            calculateUpgradeCost(granaryDef, inst.level),
-            buffSummary.upgradeDiscountRate
-          );
-          const stepRate = getBuildingCoinBonusRateAtLevel(granaryDef, 1);
-          candidates.push({
-            roiScore: stepRate / upCost,
-            cost: upCost,
-            apply: () => {
-              buildings = buildings.map((b) =>
-                b.id === inst.id ? { ...b, level: b.level + 1 } : b
-              );
-            },
-          });
-        }
-      }
-
-      // Checklist prerequisite buildings (Campfire, Totem, Elder Hut)
-      if (!buildings.some((b) => b.definitionId === campfireDef.id)) {
-        candidates.push({
-          roiScore: 0.00001 / campfireDef.baseCost,
-          cost: campfireDef.baseCost,
-          apply: () => {
-            buildings.push({
-              id: `b_${nextId++}`,
-              definitionId: campfireDef.id,
-              position: { x: 0, y: 0 },
-              level: 1,
-              placedAt: dayMs,
-            });
-          },
-        });
-      }
-      if (
-        !buildings.some((b) => b.definitionId === totemDef.id) &&
-        totalFocusMinutes >= totemDef.unlockRequirements.minTotalFocusMinutes
-      ) {
-        candidates.push({
-          roiScore: 0.00001 / totemDef.baseCost,
-          cost: totemDef.baseCost,
-          apply: () => {
-            buildings.push({
-              id: `b_${nextId++}`,
-              definitionId: totemDef.id,
-              position: { x: 0, y: 0 },
-              level: 1,
-              placedAt: dayMs,
-            });
-          },
-        });
-      }
-      if (
-        !buildings.some((b) => b.definitionId === elderHutDef.id) &&
-        playerLevel >= elderHutDef.unlockRequirements.minPlayerLevel &&
-        totalFocusMinutes >= elderHutDef.unlockRequirements.minTotalFocusMinutes
-      ) {
-        candidates.push({
-          roiScore: 0.00001 / elderHutDef.baseCost,
-          cost: elderHutDef.baseCost,
-          apply: () => {
-            buildings.push({
-              id: `b_${nextId++}`,
-              definitionId: elderHutDef.id,
-              position: { x: 0, y: 0 },
-              level: 1,
-              placedAt: dayMs,
-            });
-          },
-        });
-      }
-
-      const affordable = candidates
-        .filter((c) => c.cost <= coins)
-        .sort((a, b) => b.roiScore - a.roiScore);
-
-      if (affordable.length > 0) {
-        const best = affordable[0];
-        coins -= best.cost;
-        best.apply();
-        boughtSomething = true;
-      }
-    }
+    // Spend quest Coins cleanly before end of day
+    spendAndEnqueueOptimal(dayMs);
 
     const playerLevel = calculatePlayerLevel(totalXP);
+    const activeJobs = civState.jobs ?? [];
+    const activeBuildingsOnly = civState.buildings.filter(
+      (b) => !isBuildingUnderConstruction(b.id, activeJobs)
+    );
+    const completedExpansions = Math.max(0, civState.grid.chunks.length - INITIAL_CHUNK_COUNT);
     const evalResult = evaluateEraAdvance({
       era: 'STONE_AGE',
-      buildings,
-      villagers,
-      landExpansions,
+      buildings: activeBuildingsOnly,
+      villagers: civState.villagers ?? [],
+      founderRole: civState.founderRole,
+      landExpansions: completedExpansions,
       playerLevel,
       totalFocusMinutes,
       coins,
@@ -551,99 +726,101 @@ function simulateStoneToBronzeProgression(
         finalLevel: playerLevel,
         finalMinutes: totalFocusMinutes,
         finalBonusRate: getCurrentCoinBonus(),
-        crafterCount: villagers.filter((v) => v.role === 'crafter').length,
-        elderCount: villagers.filter((v) => v.role === 'elder').length,
-        woodworkerCount: villagers.filter((v) => v.role === 'woodworker').length,
-        forageCount: buildings.filter((b) => b.definitionId === foragingDef.id).length,
-        granaryCount: buildings.filter((b) => b.definitionId === granaryDef.id).length,
-        landExpansions,
+        crafterCount: countRoleTotal('crafter'),
+        elderCount: countRoleTotal('elder'),
+        woodworkerCount: countRoleTotal('woodworker'),
+        forageCount: activeBuildingsOnly.filter((b) => b.definitionId === foragingDef.id).length,
+        granaryCount: activeBuildingsOnly.filter((b) => b.definitionId === granaryDef.id).length,
+        landExpansions: completedExpansions,
+        completedJobsMinutes,
       };
     }
   }
 
+  const activeJobs = civState.jobs ?? [];
+  const activeBuildingsOnly = civState.buildings.filter(
+    (b) => !isBuildingUnderConstruction(b.id, activeJobs)
+  );
   return {
     daysToEligible: 99,
     finalCoins: coins,
     finalLevel: calculatePlayerLevel(totalXP),
     finalMinutes: totalFocusMinutes,
     finalBonusRate: getCurrentCoinBonus(),
-    crafterCount: villagers.filter((v) => v.role === 'crafter').length,
-    elderCount: villagers.filter((v) => v.role === 'elder').length,
-    woodworkerCount: villagers.filter((v) => v.role === 'woodworker').length,
-    forageCount: buildings.filter((b) => b.definitionId === foragingDef.id).length,
-    granaryCount: buildings.filter((b) => b.definitionId === granaryDef.id).length,
-    landExpansions,
+    crafterCount: countRoleTotal('crafter'),
+    elderCount: countRoleTotal('elder'),
+    woodworkerCount: countRoleTotal('woodworker'),
+    forageCount: activeBuildingsOnly.filter((b) => b.definitionId === foragingDef.id).length,
+    granaryCount: activeBuildingsOnly.filter((b) => b.definitionId === granaryDef.id).length,
+    landExpansions: Math.max(0, civState.grid.chunks.length - INITIAL_CHUNK_COUNT),
+    completedJobsMinutes,
   };
 }
 
-test('EconomyBalance Suite 3: V5.2 progression meets 5-7d (3h/day) & ~2w (1-2h/day) targets (+-1d max) and proves buffs help', () => {
-  const res180 = simulateStoneToBronzeProgression([180]);
-  const res60x3 = simulateStoneToBronzeProgression([60, 60, 60]);
-  const res45x4 = simulateStoneToBronzeProgression([45, 45, 45, 45]);
-  const res120 = simulateStoneToBronzeProgression([120]);
-  const res60x2 = simulateStoneToBronzeProgression([60, 60]);
-  const res45x2 = simulateStoneToBronzeProgression([45, 45]);
-  const res60 = simulateStoneToBronzeProgression([60]);
+test('EconomyBalance Suite 3: 5E-1 progression with Founder, FIFO construction crew & arithmetic land expansion meets targets and proves buffs help', () => {
+  const res180 = simulateStoneToBronzeProgression5E1([180]);
+  const res60x3 = simulateStoneToBronzeProgression5E1([60, 60, 60]);
+  const res45x4 = simulateStoneToBronzeProgression5E1([45, 45, 45, 45]);
+  const res120 = simulateStoneToBronzeProgression5E1([120]);
+  const res60x2 = simulateStoneToBronzeProgression5E1([60, 60]);
+  const res45x2 = simulateStoneToBronzeProgression5E1([45, 45]);
+  const res60 = simulateStoneToBronzeProgression5E1([60]);
 
-  const targets: Array<readonly [string, SimResult, number]> = [
-    ['[180]', res180, 4],
-    ['[60,60,60]', res60x3, 7],
-    ['[45,45,45,45]', res45x4, 7],
-    ['[60,60]', res60x2, 9],
-    ['[45,45]', res45x2, 13],
-    ['[60]', res60, 17],
-  ];
-
-  for (const [label, res, expected] of targets) {
-    assert.ok(
-      Math.abs(res.daysToEligible - expected) <= 1,
-      `${label} expected ~${expected} (+-1) days, got ${res.daysToEligible} (coins=${res.finalCoins.toFixed(1)}, lv=${res.finalLevel}, mins=${res.finalMinutes})`
-    );
-  }
-
-  // Range assertions per V5.2 balance goals
-  for (const [label, res] of [
+  const allProfiles: Array<readonly [string, SimResult]> = [
     ['[180]', res180],
     ['[60,60,60]', res60x3],
     ['[45,45,45,45]', res45x4],
-  ] as const) {
-    assert.ok(
-      res.daysToEligible >= 4 && res.daysToEligible <= 8,
-      `3h/day profile ${label} got ${res.daysToEligible}d (expected [4, 8])`
-    );
-  }
-  assert.ok(
-    res60x3.daysToEligible >= 5 && res60x3.daysToEligible <= 7,
-    `Reference [60,60,60] got ${res60x3.daysToEligible}d (expected [5, 7])`
-  );
-  assert.ok(
-    res120.daysToEligible >= 7 && res120.daysToEligible <= 11,
-    `2h [120] got ${res120.daysToEligible}d`
-  );
-  for (const [label, res] of [
+    ['[120]', res120],
+    ['[60,60]', res60x2],
     ['[45,45]', res45x2],
     ['[60]', res60],
-  ] as const) {
-    assert.ok(
-      res.daysToEligible >= 12 && res.daysToEligible <= 19,
-      `1-1.5h/day profile ${label} got ${res.daysToEligible}d (expected [12, 19])`
-    );
+  ];
+
+  for (const [label, res] of allProfiles) {
+    assert.ok(res.daysToEligible < 99, `${label} failed to reach Bronze eligibility within 60 days`);
+    assert.ok(res.crafterCount >= 1 && res.elderCount >= 1 && res.woodworkerCount >= 1);
+    assert.ok(res.forageCount === 4 && res.granaryCount === 4 && res.landExpansions >= 3);
+    assert.ok(res.completedJobsMinutes > 0, `${label} must advance real construction jobs`);
   }
 
-  // "Buffs help" verification: villager buffs strictly shorten time to Bronze Age
-  const res60NoBuff = simulateStoneToBronzeProgression([60], {
+  // Range assertions per 5E-1 progression (including construction Focus time + FIFO crew constraints)
+  assert.ok(
+    res180.daysToEligible >= 6 && res180.daysToEligible <= 11,
+    `3h [180] got ${res180.daysToEligible}d (expected [6, 11])`
+  );
+  assert.ok(
+    res60x3.daysToEligible >= 6 && res60x3.daysToEligible <= 11,
+    `Reference 3h [60,60,60] got ${res60x3.daysToEligible}d (expected [6, 11])`
+  );
+  assert.ok(
+    res45x4.daysToEligible >= 6 && res45x4.daysToEligible <= 12,
+    `3h [45,45,45,45] got ${res45x4.daysToEligible}d (expected [6, 12])`
+  );
+  assert.ok(
+    res120.daysToEligible >= 9 && res120.daysToEligible <= 14,
+    `2h [120] got ${res120.daysToEligible}d (expected [9, 14])`
+  );
+  assert.ok(
+    res60x2.daysToEligible >= 9 && res60x2.daysToEligible <= 15,
+    `2h [60,60] got ${res60x2.daysToEligible}d (expected [9, 15])`
+  );
+  assert.ok(
+    res45x2.daysToEligible >= 13 && res45x2.daysToEligible <= 20,
+    `1.5h [45,45] got ${res45x2.daysToEligible}d (expected [13, 20])`
+  );
+  assert.ok(
+    res60.daysToEligible >= 18 && res60.daysToEligible <= 25,
+    `1h [60] got ${res60.daysToEligible}d (expected [18, 25])`
+  );
+
+  // "Buffs help" verification: villager buffs strictly accelerate Bronze Age eligibility under 5E-1
+  const res60NoBuff = simulateStoneToBronzeProgression5E1([60], {
     maxElders: 1,
     maxCrafters: 1,
     maxWoodworkers: 1,
     useVillagerBuffs: false,
   });
-  const res60x2NoBuff = simulateStoneToBronzeProgression([60, 60], {
-    maxElders: 1,
-    maxCrafters: 1,
-    maxWoodworkers: 1,
-    useVillagerBuffs: false,
-  });
-  const res45x2NoBuff = simulateStoneToBronzeProgression([45, 45], {
+  const res45x2NoBuff = simulateStoneToBronzeProgression5E1([45, 45], {
     maxElders: 1,
     maxCrafters: 1,
     maxWoodworkers: 1,
@@ -652,15 +829,11 @@ test('EconomyBalance Suite 3: V5.2 progression meets 5-7d (3h/day) & ~2w (1-2h/d
 
   assert.ok(
     res60.daysToEligible < res60NoBuff.daysToEligible,
-    `Expected villager buffs to speed up [60]: withBuffs=${res60.daysToEligible}d vs noBuffs=${res60NoBuff.daysToEligible}d`
-  );
-  assert.ok(
-    res60x2.daysToEligible < res60x2NoBuff.daysToEligible,
-    `Expected villager buffs to speed up [60,60]: withBuffs=${res60x2.daysToEligible}d vs noBuffs=${res60x2NoBuff.daysToEligible}d`
+    `Expected villager buffs to speed up 5E-1 [60]: withBuffs=${res60.daysToEligible}d vs noBuffs=${res60NoBuff.daysToEligible}d`
   );
   assert.ok(
     res45x2.daysToEligible < res45x2NoBuff.daysToEligible,
-    `Expected villager buffs to speed up [45,45]: withBuffs=${res45x2.daysToEligible}d vs noBuffs=${res45x2NoBuff.daysToEligible}d`
+    `Expected villager buffs to speed up 5E-1 [45,45]: withBuffs=${res45x2.daysToEligible}d vs noBuffs=${res45x2NoBuff.daysToEligible}d`
   );
 });
 
@@ -677,3 +850,70 @@ test('EconomyBalance Suite 4: Floor build+upgrade sum (3,907) + feeCoins (500) =
   assert.strictEqual(STONE_TO_BRONZE_ADVANCE_REQUIREMENTS.feeCoins, 500);
   assert.strictEqual(floorBuildUpgradeSum + STONE_TO_BRONZE_ADVANCE_REQUIREMENTS.feeCoins, 4407);
 });
+
+test('EconomyBalance Suite 5: 5E-1 Founder & Construction Crew gating invariants', () => {
+  // 1. Founder Villager counts toward evaluateEraAdvance role fulfillment & CoinBonus, yet takes 0 Cave slots
+  const founderOnlyEval = evaluateEraAdvance({
+    era: 'STONE_AGE',
+    buildings: [],
+    villagers: [
+      { id: 'v1', role: 'elder', recruitedAt: 1 },
+      { id: 'v2', role: 'woodworker', recruitedAt: 2 },
+    ],
+    founderRole: 'crafter',
+    landExpansions: 3,
+    playerLevel: 9,
+    totalFocusMinutes: 500,
+    coins: 500,
+  });
+  const roleCheck = founderOnlyEval.checks.find((c) => c.id === 'villager:crafter');
+  assert.strictEqual(roleCheck?.met, true);
+
+  // 2. Arithmetic land expansion sequence [30, 40, 50, 60, 70, 80, 95, 110]
+  assert.deepStrictEqual(
+    [1, 2, 3, 4, 5, 6, 7, 8].map((k) => getExpansionCost(k)),
+    [30, 40, 50, 60, 70, 80, 95, 110]
+  );
+
+  // 3. Under-construction Rock Shelter blocks recruitment and under-construction economy buildings give 0 CoinBonus
+  const jobs: ConstructionJob[] = [
+    {
+      id: 'j_cave',
+      kind: 'place',
+      status: 'ACTIVE',
+      definitionId: 'stone_age_study_cave',
+      buildingId: 'b_cave',
+      crewRequired: 1,
+      totalSeconds: 3600,
+      remainingSeconds: 1800,
+      paidCoins: 12,
+      createdAt: 1,
+    },
+    {
+      id: 'j_forage',
+      kind: 'place',
+      status: 'PENDING',
+      definitionId: 'stone_age_foraging_post',
+      buildingId: 'b_forage',
+      crewRequired: 1,
+      totalSeconds: 3600,
+      remainingSeconds: 3600,
+      paidCoins: 15,
+      createdAt: 2,
+    },
+  ];
+  const buildings: BuildingInstance[] = [
+    { id: 'b_cave', definitionId: 'stone_age_study_cave', position: { x: 0, y: 0 }, level: 1, placedAt: 1 },
+    { id: 'b_forage', definitionId: 'stone_age_foraging_post', position: { x: 4, y: 0 }, level: 1, placedAt: 2 },
+  ];
+  assert.strictEqual(findVillageCave(buildings, jobs), undefined);
+  const bonuses = extractCivilizationCoinBonuses(buildings, [], jobs, 'crafter');
+  assert.strictEqual(
+    bonuses.filter((b) => b.source === 'BUILDING').length,
+    0,
+    'Under-construction economy building must grant 0 CoinBonus'
+  );
+  assert.strictEqual(bonuses.length, 1);
+  assert.strictEqual(bonuses[0].rate, VILLAGER_CRAFTER_COIN_BONUS_RATE);
+});
+

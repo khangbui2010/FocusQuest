@@ -8,10 +8,16 @@ import {
 import { GridCoordinate } from '../../../core/civilization/types.ts';
 import { GridMap } from '../../../core/civilization/gridMap.ts';
 import { extractCivilizationCoinBonuses } from '../../../core/civilization/civilizationBonusHelper.ts';
+import {
+  getClearingOrigins,
+  getCrewSummary,
+  projectJobs,
+} from '../../../core/civilization/jobs.ts';
 import { aggregateCoinBonus } from '../../../core/economy/coinBonus.ts';
 import { calculatePlayerLevel } from '../../../core/economy/levelSystem.ts';
 import { PlayerEconomy } from '../../../types/economy.ts';
 import { FullSessionStateResponse } from '../../../types/messages.ts';
+import { SessionSnapshot } from '../../../types/session.ts';
 import {
   getCivilizationStateClient,
   placeBuildingClient,
@@ -19,6 +25,8 @@ import {
   upgradeBuildingClient,
   expandLandClient,
   recruitVillagerClient,
+  cancelConstructionJobClient,
+  selectFounderClient,
   sendExtensionMessage,
   onStorageChange,
 } from '../../services/extensionClient.ts';
@@ -27,7 +35,13 @@ import { CivilizationHeader } from './CivilizationHeader.tsx';
 import { MapGridView } from './MapGridView.tsx';
 import { BuildingCatalogPanel } from './BuildingCatalogPanel.tsx';
 import { BuildingDetailsModal } from './BuildingDetailsModal.tsx';
+import { ClearingChunkModal } from './ClearingChunkModal.tsx';
 import { LandExpansionModal } from './LandExpansionModal.tsx';
+import { FounderPickerModal } from './FounderPickerModal.tsx';
+import {
+  computeLiveSessionElapsedFocusSeconds,
+  isLiveFocusTicking,
+} from './jobProjection.ts';
 import {
   ActiveExpansionReveal,
   EXPANSION_ANIMATION_DURATION_MS,
@@ -53,6 +67,8 @@ import {
 
 export interface CivilizationScreenProps {
   lifetimeFocusMinutes?: number;
+  session?: SessionSnapshot | null;
+  initialCivState?: CivilizationState | null;
   onStateMutated?: () => void | Promise<void>;
 }
 
@@ -64,13 +80,15 @@ const DEFAULT_ECONOMY: PlayerEconomy = {
 
 export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
   lifetimeFocusMinutes,
+  session: propSession,
+  initialCivState,
   onStateMutated,
 }) => {
   const { locale, t } = useTranslation();
-  const [civState, setCivState] = useState<CivilizationState | null>(null);
+  const [civState, setCivState] = useState<CivilizationState | null>(initialCivState ?? null);
   const [economy, setEconomy] = useState<PlayerEconomy>(DEFAULT_ECONOMY);
   const [fetchedLifetimeMinutes, setFetchedLifetimeMinutes] = useState<number | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(initialCivState ? false : true);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<UiErrorPayload | null>(null);
 
@@ -82,10 +100,16 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
   );
   const [placementDef, setPlacementDef] = useState<BuildingDefinition | null>(null);
   const [inspectedBuilding, setInspectedBuilding] = useState<BuildingInstance | null>(null);
+  const [inspectedClearingJobId, setInspectedClearingJobId] = useState<string | null>(null);
+  const [sessionSnapshot, setSessionSnapshot] = useState<SessionSnapshot | null>(
+    propSession ?? null
+  );
+  const [nowTickMs, setNowTickMs] = useState<number>(() => Date.now());
   const [upgradeModalError, setUpgradeModalError] = useState<UiErrorPayload | null>(null);
   const [upgradeSuccessLevel, setUpgradeSuccessLevel] = useState<number | null>(null);
   const [recruitModalError, setRecruitModalError] = useState<UiErrorPayload | null>(null);
   const [recruitSuccessRole, setRecruitSuccessRole] = useState<VillagerRole | null>(null);
+  const [founderModalError, setFounderModalError] = useState<UiErrorPayload | null>(null);
   const [activeExpansionReveal, setActiveExpansionReveal] =
     useState<ActiveExpansionReveal | null>(null);
   const [unrevealedChunkOrigin, setUnrevealedChunkOrigin] = useState<GridCoordinate | null>(null);
@@ -227,6 +251,8 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
       }
 
       if (sessionRes.success && sessionRes.data) {
+        setSessionSnapshot(sessionRes.data.currentSession ?? null);
+        setNowTickMs(Date.now());
         if (sessionRes.data.economy) {
           setEconomy(sessionRes.data.economy);
         }
@@ -247,12 +273,31 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
   }, []);
 
   useEffect(() => {
+    if (propSession !== undefined) {
+      setSessionSnapshot(propSession);
+      setNowTickMs(Date.now());
+    }
+  }, [propSession]);
+
+  useEffect(() => {
     loadCivilizationData();
     const unsubscribe = onStorageChange(() => {
       loadCivilizationData();
     });
     return unsubscribe;
   }, [loadCivilizationData]);
+
+  // Pure UI 1s live countdown tick while a Focus session is actively RUNNING in Focus phase (zero storage writes)
+  useEffect(() => {
+    if (!isLiveFocusTicking(sessionSnapshot)) {
+      return;
+    }
+    setNowTickMs(Date.now());
+    const timer = setInterval(() => {
+      setNowTickMs(Date.now());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [sessionSnapshot]);
 
   const handleCloseExpansionModal = useCallback(() => {
     if (
@@ -282,7 +327,9 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      if (inspectedBuilding) {
+      if (inspectedClearingJobId) {
+        setInspectedClearingJobId(null);
+      } else if (inspectedBuilding) {
         setInspectedBuilding(null);
       } else if (
         flowStateRef.current === 'CINEMATIC_MOVING' &&
@@ -302,6 +349,7 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
+    inspectedClearingJobId,
     inspectedBuilding,
     selectedExpansionOrigin,
     isCatalogOpen,
@@ -313,10 +361,48 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
   const effectiveLifetimeFocusMinutes =
     fetchedLifetimeMinutes ?? lifetimeFocusMinutes ?? 0;
 
+  const liveFocusSeconds = useMemo(
+    () => computeLiveSessionElapsedFocusSeconds(sessionSnapshot, nowTickMs),
+    [sessionSnapshot, nowTickMs]
+  );
+
+  const projectedCivState = useMemo(
+    () => (civState ? projectJobs(civState, liveFocusSeconds) : null),
+    [civState, liveFocusSeconds]
+  );
+
+  const crewSummary = useMemo(
+    () =>
+      getCrewSummary(
+        projectedCivState?.jobs ?? civState?.jobs,
+        civState?.villagers,
+        civState?.founderRole
+      ),
+    [projectedCivState, civState]
+  );
+
+  const liveInspectedBuilding = useMemo(() => {
+    if (!inspectedBuilding || !civState) return null;
+    return civState.buildings.find((b) => b.id === inspectedBuilding.id) ?? null;
+  }, [inspectedBuilding, civState]);
+
+  const inspectedClearingJob = useMemo(() => {
+    if (!inspectedClearingJobId) return null;
+    const jobList = projectedCivState?.jobs ?? civState?.jobs ?? [];
+    return (
+      jobList.find((job) => job.id === inspectedClearingJobId && job.kind === 'expand') ?? null
+    );
+  }, [inspectedClearingJobId, projectedCivState, civState]);
+
   const activeBonusRate = useMemo(() => {
     if (!civState) return 0;
     return aggregateCoinBonus(
-      extractCivilizationCoinBonuses(civState.buildings, civState.villagers)
+      extractCivilizationCoinBonuses(
+        civState.buildings,
+        civState.villagers,
+        civState.jobs,
+        civState.founderRole
+      )
     );
   }, [civState]);
 
@@ -329,7 +415,10 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
     [economy.level, economy.totalXP]
   );
 
-  const chunksCount = civState ? civState.grid.chunks.length : 0;
+  const chunksCount = civState
+    ? civState.grid.chunks.length +
+      getClearingOrigins(projectedCivState?.jobs ?? civState.jobs).length
+    : 0;
   const isExpansionMode = isExpansionFlowActive(flowState);
   const isExpansionLocked = isManualCameraLocked(flowState) || isSubmitting;
   const canCancelExpansion = canCancelExpansionMode(flowState) && !isSubmitting;
@@ -342,6 +431,7 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
     }
     setSelectedExpansionOrigin(null);
     setInspectedBuilding(null);
+    setInspectedClearingJobId(null);
     setIsCatalogOpen(true);
   };
 
@@ -351,6 +441,7 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
       setErrorMsg(null);
       setIsCatalogOpen(false);
       setInspectedBuilding(null);
+      setInspectedClearingJobId(null);
       setPlacementDef(null);
       setSelectedExpansionOrigin(null);
       isCinematicAnimatingRef.current = false;
@@ -473,6 +564,43 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
     }
   };
 
+  const handleCancelJob = async (jobId: string) => {
+    if (isSubmitting || isExpansionFlowActive(flowStateRef.current)) return;
+    setIsSubmitting(true);
+    setErrorMsg(null);
+    try {
+      const res = await cancelConstructionJobClient({ jobId });
+      if (!isMountedRef.current) return;
+      if (res.success && res.data) {
+        setCivState(res.data.civilizationState);
+        setEconomy(res.data.economy);
+        setInspectedClearingJobId((prev) => (prev === jobId ? null : prev));
+        if (
+          inspectedBuilding &&
+          !res.data.civilizationState.buildings.some((b) => b.id === inspectedBuilding.id)
+        ) {
+          setInspectedBuilding(null);
+        }
+        await onStateMutated?.();
+      } else {
+        setErrorMsg({
+          message: res.error || 'Could not cancel construction job.',
+          code: res.errorCode ?? 'ACTION_FAILED',
+          params: res.errorParams,
+        });
+      }
+    } catch (err) {
+      if (!isMountedRef.current) return;
+      setErrorMsg(
+        toUiErrorPayload(err, 'ACTION_FAILED', 'Cancel job request failed.')
+      );
+    } finally {
+      if (isMountedRef.current) {
+        setIsSubmitting(false);
+      }
+    }
+  };
+
   const handleRecruitVillager = async (role: VillagerRole) => {
     if (isSubmitting || isExpansionFlowActive(flowStateRef.current)) return;
     setIsSubmitting(true);
@@ -498,6 +626,36 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
       if (!isMountedRef.current) return;
       setRecruitModalError(
         toUiErrorPayload(err, 'ACTION_FAILED', 'Recruitment request failed.')
+      );
+    } finally {
+      if (isMountedRef.current) {
+        setIsSubmitting(false);
+      }
+    }
+  };
+
+  const handleSelectFounder = async (role: VillagerRole) => {
+    if (isSubmitting || isExpansionFlowActive(flowStateRef.current)) return;
+    setIsSubmitting(true);
+    setFounderModalError(null);
+    setErrorMsg(null);
+    try {
+      const res = await selectFounderClient({ role });
+      if (!isMountedRef.current) return;
+      if (res.success && res.data) {
+        setCivState(res.data.civilizationState);
+        await onStateMutated?.();
+      } else {
+        setFounderModalError({
+          message: res.error || 'SELECT_FOUNDER requires a valid villager role.',
+          code: res.errorCode ?? 'CIV_INVALID_FOUNDER_PAYLOAD',
+          params: res.errorParams,
+        });
+      }
+    } catch (err) {
+      if (!isMountedRef.current) return;
+      setFounderModalError(
+        toUiErrorPayload(err, 'CIV_INVALID_FOUNDER_PAYLOAD', 'Failed to select starting villager.')
       );
     } finally {
       if (isMountedRef.current) {
@@ -578,9 +736,18 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
       if (!isMountedRef.current) return;
 
       if (res.success && res.data) {
+        const addedImmediateChunk =
+          detectNewlyAddedChunks(
+            civState.grid.chunks.map((c) => c.origin),
+            res.data.civilizationState.grid.chunks
+          ).length > 0;
         returnTargetRef.current = 'NORMAL';
         setCivState(res.data.civilizationState);
         setEconomy(res.data.economy);
+        if (!addedImmediateChunk) {
+          setSelectedExpansionOrigin(null);
+          updateFlowState('CAMERA_RETURNING');
+        }
         await onStateMutated?.();
       } else {
         setErrorMsg({
@@ -618,6 +785,8 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
         focusCoins={economy.focusCoins}
         lifetimeFocusMinutes={effectiveLifetimeFocusMinutes}
         activeBonusRate={activeBonusRate}
+        busyCrew={crewSummary.busyCrew}
+        totalCrew={crewSummary.totalCrew}
         isPlacementMode={Boolean(placementDef)}
         selectedBuildingDef={placementDef}
         onCancelPlacement={() => setPlacementDef(null)}
@@ -658,6 +827,7 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
       ) : (
         <MapGridView
           civilizationState={civState}
+          projectedJobs={projectedCivState?.jobs}
           placementDef={placementDef}
           onPlaceBuilding={handlePlaceBuilding}
           onInspectBuilding={(inst) => {
@@ -667,7 +837,14 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
             setUpgradeSuccessLevel(null);
             setRecruitModalError(null);
             setRecruitSuccessRole(null);
+            setInspectedClearingJobId(null);
             setInspectedBuilding(inst);
+          }}
+          onInspectClearingChunk={(job) => {
+            if (isExpansionFlowActive(flowStateRef.current)) return;
+            setErrorMsg(null);
+            setInspectedBuilding(null);
+            setInspectedClearingJobId(job.id);
           }}
           isSubmitting={isSubmitting}
           isExpansionMode={isExpansionMode}
@@ -701,11 +878,12 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
         lifetimeFocusMinutes={effectiveLifetimeFocusMinutes}
         currentEra={civState?.era ?? 'STONE_AGE'}
         placedBuildings={civState?.buildings ?? []}
+        totalCrew={crewSummary.totalCrew}
         onSelectBuilding={handleSelectBuildingForPlacement}
       />
 
       <BuildingDetailsModal
-        building={inspectedBuilding}
+        building={liveInspectedBuilding}
         onClose={() => {
           setInspectedBuilding(null);
           setUpgradeModalError(null);
@@ -716,7 +894,10 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
         onRemove={handleRemoveBuilding}
         onUpgrade={handleUpgradeBuilding}
         onRecruitVillager={handleRecruitVillager}
+        onCancelJob={handleCancelJob}
+        jobs={projectedCivState?.jobs ?? civState?.jobs ?? []}
         villagers={civState?.villagers ?? []}
+        founderRole={civState?.founderRole ?? null}
         playerLevel={playerLevel}
         playerCoins={economy.focusCoins}
         currentEra={civState?.era ?? 'STONE_AGE'}
@@ -727,6 +908,14 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
         isSubmitting={isSubmitting}
       />
 
+      <ClearingChunkModal
+        job={inspectedClearingJob}
+        allJobs={projectedCivState?.jobs ?? civState?.jobs ?? []}
+        onClose={() => setInspectedClearingJobId(null)}
+        onCancelJob={handleCancelJob}
+        isSubmitting={isSubmitting}
+      />
+
       <LandExpansionModal
         isOpen={isExpansionModalOpen}
         selectedOrigin={selectedExpansionOrigin}
@@ -734,9 +923,17 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
         playerLevel={playerLevel}
         playerCoins={economy.focusCoins}
         villagers={civState?.villagers ?? []}
+        founderRole={civState?.founderRole ?? null}
         onConfirm={handleConfirmExpandLand}
         onClose={handleCloseExpansionModal}
         isSubmitting={isSubmitting}
+      />
+
+      <FounderPickerModal
+        isOpen={Boolean(!isLoading && civState && !civState.founderRole)}
+        onSelectFounder={handleSelectFounder}
+        isSubmitting={isSubmitting}
+        error={founderModalError}
       />
     </div>
   );

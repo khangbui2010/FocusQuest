@@ -275,7 +275,7 @@ test('BuildingCatalogPanel SSR (4a): renders pixel sprites for all 6 Stone Age b
   for (const id of EXPECTED_STONE_AGE_IDS) {
     assert.ok(html.includes(`data-sprite-id="${id}"`), `Catalog missing sprite for ${id}`);
   }
-  assert.ok(html.includes('Meditation Cave'));
+  assert.ok(html.includes('Rock Shelter'));
   assert.ok(html.includes('Primitive Granary'));
 });
 
@@ -295,7 +295,7 @@ test('BuildingDetailsModal SSR (4a): renders building sprite in header and falls
   );
 
   assert.ok(caveHtml.includes('data-sprite-id="stone_age_study_cave"'));
-  assert.ok(caveHtml.includes('Meditation Cave'));
+  assert.ok(caveHtml.includes('Rock Shelter'));
   assert.ok(caveHtml.includes('Upgrade Building'));
   assert.ok(caveHtml.includes('data-testid="cave-village-section"'));
   assert.ok(caveHtml.includes('2 → 4 Villager capacity'));

@@ -5,6 +5,8 @@ import { MemoryStorageAdapter } from '../../src/storage/memoryStorageAdapter.ts'
 import { StorageManager } from '../../src/storage/storageManager.ts';
 import { CivilizationCoordinator } from '../../src/background/civilizationCoordinator.ts';
 import { getBuildingDefinition } from '../../src/core/civilization/buildingCatalog.ts';
+import { createInitialCivilizationState } from '../../src/core/civilization/civilizationState.ts';
+import { GridMap } from '../../src/core/civilization/gridMap.ts';
 import { SessionSnapshot } from '../../src/types/session.ts';
 
 test('Level Consistency: calculatePlayerLevel accurately calculates level progression from totalXP', () => {
@@ -72,6 +74,26 @@ test('Level Consistency: commitSessionOutcomeInternal updates economy.level atom
 test('Level Consistency: CivilizationCoordinator placeBuilding checks unlock requirements using totalXP', async () => {
   const adapter = new MemoryStorageAdapter();
   const storage = new StorageManager(adapter);
+
+  const initialCiv = createInitialCivilizationState();
+  const gm = GridMap.fromSnapshot(initialCiv.grid);
+  gm.placeBuilding('cave_seed', { x: 5, y: 5 }, { width: 3, height: 3 });
+  await storage.setCivilizationState({
+    ...initialCiv,
+    grid: gm.toSnapshot(),
+    buildings: [
+      {
+        id: 'cave_seed',
+        definitionId: 'stone_age_study_cave',
+        position: { x: 5, y: 5 },
+        level: 1,
+        placedAt: 1,
+      },
+    ],
+    villagers: [{ id: 'v_seed', role: 'woodworker', recruitedAt: 1 }],
+    founderRole: 'elder',
+  });
+
   const civCoordinator = new CivilizationCoordinator(storage);
   await civCoordinator.ensureInitialized();
 

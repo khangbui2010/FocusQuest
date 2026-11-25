@@ -21,7 +21,16 @@ import {
   findVillageCave,
   getVillagerCapacity,
 } from './villager.ts';
-import { isVillagerRole } from '../../ui/components/civilization/spriteRegistry.ts';
+import {
+  ConstructionJob,
+  MAX_ACTIVE_CONSTRUCTION_JOBS,
+  getTotalVillagerCount,
+} from './jobs.ts';
+import { CHUNK_HEIGHT, CHUNK_WIDTH } from './constants.ts';
+import {
+  VillagerRole,
+  isVillagerRole,
+} from '../../ui/components/civilization/spriteRegistry.ts';
 
 export const CURRENT_CIVILIZATION_SCHEMA_VERSION = 2;
 
@@ -34,6 +43,8 @@ export interface CivilizationState {
   readonly grid: GridMapSnapshot;
   readonly buildings: readonly BuildingInstance[];
   readonly villagers?: readonly Villager[];
+  readonly jobs?: readonly ConstructionJob[];
+  readonly founderRole?: VillagerRole | null;
   readonly lastUpdated: number;
 }
 
@@ -59,6 +70,8 @@ export function createInitialCivilizationState(): CivilizationState {
     grid: initialMap.toSnapshot(),
     buildings: [],
     villagers: [],
+    jobs: [],
+    founderRole: null,
     lastUpdated: Date.now(),
   };
 }
@@ -76,7 +89,8 @@ export function isValidEra(era: unknown): era is CivilizationEra {
 /**
  * Comprehensive validation of CivilizationState.
  * Verifies structural integrity, catalog definitions, spatial alignment,
- * footprint accuracy, and bidirectional occupancy agreement with GridMap.
+ * footprint accuracy, bidirectional occupancy agreement with GridMap,
+ * villagers, founderRole, and construction jobs invariants.
  * Rejects legacy 10x10 chunk states so sanitizeCivilizationState re-seeds 8x8 cleanly.
  */
 export function validateCivilizationState(state: unknown): CivilizationStateValidationResult {
@@ -88,7 +102,7 @@ export function validateCivilizationState(state: unknown): CivilizationStateVali
 
   const s = state as Partial<CivilizationState>;
 
-  // 1. Schema version (kept at 2 for Stage 4a-2; v3 is reserved for Quest schema in Stage 2a)
+  // 1. Schema version
   if (typeof s.schemaVersion !== 'number' || !Number.isInteger(s.schemaVersion) || s.schemaVersion < 1) {
     errors.push(`Invalid schemaVersion: expected integer >= 1, got ${String(s.schemaVersion)}`);
   }
@@ -125,6 +139,7 @@ export function validateCivilizationState(state: unknown): CivilizationStateVali
   }
 
   const seenInstanceIds = new Set<string>();
+  const buildingById = new Map<string, BuildingInstance>();
   let totalExpectedOccupiedCells = 0;
 
   for (let i = 0; i < s.buildings.length; i++) {
@@ -139,6 +154,7 @@ export function validateCivilizationState(state: unknown): CivilizationStateVali
       errors.push(`Duplicate building instance id detected: "${inst.id}"`);
     } else {
       seenInstanceIds.add(inst.id!);
+      buildingById.set(inst.id!, inst as BuildingInstance);
     }
 
     // 4.2 Definition reference
@@ -198,7 +214,169 @@ export function validateCivilizationState(state: unknown): CivilizationStateVali
     );
   }
 
-  // 6. Villagers invariant validation (if present; undefined remains valid for pre-v4 compatibility)
+  // 6. Optional founderRole validation
+  if (s.founderRole !== undefined && s.founderRole !== null && !isVillagerRole(s.founderRole)) {
+    errors.push(`Invalid founderRole: "${String(s.founderRole)}"`);
+  }
+
+  // 7. Jobs validation (if present)
+  const safeJobs: ConstructionJob[] = [];
+  if (s.jobs !== undefined) {
+    if (!Array.isArray(s.jobs)) {
+      errors.push('Jobs must be an array when defined');
+    } else {
+      const seenJobIds = new Set<string>();
+      const placeBuildingIds = new Set<string>();
+      const upgradePairs = new Set<string>();
+      const expandOrigins = new Set<string>();
+      const activeUpgradeBuildingIds = new Set<string>();
+      let activeCount = 0;
+      let busyCrew = 0;
+
+      // Pass 1: individual job validation
+      for (let i = 0; i < s.jobs.length; i += 1) {
+        const job = s.jobs[i] as Partial<ConstructionJob>;
+        if (!job || typeof job !== 'object') {
+          errors.push(`Job[${i}] must be a non-null object`);
+          continue;
+        }
+        if (typeof job.id !== 'string' || job.id.trim().length === 0) {
+          errors.push(`Job[${i}] has invalid or empty id`);
+        } else if (seenJobIds.has(job.id)) {
+          errors.push(`Duplicate construction job id detected: "${job.id}"`);
+        } else {
+          seenJobIds.add(job.id);
+        }
+
+        if (job.kind !== 'place' && job.kind !== 'upgrade' && job.kind !== 'expand') {
+          errors.push(`Job "${String(job.id)}" has invalid kind "${String(job.kind)}"`);
+          continue;
+        }
+        if (job.status !== 'ACTIVE' && job.status !== 'PENDING') {
+          errors.push(`Job "${String(job.id)}" has invalid status "${String(job.status)}"`);
+          continue;
+        }
+        if (
+          typeof job.crewRequired !== 'number' ||
+          !Number.isInteger(job.crewRequired) ||
+          job.crewRequired < 0
+        ) {
+          errors.push(`Job "${String(job.id)}" has invalid crewRequired`);
+        }
+        if (
+          typeof job.totalSeconds !== 'number' ||
+          !Number.isInteger(job.totalSeconds) ||
+          job.totalSeconds <= 0
+        ) {
+          errors.push(`Job "${String(job.id)}" has invalid totalSeconds`);
+        }
+        if (
+          typeof job.remainingSeconds !== 'number' ||
+          !Number.isInteger(job.remainingSeconds) ||
+          job.remainingSeconds < 1 ||
+          (typeof job.totalSeconds === 'number' && job.remainingSeconds > job.totalSeconds)
+        ) {
+          errors.push(`Job "${String(job.id)}" has invalid remainingSeconds`);
+        }
+        if (typeof job.paidCoins !== 'number' || !Number.isFinite(job.paidCoins) || job.paidCoins < 0) {
+          errors.push(`Job "${String(job.id)}" has invalid paidCoins`);
+        }
+        if (typeof job.createdAt !== 'number' || !Number.isFinite(job.createdAt) || job.createdAt < 0) {
+          errors.push(`Job "${String(job.id)}" has invalid createdAt`);
+        }
+
+        if (job.kind === 'place') {
+          if (typeof job.buildingId !== 'string' || !buildingById.has(job.buildingId)) {
+            errors.push(`Place job "${String(job.id)}" references missing building "${String(job.buildingId)}"`);
+          } else {
+            const b = buildingById.get(job.buildingId)!;
+            if (b.level !== 1) {
+              errors.push(`Under-construction building "${b.id}" must be at level 1`);
+            }
+            if (placeBuildingIds.has(job.buildingId)) {
+              errors.push(`Duplicate place job for building "${job.buildingId}"`);
+            }
+            placeBuildingIds.add(job.buildingId);
+          }
+        } else if (job.kind === 'upgrade') {
+          if (typeof job.buildingId !== 'string' || !buildingById.has(job.buildingId)) {
+            errors.push(`Upgrade job "${String(job.id)}" references missing building "${String(job.buildingId)}"`);
+          } else {
+            const b = buildingById.get(job.buildingId)!;
+            const def = getBuildingDefinition(b.definitionId);
+            const effMax = getEffectiveMaxLevel(def, isValidEra(s.era) ? s.era : 'STONE_AGE');
+            if (
+              typeof job.targetLevel !== 'number' ||
+              !Number.isInteger(job.targetLevel) ||
+              job.targetLevel <= b.level ||
+              job.targetLevel > effMax
+            ) {
+              errors.push(
+                `Upgrade job "${String(job.id)}" targetLevel ${String(job.targetLevel)} invalid for building level ${b.level}`
+              );
+            } else {
+              const pairKey = `${job.buildingId}:${job.targetLevel}`;
+              if (upgradePairs.has(pairKey)) {
+                errors.push(`Duplicate upgrade job targeting ${pairKey}`);
+              }
+              upgradePairs.add(pairKey);
+            }
+          }
+        } else if (job.kind === 'expand') {
+          if (
+            !isValidCoordinate(job.origin) ||
+            job.origin.x % CHUNK_WIDTH !== 0 ||
+            job.origin.y % CHUNK_HEIGHT !== 0
+          ) {
+            errors.push(`Expand job "${String(job.id)}" has invalid chunk origin`);
+          } else if (reconstructedMap.hasChunkAt(job.origin.x, job.origin.y)) {
+            errors.push(`Expand job "${String(job.id)}" targets already unlocked chunk`);
+          } else {
+            const oKey = `${job.origin.x},${job.origin.y}`;
+            if (expandOrigins.has(oKey)) {
+              errors.push(`Duplicate expand job for origin (${oKey})`);
+            }
+            expandOrigins.add(oKey);
+          }
+        }
+
+        if (job.status === 'ACTIVE') {
+          activeCount += 1;
+          if (typeof job.crewRequired === 'number' && Number.isFinite(job.crewRequired)) {
+            busyCrew += job.crewRequired;
+          }
+          if (job.kind === 'upgrade' && job.buildingId) {
+            if (activeUpgradeBuildingIds.has(job.buildingId)) {
+              errors.push(`Multiple ACTIVE upgrade jobs for building "${job.buildingId}"`);
+            }
+            activeUpgradeBuildingIds.add(job.buildingId);
+          }
+        }
+
+        safeJobs.push(job as ConstructionJob);
+      }
+
+      // Pass 2: cross-check 'upgrade' vs 'place' conflict, max active count & busy crew <= total villagers
+      for (const job of safeJobs) {
+        if (job.kind === 'upgrade' && job.buildingId && placeBuildingIds.has(job.buildingId)) {
+          errors.push(`Building "${job.buildingId}" cannot have both 'place' and 'upgrade' jobs`);
+        }
+      }
+
+      if (activeCount > MAX_ACTIVE_CONSTRUCTION_JOBS) {
+        errors.push(`Active job count (${activeCount}) exceeds limit (${MAX_ACTIVE_CONSTRUCTION_JOBS})`);
+      }
+
+      const validVillagers = Array.isArray(s.villagers) ? s.villagers : [];
+      const validFounder = isVillagerRole(s.founderRole) ? s.founderRole : null;
+      const totalCrew = getTotalVillagerCount(validVillagers, validFounder);
+      if (busyCrew > totalCrew) {
+        errors.push(`Busy crew (${busyCrew}) exceeds total villagers (${totalCrew})`);
+      }
+    }
+  }
+
+  // 8. Villagers invariant validation (if present; undefined remains valid for pre-v4 compatibility)
   if (s.villagers !== undefined) {
     if (!Array.isArray(s.villagers)) {
       errors.push('Villagers must be an array when defined');
@@ -231,10 +409,10 @@ export function validateCivilizationState(state: unknown): CivilizationStateVali
         }
       }
 
-      const cave = findVillageCave(s.buildings);
+      const cave = findVillageCave(s.buildings, safeJobs);
       const capacity = getVillagerCapacity(cave);
       if (s.villagers.length > 0 && !cave) {
-        errors.push('Villagers cannot exist without a Meditation Cave on the map');
+        errors.push('Villagers cannot exist without an active Meditation Cave on the map');
       } else if (s.villagers.length > capacity) {
         errors.push(
           `Villager count (${s.villagers.length}) exceeds Cave capacity (${capacity})`
@@ -261,3 +439,4 @@ export function sanitizeCivilizationState(raw: unknown): CivilizationState | nul
   }
   return raw as CivilizationState;
 }
+

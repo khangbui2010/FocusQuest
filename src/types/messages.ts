@@ -10,6 +10,7 @@ import { MusicPlayerState, MusicTrack, RepeatMode } from './music.ts';
 import { QuestPeriod, QuestResetCountdown, QuestState } from './quests.ts';
 import { ErrorParams } from './errors.ts';
 import { Villager } from '../core/civilization/villager.ts';
+import { ConstructionJob } from '../core/civilization/jobs.ts';
 import { VillagerRole } from '../ui/components/civilization/spriteRegistry.ts';
 
 export type MessageAction =
@@ -39,6 +40,8 @@ export type MessageAction =
   | 'UPGRADE_BUILDING'
   | 'EXPAND_LAND'
   | 'RECRUIT_VILLAGER'
+  | 'CANCEL_CONSTRUCTION_JOB'
+  | 'SELECT_FOUNDER'
   | 'GET_QUEST_STATE'
   | 'CLAIM_QUEST_REWARD'
   | 'SET_LANGUAGE'
@@ -110,6 +113,14 @@ export interface RecruitVillagerPayload {
   role: VillagerRole;
 }
 
+export interface CancelConstructionJobPayload {
+  jobId: string;
+}
+
+export interface SelectFounderPayload {
+  role: VillagerRole;
+}
+
 export interface ClaimQuestRewardPayload {
   period: QuestPeriod;
   questId: string;
@@ -157,6 +168,7 @@ export interface PlaceBuildingResponseData {
   building: BuildingInstance;
   civilizationState: CivilizationState;
   economy: PlayerEconomy;
+  job?: ConstructionJob;
 }
 
 export interface RemoveBuildingResponseData {
@@ -172,6 +184,7 @@ export interface UpgradeBuildingResponseData {
   building: BuildingInstance;
   newLevel: number;
   cost: number;
+  job?: ConstructionJob;
 }
 
 export interface ExpandLandResponseData {
@@ -179,6 +192,7 @@ export interface ExpandLandResponseData {
   civilizationState: CivilizationState;
   economy: PlayerEconomy;
   cost: number;
+  job?: ConstructionJob;
 }
 
 export interface RecruitVillagerResponseData {
@@ -186,6 +200,18 @@ export interface RecruitVillagerResponseData {
   civilizationState: CivilizationState;
   economy: PlayerEconomy;
   cost: number;
+}
+
+export interface CancelConstructionJobResponseData {
+  cancelledJobIds: readonly string[];
+  refundedCoins: number;
+  civilizationState: CivilizationState;
+  economy: PlayerEconomy;
+}
+
+export interface SelectFounderResponseData {
+  founderRole: VillagerRole;
+  civilizationState: CivilizationState;
 }
 
 export interface GetQuestStateResponseData {
@@ -228,6 +254,8 @@ export type ExtensionMessage =
   | { action: 'UPGRADE_BUILDING'; payload: UpgradeBuildingPayload }
   | { action: 'EXPAND_LAND'; payload: ExpandLandPayload }
   | { action: 'RECRUIT_VILLAGER'; payload: RecruitVillagerPayload }
+  | { action: 'CANCEL_CONSTRUCTION_JOB'; payload: CancelConstructionJobPayload }
+  | { action: 'SELECT_FOUNDER'; payload: SelectFounderPayload }
   | { action: 'GET_QUEST_STATE' }
   | { action: 'CLAIM_QUEST_REWARD'; payload: ClaimQuestRewardPayload }
   | { action: 'SET_LANGUAGE'; payload: SetLanguagePayload }

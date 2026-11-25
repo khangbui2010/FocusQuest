@@ -29,6 +29,13 @@ import {
 import { getEffectiveMaxLevel } from '../../../core/civilization/eraRules.ts';
 import { getVillagerBuffSummary } from '../../../core/civilization/villagerBuffs.ts';
 import {
+  ConstructionJob,
+  getPlaceJobForBuilding,
+  getTotalVillagerCount,
+  getUpgradeJobSpec,
+  getUpgradeJobsForBuilding,
+} from '../../../core/civilization/jobs.ts';
+import {
   VILLAGE_CAVE_DEFINITION_ID,
   Villager,
   evaluateRecruitment,
@@ -36,12 +43,20 @@ import {
 } from '../../../core/civilization/villager.ts';
 import { renderBuildingIcon } from './BuildingCatalogPanel.tsx';
 import {
+  CLOCK_TILE_INDEX,
+  ClockTileIcon,
   PixelSprite,
   VILLAGER_ROLES,
   VillagerRole,
   VillagerSprite,
   getBuildingSprite,
+  getConstructionSprite,
 } from './spriteRegistry.ts';
+import {
+  formatJobCountdown,
+  formatJobDurationMinutes,
+  getCancelJobRefundPreview,
+} from './jobProjection.ts';
 import { formatRewardAmount } from '../../utils/formatters.ts';
 import {
   getLocalizedBuildingDescription,
@@ -57,7 +72,10 @@ export interface BuildingDetailsModalProps {
   onRemove: (instanceId: string) => Promise<void>;
   onUpgrade?: (instanceId: string, expectedLevel: number) => Promise<void>;
   onRecruitVillager?: (role: VillagerRole) => Promise<void>;
+  onCancelJob?: (jobId: string) => Promise<void>;
+  jobs?: readonly ConstructionJob[];
   villagers?: readonly Villager[];
+  founderRole?: VillagerRole | null;
   playerLevel?: number;
   playerCoins?: number;
   currentEra?: CivilizationEra;
@@ -74,7 +92,10 @@ export const BuildingDetailsModal: React.FC<BuildingDetailsModalProps> = ({
   onRemove,
   onUpgrade,
   onRecruitVillager,
+  onCancelJob,
+  jobs = [],
   villagers = [],
+  founderRole = null,
   playerLevel = 1,
   playerCoins = 0,
   currentEra = 'STONE_AGE',
@@ -86,14 +107,20 @@ export const BuildingDetailsModal: React.FC<BuildingDetailsModalProps> = ({
 }) => {
   const { locale, t } = useTranslation();
   const [confirmDemolish, setConfirmDemolish] = useState(false);
+  const [confirmCancelBuild, setConfirmCancelBuild] = useState(false);
+  const [cancellingJobId, setCancellingJobId] = useState<string | null>(null);
   const [inFlightBuildingId, setInFlightBuildingId] = useState<string | null>(null);
   const inFlightLockRef = useRef<string | null>(null);
+  const cancelJobLockRef = useRef<string | null>(null);
   const [selectedRole, setSelectedRole] = useState<VillagerRole>('elder');
   const [isRecruitInFlight, setIsRecruitInFlight] = useState(false);
   const recruitLockRef = useRef<boolean>(false);
 
   useEffect(() => {
     setConfirmDemolish(false);
+    setConfirmCancelBuild(false);
+    setCancellingJobId(null);
+    cancelJobLockRef.current = null;
     setInFlightBuildingId(null);
     inFlightLockRef.current = null;
     setIsRecruitInFlight(false);
@@ -103,7 +130,13 @@ export const BuildingDetailsModal: React.FC<BuildingDetailsModalProps> = ({
   if (!building) return null;
 
   const def = getBuildingDefinition(building.definitionId);
-  const sprite = getBuildingSprite(building.definitionId);
+  const placeJob = getPlaceJobForBuilding(building.id, jobs);
+  const upgradeJobs = getUpgradeJobsForBuilding(building.id, jobs);
+  const baseSprite = getBuildingSprite(building.definitionId);
+  const constructionSprite = placeJob
+    ? getConstructionSprite(building.definitionId, placeJob.remainingSeconds, placeJob.totalSeconds)
+    : null;
+  const sprite = constructionSprite ?? baseSprite;
   const thumbScale = sprite
     ? sprite.width === 16 && sprite.height === 16
       ? 2
@@ -129,7 +162,8 @@ export const BuildingDetailsModal: React.FC<BuildingDetailsModalProps> = ({
       ? formatRewardAmount(coinBonusEffect.rate * building.level * 100)
       : null;
 
-  const buffSummary = getVillagerBuffSummary(villagers);
+  const buffSummary = getVillagerBuffSummary(villagers, founderRole);
+  const totalCrew = getTotalVillagerCount(villagers, founderRole);
   const upgradeEval = evaluateBuildingUpgrade({
     instance: building,
     definition: def,
@@ -137,29 +171,41 @@ export const BuildingDetailsModal: React.FC<BuildingDetailsModalProps> = ({
     playerLevel,
     playerCoins,
     upgradeDiscountRate: buffSummary.upgradeDiscountRate,
+    jobs,
+    totalVillagers: totalCrew,
   });
+  const nextUpgradeSpec = getUpgradeJobSpec(upgradeEval.currentLevel);
 
   const isCave = def?.id === VILLAGE_CAVE_DEFINITION_ID;
   const caveCapacity = isCave ? getVillagerCapacity(building) : 0;
   const currentVillagerCount = villagers.length;
   const isUpgradeBusy = isSubmitting || inFlightBuildingId === building.id;
-  const isAnyBusy = isUpgradeBusy || isRecruitInFlight;
+  const isCancellingAnyJob = cancellingJobId !== null;
+  const isAnyBusy = isUpgradeBusy || isRecruitInFlight || isCancellingAnyJob;
   const canTriggerUpgrade = Boolean(onUpgrade) && upgradeEval.canUpgrade && !isAnyBusy;
-  const demolishRefund = calculateBuildingDemolishRefund(def, building.level);
+  const demolishRefund = calculateBuildingDemolishRefund(def, building.level, {
+    placeJob,
+    upgradeJobs,
+  });
   const canDemolish = !(isCave && currentVillagerCount > 0);
   const reducedMotion = prefersReducedMotion();
   const showUpgradeSuccess = upgradeSuccessLevel === building.level;
 
   const recruitEval = isCave
     ? evaluateRecruitment({
-        caveBuilding: building,
+        caveBuilding: placeJob ? undefined : building,
         villagers,
+        founderRole,
         playerCoins,
         role: selectedRole,
       })
     : null;
   const canTriggerRecruit =
-    isCave && Boolean(onRecruitVillager) && Boolean(recruitEval?.canRecruit) && !isAnyBusy;
+    isCave &&
+    !placeJob &&
+    Boolean(onRecruitVillager) &&
+    Boolean(recruitEval?.canRecruit) &&
+    !isAnyBusy;
 
   const handleUpgradeClick = async () => {
     if (!onUpgrade || !upgradeEval.canUpgrade || isAnyBusy) return;
@@ -168,7 +214,7 @@ export const BuildingDetailsModal: React.FC<BuildingDetailsModalProps> = ({
     inFlightLockRef.current = building.id;
     setInFlightBuildingId(building.id);
     try {
-      await onUpgrade(building.id, building.level);
+      await onUpgrade(building.id, upgradeEval.currentLevel);
     } finally {
       if (inFlightLockRef.current === building.id) {
         inFlightLockRef.current = null;
@@ -178,7 +224,7 @@ export const BuildingDetailsModal: React.FC<BuildingDetailsModalProps> = ({
   };
 
   const handleRecruitClick = async () => {
-    if (!isCave || !onRecruitVillager || !recruitEval?.canRecruit || isAnyBusy) return;
+    if (!isCave || placeJob || !onRecruitVillager || !recruitEval?.canRecruit || isAnyBusy) return;
     if (recruitLockRef.current) return;
 
     recruitLockRef.current = true;
@@ -191,9 +237,28 @@ export const BuildingDetailsModal: React.FC<BuildingDetailsModalProps> = ({
     }
   };
 
+  const handleCancelJobClick = async (jobId: string) => {
+    if (!onCancelJob || isAnyBusy) return;
+    if (cancelJobLockRef.current === jobId) return;
+    cancelJobLockRef.current = jobId;
+    setCancellingJobId(jobId);
+    try {
+      await onCancelJob(jobId);
+      setConfirmCancelBuild(false);
+    } finally {
+      if (cancelJobLockRef.current === jobId) {
+        cancelJobLockRef.current = null;
+      }
+      setCancellingJobId(null);
+    }
+  };
+
+  const formattedUpgradeCost = formatRewardAmount(upgradeEval.cost);
   let upgradeBtnLabel = t('civ.details.upgradeBtn');
   if (!upgradeEval.isCategoryUpgradeable) {
     upgradeBtnLabel = t('civ.details.upgradeFixedBadge');
+  } else if (upgradeEval.reason === 'BUILDING_UNDER_CONSTRUCTION') {
+    upgradeBtnLabel = t('civ.job.pendingShort');
   } else if (upgradeEval.reason === 'BUILDING_MAX_LEVEL') {
     upgradeBtnLabel = t('civ.details.upgradeMaxBadge');
   } else if (isUpgradeBusy) {
@@ -202,11 +267,32 @@ export const BuildingDetailsModal: React.FC<BuildingDetailsModalProps> = ({
     upgradeBtnLabel = t('civ.details.upgradeNeedLevelShort', {
       required: upgradeEval.requiredPlayerLevel,
     });
+  } else if (upgradeEval.reason === 'NOT_ENOUGH_VILLAGERS') {
+    upgradeBtnLabel = t('civ.details.upgradeNeedVillagersShort', {
+      required: nextUpgradeSpec.crew,
+    });
   } else if (upgradeEval.reason === 'INSUFFICIENT_COINS') {
     upgradeBtnLabel = t('civ.catalog.needCoins', {
-      cost: formatRewardAmount(upgradeEval.cost),
+      cost: formattedUpgradeCost,
     });
   }
+
+  const placeRefundPreview = placeJob ? getCancelJobRefundPreview(placeJob, jobs) : null;
+  const placePercent = placeJob
+    ? Math.max(
+        0,
+        Math.min(
+          100,
+          Math.floor(
+            ((placeJob.totalSeconds - placeJob.remainingSeconds) / Math.max(1, placeJob.totalSeconds)) *
+              100
+          )
+        )
+      )
+    : 0;
+  const formattedPlaceRefund = placeRefundPreview
+    ? formatRewardAmount(placeRefundPreview.refundCoins)
+    : '0';
 
   return (
     <div
@@ -302,32 +388,118 @@ export const BuildingDetailsModal: React.FC<BuildingDetailsModalProps> = ({
             </div>
           </div>
 
-          {/* Active Effect */}
-          <div className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-[11px]">
-            <div className="font-semibold text-slate-800 dark:text-slate-200 mb-0.5">
-              {t('civ.details.activeEffectTitle')}
+          {/* Under Construction Banner (Milestone 5E-1) */}
+          {placeJob && placeRefundPreview && (
+            <div
+              data-testid="building-under-construction-section"
+              className="p-2.5 rounded-xl border border-sky-300/80 dark:border-sky-800/70 bg-sky-50/70 dark:bg-sky-950/30 space-y-2 text-[11px]"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-1.5 font-semibold text-sky-900 dark:text-sky-200">
+                  <ClockTileIcon
+                    tileIndex={
+                      placeJob.status === 'ACTIVE'
+                        ? CLOCK_TILE_INDEX.CLOCK
+                        : CLOCK_TILE_INDEX.HOURGLASS
+                    }
+                    size={14}
+                  />
+                  <span>{t('civ.details.underConstructionTitle')}</span>
+                </span>
+                <span className="font-mono font-semibold text-sky-800 dark:text-sky-300 tabular-nums">
+                  {placeJob.status === 'ACTIVE'
+                    ? formatJobCountdown(placeJob.remainingSeconds)
+                    : t('civ.job.pendingShort')}
+                </span>
+              </div>
+
+              <p className="text-[10px] text-sky-800/90 dark:text-sky-300/90 leading-snug">
+                {t('civ.details.underConstructionDesc', { crew: placeJob.crewRequired })}
+              </p>
+
+              <div className="text-[10px] font-medium text-sky-900 dark:text-sky-200 tabular-nums">
+                {placeJob.status === 'ACTIVE'
+                  ? t('civ.details.constructionProgress', {
+                      percent: placePercent,
+                      time: formatJobCountdown(placeJob.remainingSeconds),
+                    })
+                  : t('civ.details.constructionPendingNote', { crew: placeJob.crewRequired })}
+              </div>
+
+              {onCancelJob &&
+                (!confirmCancelBuild ? (
+                  <button
+                    type="button"
+                    data-testid="cancel-build-job-btn"
+                    disabled={isAnyBusy}
+                    onClick={() => setConfirmCancelBuild(true)}
+                    className="w-full py-1.5 px-2.5 inline-flex items-center justify-center gap-1.5 text-[11px] font-semibold text-rose-600 dark:text-rose-400 bg-white dark:bg-slate-900 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                    <span>
+                      {t('civ.details.cancelBuildBtn', { refund: formattedPlaceRefund })}
+                    </span>
+                  </button>
+                ) : (
+                  <div className="space-y-1.5 p-2 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60">
+                    <div className="text-[10px] text-rose-700 dark:text-rose-300 leading-snug">
+                      {t('civ.details.cancelBuildConfirm', {
+                        refund: formattedPlaceRefund,
+                        percent: placeRefundPreview.isUnstarted ? '100' : '50',
+                      })}
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        disabled={isAnyBusy}
+                        onClick={() => setConfirmCancelBuild(false)}
+                        className="py-1 px-2 text-[10px] font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded cursor-pointer"
+                      >
+                        {t('civ.details.cancelBtn')}
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="confirm-cancel-build-job-btn"
+                        disabled={isAnyBusy}
+                        onClick={() => void handleCancelJobClick(placeJob.id)}
+                        className="py-1 px-2 text-[10px] font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded cursor-pointer disabled:opacity-50"
+                      >
+                        {t('civ.details.confirmCancelJobBtn')}
+                      </button>
+                    </div>
+                  </div>
+                ))}
             </div>
-            {isCave ? (
-              <p className="text-indigo-700 dark:text-indigo-400">
-                {t('civ.details.effectCaveSupport', { capacity: caveCapacity })}
-              </p>
-            ) : activeBonusPercent ? (
-              <p className="text-emerald-700 dark:text-emerald-400">
-                {t('civ.details.effectCoinBonus', { percent: activeBonusPercent })}
-              </p>
-            ) : def?.category === 'FOCUS_SUPPORT' ? (
-              <p className="text-indigo-700 dark:text-indigo-400">
-                {t('civ.details.effectFocusSupport')}
-              </p>
-            ) : (
-              <p className="text-slate-500 dark:text-slate-400">
-                {t('civ.details.effectDecor')}
-              </p>
-            )}
-          </div>
+          )}
+
+          {/* Active Effect */}
+          {!placeJob && (
+            <div className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-[11px]">
+              <div className="font-semibold text-slate-800 dark:text-slate-200 mb-0.5">
+                {t('civ.details.activeEffectTitle')}
+              </div>
+              {isCave ? (
+                <p className="text-indigo-700 dark:text-indigo-400">
+                  {t('civ.details.effectCaveSupport', { capacity: caveCapacity })}
+                </p>
+              ) : activeBonusPercent ? (
+                <p className="text-emerald-700 dark:text-emerald-400">
+                  {t('civ.details.effectCoinBonus', { percent: activeBonusPercent })}
+                </p>
+              ) : def?.category === 'FOCUS_SUPPORT' ? (
+                <p className="text-indigo-700 dark:text-indigo-400">
+                  {t('civ.details.effectFocusSupport')}
+                </p>
+              ) : (
+                <p className="text-slate-500 dark:text-slate-400">
+                  {t('civ.details.effectDecor')}
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Village & Villager Recruitment (Meditation Cave V2) */}
-          {isCave && recruitEval && (
+          {isCave && !placeJob && recruitEval && (
             <div
               data-testid="cave-village-section"
               className="p-2.5 rounded-xl border border-indigo-200/80 dark:border-indigo-800/60 bg-indigo-50/40 dark:bg-indigo-950/20 space-y-2"
@@ -546,7 +718,78 @@ export const BuildingDetailsModal: React.FC<BuildingDetailsModalProps> = ({
             </div>
           )}
 
-          {/* Upgrade Section (Milestone 5C-1) */}
+          {/* Queued Upgrades (Milestone 5E-1) */}
+          {upgradeJobs.length > 0 && (
+            <div
+              data-testid="building-upgrade-queue-section"
+              className="p-2.5 rounded-xl border border-indigo-200/80 dark:border-indigo-800/60 bg-indigo-50/40 dark:bg-indigo-950/20 space-y-1.5"
+            >
+              <div className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">
+                {t('civ.details.upgradeQueueTitle')}
+              </div>
+              <div className="space-y-1">
+                {upgradeJobs.map((uJob) => {
+                  const toLevel = uJob.targetLevel ?? building.level + 1;
+                  const fromLevel = toLevel - 1;
+                  const isActive = uJob.status === 'ACTIVE';
+                  const preview = getCancelJobRefundPreview(uJob, jobs);
+                  const previewRefund = formatRewardAmount(preview.refundCoins);
+                  const formattedCountdown = formatJobCountdown(uJob.remainingSeconds);
+
+                  return (
+                    <div
+                      key={uJob.id}
+                      data-testid={`upgrade-job-row-${uJob.id}`}
+                      className="flex items-center justify-between gap-2 p-1.5 rounded-lg bg-white/90 dark:bg-slate-900/60 border border-indigo-200/70 dark:border-indigo-800/50 text-[10px]"
+                    >
+                      <div className="min-w-0">
+                        <div className="inline-flex items-center gap-1 font-semibold text-slate-800 dark:text-slate-200 font-mono tabular-nums">
+                          <ClockTileIcon
+                            tileIndex={
+                              isActive ? CLOCK_TILE_INDEX.CLOCK : CLOCK_TILE_INDEX.HOURGLASS
+                            }
+                            size={11}
+                          />
+                          <span>
+                            {isActive
+                              ? t('civ.details.upgradeJobRowActive', {
+                                  from: fromLevel,
+                                  to: toLevel,
+                                  time: formattedCountdown,
+                                })
+                              : t('civ.details.upgradeJobRowPending', {
+                                  from: fromLevel,
+                                  to: toLevel,
+                                })}
+                          </span>
+                        </div>
+                        <div className="text-[9px] text-slate-500 dark:text-slate-400 tabular-nums">
+                          {t('civ.details.cancelUpgradeHint', {
+                            level: toLevel,
+                            refund: previewRefund,
+                          })}
+                        </div>
+                      </div>
+
+                      {onCancelJob && (
+                        <button
+                          type="button"
+                          data-testid={`cancel-upgrade-job-${uJob.id}`}
+                          disabled={isAnyBusy}
+                          onClick={() => void handleCancelJobClick(uJob.id)}
+                          className="px-2 py-1 text-[10px] font-semibold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/30 hover:bg-rose-100 dark:hover:bg-rose-950/50 border border-rose-200 dark:border-rose-900/60 rounded whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+                        >
+                          {t('civ.details.cancelUpgradeBtn')}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Upgrade Section (Milestone 5C-1 + 5E-1 Queue/Crew) */}
           <div
             data-testid="building-upgrade-section"
             className={`p-2.5 rounded-xl border space-y-1.5 ${
@@ -565,6 +808,10 @@ export const BuildingDetailsModal: React.FC<BuildingDetailsModalProps> = ({
                   <div className="text-[10px] text-slate-500 dark:text-slate-400">
                     {t('civ.details.upgradeNonUpgradeable')}
                   </div>
+                ) : upgradeEval.reason === 'BUILDING_UNDER_CONSTRUCTION' ? (
+                  <div className="text-[10px] text-sky-700 dark:text-sky-400 font-medium">
+                    {t('civ.details.upgradeUnderConstruction')}
+                  </div>
                 ) : upgradeEval.reason === 'BUILDING_MAX_LEVEL' ? (
                   <div className="text-[10px] text-emerald-700 dark:text-emerald-400 font-medium">
                     {t('civ.details.upgradeMax')}
@@ -574,8 +821,8 @@ export const BuildingDetailsModal: React.FC<BuildingDetailsModalProps> = ({
                     <div className="text-slate-600 dark:text-slate-300 flex items-center gap-1.5 flex-wrap">
                       <span>
                         {t('civ.details.upgradeNext', {
-                          level: upgradeEval.nextLevel ?? building.level + 1,
-                          cost: formatRewardAmount(upgradeEval.cost),
+                          level: upgradeEval.nextLevel ?? upgradeEval.currentLevel + 1,
+                          cost: formattedUpgradeCost,
                         })}
                       </span>
                       {upgradeEval.discountRate > 0 && upgradeEval.baseCost > upgradeEval.cost && (
@@ -597,6 +844,12 @@ export const BuildingDetailsModal: React.FC<BuildingDetailsModalProps> = ({
                         </>
                       )}
                     </div>
+                    <div className="text-[10px] text-slate-500 dark:text-slate-400 tabular-nums">
+                      {t('civ.details.upgradeDurationCrew', {
+                        crew: nextUpgradeSpec.crew,
+                        minutes: formatJobDurationMinutes(nextUpgradeSpec.durationSeconds),
+                      })}
+                    </div>
                     {upgradeEval.nextCoinBonusRate > upgradeEval.currentCoinBonusRate && (
                       <div className="text-emerald-700 dark:text-emerald-400 font-medium">
                         {t('civ.details.upgradeBonusPreview', {
@@ -613,7 +866,7 @@ export const BuildingDetailsModal: React.FC<BuildingDetailsModalProps> = ({
                         {t('civ.details.upgradeCaveCapacityPreview', {
                           current: caveCapacity,
                           next: getVillagerCapacity({
-                            level: upgradeEval.nextLevel ?? building.level + 1,
+                            level: upgradeEval.nextLevel ?? upgradeEval.currentLevel + 1,
                           }),
                         })}
                       </div>
@@ -622,6 +875,14 @@ export const BuildingDetailsModal: React.FC<BuildingDetailsModalProps> = ({
                       <div className="text-amber-600 dark:text-amber-400 font-medium">
                         {t('civ.details.upgradeNeedLevel', {
                           required: upgradeEval.requiredPlayerLevel,
+                        })}
+                      </div>
+                    )}
+                    {upgradeEval.reason === 'NOT_ENOUGH_VILLAGERS' && (
+                      <div className="text-amber-600 dark:text-amber-400 font-medium">
+                        {t('civ.details.upgradeNeedVillagers', {
+                          required: nextUpgradeSpec.crew,
+                          current: totalCrew,
                         })}
                       </div>
                     )}
@@ -685,64 +946,66 @@ export const BuildingDetailsModal: React.FC<BuildingDetailsModalProps> = ({
           </div>
 
           {/* Demolish Action */}
-          <div className="pt-1 border-t border-slate-200 dark:border-slate-800 space-y-1.5">
-            {isCave && !canDemolish && (
-              <div
-                data-testid="demolish-blocked-villagers-hint"
-                className="text-[10px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 rounded-lg px-2 py-1"
-              >
-                {t('civ.details.demolishBlockedVillagers', { count: currentVillagerCount })}
-              </div>
-            )}
-            {!confirmDemolish ? (
-              <button
-                type="button"
-                data-testid="building-demolish-btn"
-                disabled={isAnyBusy || !canDemolish}
-                onClick={() => {
-                  if (!canDemolish) return;
-                  setConfirmDemolish(true);
-                }}
-                className="w-full py-2 px-3 inline-flex items-center justify-center gap-1.5 text-xs font-semibold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/30 hover:bg-rose-100 dark:hover:bg-rose-950/50 border border-rose-200 dark:border-rose-900/60 rounded-xl transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Trash2 className="w-3.5 h-3.5 shrink-0" />
-                <span>{t('civ.details.demolishBtn')}</span>
-              </button>
-            ) : (
-              <div className="space-y-2 p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/60">
-                <div className="flex items-start gap-1.5 text-[11px] text-rose-700 dark:text-rose-300">
-                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                  <span>
-                    {t('civ.details.demolishWarning', {
-                      name,
-                      refund: formatRewardAmount(demolishRefund),
-                    })}
-                  </span>
+          {!placeJob && (
+            <div className="pt-1 border-t border-slate-200 dark:border-slate-800 space-y-1.5">
+              {isCave && !canDemolish && (
+                <div
+                  data-testid="demolish-blocked-villagers-hint"
+                  className="text-[10px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 rounded-lg px-2 py-1"
+                >
+                  {t('civ.details.demolishBlockedVillagers', { count: currentVillagerCount })}
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    disabled={isAnyBusy}
-                    onClick={() => setConfirmDemolish(false)}
-                    className="py-1.5 px-3 text-[11px] font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors cursor-pointer"
-                  >
-                    {t('civ.details.cancelBtn')}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isAnyBusy || !canDemolish}
-                    onClick={() => {
-                      if (!canDemolish) return;
-                      void onRemove(building.id);
-                    }}
-                    className="py-1.5 px-3 text-[11px] font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {isAnyBusy ? t('civ.details.removingBtn') : t('civ.details.confirmDemolishBtn')}
-                  </button>
+              )}
+              {!confirmDemolish ? (
+                <button
+                  type="button"
+                  data-testid="building-demolish-btn"
+                  disabled={isAnyBusy || !canDemolish}
+                  onClick={() => {
+                    if (!canDemolish) return;
+                    setConfirmDemolish(true);
+                  }}
+                  className="w-full py-2 px-3 inline-flex items-center justify-center gap-1.5 text-xs font-semibold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/30 hover:bg-rose-100 dark:hover:bg-rose-950/50 border border-rose-200 dark:border-rose-900/60 rounded-xl transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                  <span>{t('civ.details.demolishBtn')}</span>
+                </button>
+              ) : (
+                <div className="space-y-2 p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/60">
+                  <div className="flex items-start gap-1.5 text-[11px] text-rose-700 dark:text-rose-300">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                    <span>
+                      {t('civ.details.demolishWarning', {
+                        name,
+                        refund: formatRewardAmount(demolishRefund),
+                      })}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      disabled={isAnyBusy}
+                      onClick={() => setConfirmDemolish(false)}
+                      className="py-1.5 px-3 text-[11px] font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+                    >
+                      {t('civ.details.cancelBtn')}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isAnyBusy || !canDemolish}
+                      onClick={() => {
+                        if (!canDemolish) return;
+                        void onRemove(building.id);
+                      }}
+                      className="py-1.5 px-3 text-[11px] font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isAnyBusy ? t('civ.details.removingBtn') : t('civ.details.confirmDemolishBtn')}
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

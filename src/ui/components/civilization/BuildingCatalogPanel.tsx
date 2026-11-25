@@ -24,8 +24,10 @@ import {
   isBuildingDefinitionUpgradeable,
 } from '../../../core/civilization/buildingUpgrade.ts';
 import { getEffectiveMaxLevel } from '../../../core/civilization/eraRules.ts';
+import { getPlaceJobSpec } from '../../../core/civilization/jobs.ts';
 import { VILLAGE_CAVE_DEFINITION_ID } from '../../../core/civilization/villager.ts';
 import { PixelSprite, getBuildingSprite } from './spriteRegistry.ts';
+import { formatJobDurationMinutes } from './jobProjection.ts';
 import { useTranslation } from '../../../i18n/I18nContext.tsx';
 import { formatRewardAmount } from '../../utils/formatters.ts';
 import { TranslationKey } from '../../../i18n/types.ts';
@@ -42,6 +44,7 @@ export interface BuildingCatalogPanelProps {
   lifetimeFocusMinutes: number;
   currentEra?: CivilizationEra;
   placedBuildings?: readonly BuildingInstance[];
+  totalCrew?: number;
   onSelectBuilding: (def: BuildingDefinition) => void;
 }
 
@@ -109,6 +112,7 @@ export const BuildingCatalogPanel: React.FC<BuildingCatalogPanelProps> = ({
   lifetimeFocusMinutes,
   currentEra = 'STONE_AGE',
   placedBuildings = [],
+  totalCrew,
   onSelectBuilding,
 }) => {
   const { locale, t } = useTranslation();
@@ -192,10 +196,14 @@ export const BuildingCatalogPanel: React.FC<BuildingCatalogPanelProps> = ({
               : false;
             const limitCheck = canPlaceAnotherBuildingOfCategory(def, placedBuildings);
             const capReached = !limitCheck.allowed;
+            const placeSpec = getPlaceJobSpec(def.id);
+            const crewShort =
+              totalCrew !== undefined && placeSpec.crew > 0 && totalCrew < placeSpec.crew;
             const insufficientCoins = playerCoins < def.baseCost;
             const isLocked = levelLocked || focusLocked || eraLocked;
-            const canBuild = !isLocked && !capReached && !insufficientCoins;
+            const canBuild = !isLocked && !capReached && !crewShort && !insufficientCoins;
 
+            const baseCostFormatted = formatRewardAmount(def.baseCost);
             let actionLabel = t('civ.catalog.buildBtn');
             if (levelLocked) {
               actionLabel = t('civ.catalog.lockedLevel', {
@@ -212,9 +220,12 @@ export const BuildingCatalogPanel: React.FC<BuildingCatalogPanelProps> = ({
                 current: limitCheck.currentCount,
                 max: limitCheck.limit,
               });
+            } else if (crewShort) {
+              actionLabel = t('civ.catalog.needCrew', { crew: placeSpec.crew });
             } else if (insufficientCoins) {
-              actionLabel = t('civ.catalog.needCoins', { cost: formatRewardAmount(def.baseCost) });
+              actionLabel = t('civ.catalog.needCoins', { cost: baseCostFormatted });
             }
+            const placeDurationMinutes = formatJobDurationMinutes(placeSpec.durationSeconds);
 
             const iconTone =
               def.category === 'ECONOMY_EFFECT'
@@ -291,6 +302,15 @@ export const BuildingCatalogPanel: React.FC<BuildingCatalogPanelProps> = ({
                               maxLevel: getEffectiveMaxLevel(def, currentEra),
                             })
                           : t('civ.catalog.cantUpgrade')}
+                      </span>
+                      <span aria-hidden="true">·</span>
+                      <span data-testid="catalog-crew-time" className="tabular-nums">
+                        {placeSpec.durationSeconds === 0
+                          ? t('civ.catalog.instantBuild')
+                          : t('civ.catalog.crewAndTime', {
+                              crew: placeSpec.crew,
+                              minutes: placeDurationMinutes,
+                            })}
                       </span>
                       {limitCheck.limit !== null && (
                         <>

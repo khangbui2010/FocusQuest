@@ -11,6 +11,7 @@ import { evaluateExpansion } from '../../src/core/civilization/landExpansion.ts'
 import { CHUNK_HEIGHT, CHUNK_WIDTH } from '../../src/core/civilization/constants.ts';
 import { MemoryStorageAdapter } from '../../src/storage/memoryStorageAdapter.ts';
 import { StorageManager } from '../../src/storage/storageManager.ts';
+import { advanceJobs } from '../../src/core/civilization/jobs.ts';
 import { CivilizationCoordinator } from '../../src/background/civilizationCoordinator.ts';
 import { CivilizationHeader } from '../../src/ui/components/civilization/CivilizationHeader.tsx';
 import {
@@ -365,10 +366,28 @@ test('UX-5.1 UI Integration & Regression: CivilizationHeader & MapGridView lock 
 });
 
 test('UX-5.1 Lifecycle & Source Integrity: pre/post-commit popup restart preserves business invariants & source contains zero auto-fit zoom calls or resource leaks', async () => {
-  // 1. Pre-commit cancel / popup close leaves economy & chunks untouched; post-commit keeps expanded chunk persisted
+  // 1. Pre-commit cancel / popup close leaves economy & chunks untouched; post-commit keeps clearing job & completed chunk persisted
   const adapter = new MemoryStorageAdapter();
   const storage = new StorageManager(adapter);
   await storage.setEconomy({ focusCoins: 200, totalXP: 450, level: 3 });
+  const initCiv = createInitialCivilizationState();
+  const gm = GridMap.fromSnapshot(initCiv.grid);
+  gm.placeBuilding('cave_seed', { x: 0, y: 0 }, { width: 3, height: 3 });
+  await storage.setCivilizationState({
+    ...initCiv,
+    grid: gm.toSnapshot(),
+    buildings: [
+      {
+        id: 'cave_seed',
+        definitionId: 'stone_age_study_cave',
+        position: { x: 0, y: 0 },
+        level: 1,
+        placedAt: 1,
+      },
+    ],
+    villagers: [{ id: 'v_seed', role: 'elder', recruitedAt: 1 }],
+    founderRole: 'elder',
+  });
   const coordinator = new CivilizationCoordinator(storage);
 
   // Before commit: popup closes during CINEMATIC_MOVING -> storage untouched
@@ -379,18 +398,20 @@ test('UX-5.1 Lifecycle & Source Integrity: pre/post-commit popup restart preserv
   // Rules check unchanged: evaluateExpansion gate
   const gate = evaluateExpansion({ chunkCount: 4, playerLevel: 3, coins: 200 });
   assert.equal(gate.canExpand, true);
-  assert.equal(gate.cost, 60);
+  assert.equal(gate.cost, 30);
 
-  // Execute real commit, then simulate popup close/reopen during CHOPPING/TERRAIN_UPDATING:
-  // committed chunk stays persisted cleanly with zero rollback
+  // Execute real commit (queues 60m clearing job), then simulate duplicate transaction & Focus completion
   const tx = await coordinator.expandLand({ origin: { x: 8, y: 0 } });
-  assert.equal(tx.civilizationState.grid.chunks.length, 5);
-  assert.equal(tx.economy.focusCoins, 140);
+  assert.equal(tx.civilizationState.grid.chunks.length, 4);
+  assert.equal(tx.civilizationState.jobs?.length, 1);
+  assert.equal(tx.economy.focusCoins, 170);
 
   // Duplicate transaction on same origin must fail cleanly without deducting Coins
   await assert.rejects(() => coordinator.expandLand({ origin: { x: 8, y: 0 } }));
-  assert.equal((await storage.getEconomy()).focusCoins, 140);
+  assert.equal((await storage.getEconomy()).focusCoins, 170);
 
+  // Focus settlement completes clearing job and unlocks chunk (8,0)
+  await storage.setCivilizationState(advanceJobs(tx.civilizationState, 3600));
   const reopened = await coordinator.getCivilizationState();
   assert.equal(reopened.grid.chunks.length, 5);
   assert.ok(reopened.grid.chunks.some((c) => c.origin.x === 8 && c.origin.y === 0));

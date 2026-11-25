@@ -9,7 +9,10 @@
  */
 
 import { CoinBonus } from '../../types/economy.ts';
-import { isVillagerRole } from '../../ui/components/civilization/spriteRegistry.ts';
+import {
+  VillagerRole,
+  isVillagerRole,
+} from '../../ui/components/civilization/spriteRegistry.ts';
 import {
   VILLAGER_COMPLETE_TRIBE_COIN_BONUS,
   VILLAGER_CRAFTER_COIN_BONUS_CAP,
@@ -47,13 +50,25 @@ function roundRate(value: number): number {
 
 /**
  * Counts valid villagers by role without mutating or throwing on malformed inputs.
+ * Optional `founderRole` contributes +1 to that role (permanent Founder villager).
  */
 export function getVillagerRoleCounts(
-  villagers: readonly Villager[] | null | undefined
+  villagers: readonly Villager[] | null | undefined,
+  founderRole?: VillagerRole | null
 ): VillagerRoleCounts {
   let elder = 0;
   let crafter = 0;
   let woodworker = 0;
+
+  if (founderRole && isVillagerRole(founderRole)) {
+    if (founderRole === 'elder') {
+      elder += 1;
+    } else if (founderRole === 'crafter') {
+      crafter += 1;
+    } else if (founderRole === 'woodworker') {
+      woodworker += 1;
+    }
+  }
 
   if (Array.isArray(villagers)) {
     for (const v of villagers) {
@@ -85,19 +100,21 @@ export function getVillagerRoleCounts(
  * Checks whether the village has at least 1 elder, 1 crafter, and 1 woodworker.
  */
 export function hasCompleteTribeSynergy(
-  villagers: readonly Villager[] | null | undefined
+  villagers: readonly Villager[] | null | undefined,
+  founderRole?: VillagerRole | null
 ): boolean {
-  const counts = getVillagerRoleCounts(villagers);
+  const counts = getVillagerRoleCounts(villagers, founderRole);
   return counts.elder >= 1 && counts.crafter >= 1 && counts.woodworker >= 1;
 }
 
 /**
- * Computes the complete, capped villager buff summary from the current villager roster.
+ * Computes the complete, capped villager buff summary from the current villager roster + optional Founder.
  */
 export function getVillagerBuffSummary(
-  villagers: readonly Villager[] | null | undefined
+  villagers: readonly Villager[] | null | undefined,
+  founderRole?: VillagerRole | null
 ): VillagerBuffSummary {
-  const counts = getVillagerRoleCounts(villagers);
+  const counts = getVillagerRoleCounts(villagers, founderRole);
   const crafterCoinBonus = Math.min(
     VILLAGER_CRAFTER_COIN_BONUS_CAP,
     roundRate(counts.crafter * VILLAGER_CRAFTER_COIN_BONUS_RATE)
@@ -134,9 +151,10 @@ export function getVillagerBuffSummary(
  * Applied strictly to Coins on valid completed Focus sessions via RewardEngine / aggregateCoinBonus.
  */
 export function extractVillagerCoinBonuses(
-  villagers: readonly Villager[] | null | undefined
+  villagers: readonly Villager[] | null | undefined,
+  founderRole?: VillagerRole | null
 ): readonly CoinBonus[] {
-  const summary = getVillagerBuffSummary(villagers);
+  const summary = getVillagerBuffSummary(villagers, founderRole);
   const bonuses: CoinBonus[] = [];
 
   if (summary.crafterCoinBonus > 0) {

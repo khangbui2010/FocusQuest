@@ -102,11 +102,11 @@ test('Migration v5: upgrades v4 legacy fq_quests preserving active quests, progr
   await storage.set(STORAGE_KEYS.ECONOMY, economy);
   await storage.set(STORAGE_KEYS.CIVILIZATION, civ);
 
-  assert.strictEqual(CURRENT_SCHEMA_VERSION, 5);
+  assert.strictEqual(CURRENT_SCHEMA_VERSION, 6);
   const res = await new MigrationRunner(storage).runMigrations();
   assert.strictEqual(res.previousVersion, 4);
-  assert.strictEqual(res.currentVersion, 5);
-  assert.strictEqual(await storage.get<number>(STORAGE_KEYS.SCHEMA_VERSION), 5);
+  assert.strictEqual(res.currentVersion, 6);
+  assert.strictEqual(await storage.get<number>(STORAGE_KEYS.SCHEMA_VERSION), 6);
 
   const migrated = await storage.get<QuestState>(STORAGE_KEYS.QUESTS);
   assert.ok(migrated);
@@ -174,8 +174,8 @@ test('Migration v5: upgrades v4 legacy fq_quests preserving active quests, progr
 
   // Idempotency check
   const reRun = await new MigrationRunner(storage).runMigrations();
-  assert.strictEqual(reRun.previousVersion, 5);
-  assert.strictEqual(reRun.currentVersion, 5);
+  assert.strictEqual(reRun.previousVersion, 6);
+  assert.strictEqual(reRun.currentVersion, 6);
   await v5_questPoolSchema.up(storage);
   assert.deepStrictEqual(await storage.get<QuestState>(STORAGE_KEYS.QUESTS), migrated);
 });

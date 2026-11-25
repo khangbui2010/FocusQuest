@@ -58,7 +58,7 @@ test('Migration v4: expands legacy 2x2 Cave cleanly to 3x3, backfills villagers 
   await storage.set(STORAGE_KEYS.PROFILES, profiles);
   await storage.set(STORAGE_KEYS.DAILY_STATS, dailyStats);
 
-  assert.equal(CURRENT_SCHEMA_VERSION, 5);
+  assert.equal(CURRENT_SCHEMA_VERSION, 6);
   const res = await new MigrationRunner(storage, undefined, 4).runMigrations();
   assert.equal(res.previousVersion, 3);
   assert.equal(res.currentVersion, 4);

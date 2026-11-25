@@ -173,7 +173,9 @@ test('BuildingDetailsModal SSR (Villager V2): displays recruitment UI, upgrade c
   assert.ok(occupiedHtml.includes('data-testid="cave-upgrade-capacity-preview"'));
   assert.ok(occupiedHtml.includes('2 → 4 Villager capacity'));
   assert.ok(occupiedHtml.includes('data-testid="demolish-blocked-villagers-hint"'));
-  assert.ok(occupiedHtml.includes('Cannot demolish Cave while 2 villagers live in the village.'));
+  assert.ok(
+    occupiedHtml.includes('Cannot demolish Rock Shelter while 2 villagers live in the village.')
+  );
 });
 
 test('BuildingCatalogPanel & FocusSceneArea SSR (Villager V2): Cave shows 1/1 limit & Max Lv. 5; scene-shelter stays 48x48', () => {

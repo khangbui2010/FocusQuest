@@ -8,8 +8,11 @@ import {
   getDailyStatsClient,
   isChromeExtension,
   isDevServerMockMode,
+  seedMockCivilizationForTest,
   sendExtensionMessage,
 } from '../../src/ui/services/extensionClient.ts';
+import { createInitialCivilizationState } from '../../src/core/civilization/civilizationState.ts';
+import { GridMap } from '../../src/core/civilization/gridMap.ts';
 import { FullSessionStateResponse } from '../../src/types/messages.ts';
 import { SessionSnapshot } from '../../src/types/session.ts';
 import { FocusProfile } from '../../src/types/profiles.ts';
@@ -284,51 +287,95 @@ test('UI ExtensionClient (5b): GET_ACTIVE_PROFILE, RENAME_PROFILE, and DELETE_PR
 });
 
 test('UI ExtensionClient (5B.6a): EXPAND_LAND simulator matches backend Level, Coins, and origin-only rules', async () => {
-  // Rejects deprecated direction payload
-  const dirRes = await sendExtensionMessage({
-    action: 'EXPAND_LAND',
-    payload: { direction: 'EAST' } as unknown as { origin: { x: number; y: number } },
-  });
-  assert.equal(dirRes.success, false);
+  const realDateNow = Date.now;
+  let mockNow = 1732000000000;
+  Date.now = () => mockNow;
+  try {
+    const baseCiv = createInitialCivilizationState();
+    const gm = GridMap.fromSnapshot(baseCiv.grid);
+    gm.placeBuilding('cave_ec_seed', { x: 4, y: 4 }, { width: 3, height: 3 });
+    seedMockCivilizationForTest({
+      ...baseCiv,
+      grid: gm.toSnapshot(),
+      buildings: [
+        {
+          id: 'cave_ec_seed',
+          definitionId: 'stone_age_study_cave',
+          position: { x: 4, y: 4 },
+          level: 1,
+          placedAt: 1,
+        },
+      ],
+      villagers: [{ id: 'v_ec_seed', role: 'elder', recruitedAt: 1 }],
+      founderRole: 'elder',
+    });
 
-  // Rejects non-aligned origin
-  const unalignedRes = await sendExtensionMessage({
-    action: 'EXPAND_LAND',
-    payload: { origin: { x: 5, y: 0 } },
-  });
-  assert.equal(unalignedRes.success, false);
-  assert.match(unalignedRes.error || '', /INVALID_ORIGIN/);
+    // Rejects deprecated direction payload
+    const dirRes = await sendExtensionMessage({
+      action: 'EXPAND_LAND',
+      payload: { direction: 'EAST' } as unknown as { origin: { x: number; y: number } },
+    });
+    assert.equal(dirRes.success, false);
 
-  // Rejects non-adjacent origin without deducting Coins
-  const nonAdjacentRes = await sendExtensionMessage({
-    action: 'EXPAND_LAND',
-    payload: { origin: { x: 16, y: 16 } },
-  });
-  assert.equal(nonAdjacentRes.success, false);
+    // Rejects non-aligned origin
+    const unalignedRes = await sendExtensionMessage({
+      action: 'EXPAND_LAND',
+      payload: { origin: { x: 5, y: 0 } },
+    });
+    assert.equal(unalignedRes.success, false);
+    assert.match(unalignedRes.error || '', /INVALID_ORIGIN/);
 
-  // Valid k=1 expansion at (8, 0): default mockState starts at 120 Coins, Lv. 3 -> costs 60, leaves 60
-  const okRes = await sendExtensionMessage<{
-    newChunk: { x: number; y: number };
-    economy: { focusCoins: number };
-    cost: number;
-    civilizationState: { grid: { chunks: unknown[] } };
-  }>({
-    action: 'EXPAND_LAND',
-    payload: { origin: { x: 8, y: 0 } },
-  });
-  assert.equal(okRes.success, true, `Expected simulator EXPAND_LAND success, got ${okRes.error}`);
-  assert.deepEqual(okRes.data?.newChunk, { x: 8, y: 0 });
-  assert.equal(okRes.data?.cost, 60);
-  assert.equal(okRes.data?.economy.focusCoins, 60);
-  assert.equal(okRes.data?.civilizationState.grid.chunks.length, 5);
+    // Rejects non-adjacent origin without deducting Coins
+    const nonAdjacentRes = await sendExtensionMessage({
+      action: 'EXPAND_LAND',
+      payload: { origin: { x: 16, y: 16 } },
+    });
+    assert.equal(nonAdjacentRes.success, false);
 
-  // Subsequent k=2 blocked by Level 4 gate (default simulator is Lv. 3)
-  const levelGateRes = await sendExtensionMessage({
-    action: 'EXPAND_LAND',
-    payload: { origin: { x: -4, y: 0 } },
-  });
-  assert.equal(levelGateRes.success, false);
-  assert.match(levelGateRes.error || '', /Player Level 4/);
+    // Valid k=1 expansion at (8, 0): default mockState starts at 120 Coins, Lv. 3 -> costs 30, leaves 90, queues 60m clearing job
+    const okRes = await sendExtensionMessage<{
+      newChunk: { x: number; y: number };
+      economy: { focusCoins: number };
+      cost: number;
+      job?: { kind: string; status: string };
+      civilizationState: { grid: { chunks: unknown[] }; jobs?: unknown[] };
+    }>({
+      action: 'EXPAND_LAND',
+      payload: { origin: { x: 8, y: 0 } },
+    });
+    assert.equal(okRes.success, true, `Expected simulator EXPAND_LAND success, got ${okRes.error}`);
+    assert.deepEqual(okRes.data?.newChunk, { x: 8, y: 0 });
+    assert.equal(okRes.data?.cost, 30);
+    assert.equal(okRes.data?.economy.focusCoins, 90);
+    assert.equal(okRes.data?.job?.kind, 'expand');
+    assert.equal(okRes.data?.job?.status, 'ACTIVE');
+    assert.equal(okRes.data?.civilizationState.grid.chunks.length, 4);
+
+    // Subsequent k=2 blocked by Level 4 gate (default simulator is Lv. 3)
+    const levelGateRes = await sendExtensionMessage({
+      action: 'EXPAND_LAND',
+      payload: { origin: { x: -4, y: 0 } },
+    });
+    assert.equal(levelGateRes.success, false);
+    assert.match(levelGateRes.error || '', /Player Level 4/);
+
+    // Complete 60m Focus session to finish clearing and unlock chunk #5
+    await sendExtensionMessage({
+      action: 'START_SESSION',
+      payload: { mode: 'COUNTDOWN', targetMinutes: 60, profileId: 'profile-study-research' },
+    });
+    mockNow += 61 * 60 * 1000;
+    await sendExtensionMessage({ action: 'GET_SESSION_STATE' });
+    await sendExtensionMessage({ action: 'RESET_SESSION' });
+
+    const civAfter = await sendExtensionMessage<{ grid: { chunks: unknown[] }; jobs?: unknown[] }>({
+      action: 'GET_CIVILIZATION_STATE',
+    });
+    assert.equal(civAfter.data?.grid.chunks.length, 5);
+    assert.equal(civAfter.data?.jobs?.length ?? 0, 0);
+  } finally {
+    Date.now = realDateNow;
+  }
 });
 
 test('UI ExtensionClient (Stage 3): GET_DAILY_STATS simulator returns deterministic ~400-day dataset with gaps & streaks', async () => {

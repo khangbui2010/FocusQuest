@@ -8,6 +8,8 @@ import {
   placeBuildingClient,
   removeBuildingClient,
   expandLandClient,
+  seedMockCivilizationForTest,
+  sendExtensionMessage,
 } from '../../src/ui/services/extensionClient.ts';
 import { CivilizationHeader } from '../../src/ui/components/civilization/CivilizationHeader.tsx';
 import { BuildingCatalogPanel } from '../../src/ui/components/civilization/BuildingCatalogPanel.tsx';
@@ -86,28 +88,86 @@ test('Civilization Client: placeBuildingClient validates placement, deducts coin
 });
 
 test('Civilization Client: expandLandClient requires origin, deducts Coins, enforces Level gate, and rejects direction', async () => {
-  const initial = await getCivilizationStateClient();
-  const initialChunks = initial.data?.grid.chunks.length ?? 4;
+  const realDateNow = Date.now;
+  let mockNow = 1732000000000;
+  Date.now = () => mockNow;
+  try {
+    const baseState = (await getCivilizationStateClient()).data!;
+    const gm = GridMap.fromSnapshot(baseState.grid);
+    gm.placeBuilding('cave_cv_seed', { x: 4, y: 4 }, { width: 3, height: 3 });
+    seedMockCivilizationForTest({
+      ...baseState,
+      grid: gm.toSnapshot(),
+      buildings: [
+        ...baseState.buildings,
+        {
+          id: 'cave_cv_seed',
+          definitionId: 'stone_age_study_cave',
+          position: { x: 4, y: 4 },
+          level: 1,
+          placedAt: 1,
+        },
+      ],
+      villagers: [{ id: 'v_cv_seed', role: 'woodworker', recruitedAt: 1 }],
+      founderRole: 'woodworker',
+    });
 
-  // Rejects deprecated direction payload
-  const rejectedDir = await expandLandClient({
-    direction: 'EAST',
-  } as unknown as { origin: { x: number; y: number } });
-  assert.equal(rejectedDir.success, false);
+    const initialChunks = baseState.grid.chunks.length;
 
-  // Expand adjacent East chunk (8, 0): k=1 requires Lv. 3 and costs 60 Coins
-  // (mockState starts at 120, two campfires placed & demolished with 50% refund => 116 Coins before expand -> 56 after)
-  const expandEast = await expandLandClient({ origin: { x: 8, y: 0 } });
-  assert.equal(expandEast.success, true, `Expected expandEast success, got ${expandEast.error}`);
-  assert.ok(expandEast.data);
-  assert.equal(expandEast.data.cost, 60);
-  assert.equal(expandEast.data.economy.focusCoins, 56);
-  assert.equal(expandEast.data.civilizationState.grid.chunks.length, initialChunks + 1);
+    // Rejects deprecated direction payload
+    const rejectedDir = await expandLandClient({
+      direction: 'EAST',
+    } as unknown as { origin: { x: number; y: number } });
+    assert.equal(rejectedDir.success, false);
 
-  // Second expansion k=2 (0, -4) requires Lv. 4 -> fails at default Lv. 3 without deducting Coins
-  const expandSecondBlocked = await expandLandClient({ origin: { x: 0, y: -4 } });
-  assert.equal(expandSecondBlocked.success, false);
-  assert.match(expandSecondBlocked.error || '', /Player Level 4/i);
+    // Expand adjacent East chunk (8, 0): k=1 requires Lv. 3, 2 crew, 60m clearing and costs 30 Coins
+    // Note: use elder founder + elder villager so discountRate = 0 and exact baseCost 30 applies cleanly.
+    seedMockCivilizationForTest({
+      ...baseState,
+      grid: gm.toSnapshot(),
+      buildings: [
+        ...baseState.buildings,
+        {
+          id: 'cave_cv_seed',
+          definitionId: 'stone_age_study_cave',
+          position: { x: 4, y: 4 },
+          level: 1,
+          placedAt: 1,
+        },
+      ],
+      villagers: [{ id: 'v_cv_seed', role: 'elder', recruitedAt: 1 }],
+      founderRole: 'elder',
+    });
+
+    const expandEast = await expandLandClient({ origin: { x: 8, y: 0 } });
+    assert.equal(expandEast.success, true, `Expected expandEast success, got ${expandEast.error}`);
+    assert.ok(expandEast.data);
+    assert.equal(expandEast.data.cost, 30);
+    assert.equal(expandEast.data.economy.focusCoins, 86);
+    assert.equal(expandEast.data.job?.kind, 'expand');
+    assert.equal(expandEast.data.job?.status, 'ACTIVE');
+    assert.equal(expandEast.data.civilizationState.grid.chunks.length, initialChunks);
+
+    // Second expansion k=2 (0, -4) requires Lv. 4 while k=1 is clearing -> fails at Lv. 3 without deducting Coins
+    const expandSecondBlocked = await expandLandClient({ origin: { x: 0, y: -4 } });
+    assert.equal(expandSecondBlocked.success, false);
+    assert.match(expandSecondBlocked.error || '', /Player Level 4/i);
+
+    // Completing a 60m Focus session finishes clearing and unlocks chunk #5
+    await sendExtensionMessage({
+      action: 'START_SESSION',
+      payload: { mode: 'COUNTDOWN', targetMinutes: 60, profileId: 'profile-study-research' },
+    });
+    mockNow += 61 * 60 * 1000;
+    await sendExtensionMessage({ action: 'GET_SESSION_STATE' });
+    await sendExtensionMessage({ action: 'RESET_SESSION' });
+
+    const afterFocus = await getCivilizationStateClient();
+    assert.equal(afterFocus.data?.grid.chunks.length, initialChunks + 1);
+    assert.equal(afterFocus.data?.jobs?.length ?? 0, 0);
+  } finally {
+    Date.now = realDateNow;
+  }
 });
 
 test('Civilization UI: CivilizationHeader renders Stone Age era, coins, focus, and bonus', () => {
@@ -189,7 +249,7 @@ test('Civilization UI: BuildingCatalogPanel renders definitions, costs, and unlo
   assert.ok(html.includes('Building Catalog'), 'must render title');
   assert.ok(html.includes('Campfire'), 'must render campfire');
   assert.ok(html.includes('Ancient Totem'), 'must render ancient totem');
-  assert.ok(html.includes('Meditation Cave'), 'must render meditation cave');
+  assert.ok(html.includes('Rock Shelter'), 'must render rock shelter');
   assert.ok(html.includes('Foraging Post'), 'must render foraging post');
   assert.ok(html.includes('Primitive Granary'), 'must render primitive granary');
   // Granary requires Lv. 2, so at playerLevel 1 it should show Lv. 2 requirement
@@ -253,6 +313,7 @@ test('Civilization UI: BuildingDetailsModal renders building information, Stage 
       onUpgrade: async () => {},
       playerLevel: 2,
       playerCoins: 150,
+      founderRole: 'crafter',
       isSubmitting: false,
     })
   );
@@ -262,7 +323,7 @@ test('Civilization UI: BuildingDetailsModal renders building information, Stage 
   assert.ok(htmlEcon.includes('>Upgrade<'), 'must display enabled Upgrade button');
 });
 
-test('Civilization UI: LandExpansionModal renders chunk confirmation details (cost, level, balance, focus minutes) without compass', () => {
+test('Civilization UI: LandExpansionModal renders chunk confirmation details (cost, level, crew, balance, focus minutes) without compass', () => {
   const htmlReady = renderToString(
     React.createElement(LandExpansionModal, {
       isOpen: true,
@@ -270,6 +331,8 @@ test('Civilization UI: LandExpansionModal renders chunk confirmation details (co
       chunksCount: 4,
       playerLevel: 3,
       playerCoins: 120,
+      villagers: [{ id: 'v1', role: 'elder', recruitedAt: 1 }],
+      founderRole: 'crafter',
       onConfirm: async () => {},
       onClose: () => {},
       isSubmitting: false,
@@ -280,12 +343,14 @@ test('Civilization UI: LandExpansionModal renders chunk confirmation details (co
   assert.ok(htmlReady.includes('(8, 0)'), 'must render chosen chunk origin');
   assert.ok(htmlReady.includes('New Chunk #1'), 'must render purchase order');
   assert.ok(htmlReady.includes('+16 cells (4×4)'), 'must render +16 cells 4x4 delta');
-  assert.ok(htmlReady.includes('60 Coins'), 'must render Coins cost');
-  assert.ok(htmlReady.includes('40m focus at ×1.0 / 16m at ×2.5'), 'must render equivalent focus minutes');
+  assert.ok(htmlReady.includes('30 Coins'), 'must render Coins cost');
+  assert.ok(htmlReady.includes('20m focus at ×1.0 / 8m at ×2.5'), 'must render equivalent focus minutes');
+  assert.ok(htmlReady.includes('2 crew · 60m Focus'), 'must render clearing crew and focus time');
   assert.ok(htmlReady.includes('Lv. 3'), 'must render required level');
   assert.ok(htmlReady.includes('Current: Lv. 3'), 'must render current player level');
   assert.ok(htmlReady.includes('120 Coins'), 'must render current Coins balance');
   assert.ok(htmlReady.includes('Expand'), 'must render Expand button');
+  assert.ok(!htmlReady.includes('disabled=""[^>]*>Expand'), 'Expand button must be enabled when level, coins, and crew met');
   assert.ok(htmlReady.includes('Cancel'), 'must render Cancel button');
   assert.ok(!htmlReady.includes('>North<') && !htmlReady.includes('>South<') && !htmlReady.includes('>East<') && !htmlReady.includes('>West<'), 'must not render 4-way directional compass');
 
@@ -297,6 +362,8 @@ test('Civilization UI: LandExpansionModal renders chunk confirmation details (co
       chunksCount: 4,
       playerLevel: 2,
       playerCoins: 500,
+      villagers: [{ id: 'v1', role: 'elder', recruitedAt: 1 }],
+      founderRole: 'crafter',
       onConfirm: async () => {},
       onClose: () => {},
       isSubmitting: false,
@@ -312,14 +379,34 @@ test('Civilization UI: LandExpansionModal renders chunk confirmation details (co
       selectedOrigin: { x: 8, y: 0 },
       chunksCount: 4,
       playerLevel: 3,
-      playerCoins: 45,
+      playerCoins: 25,
+      villagers: [{ id: 'v1', role: 'elder', recruitedAt: 1 }],
+      founderRole: 'crafter',
       onConfirm: async () => {},
       onClose: () => {},
       isSubmitting: false,
     })
   );
-  assert.ok(htmlLowCoins.includes('Insufficient Coins: need 60, have 45.'));
+  assert.ok(htmlLowCoins.includes('Insufficient Coins: need 30, have 25.'));
   assert.match(htmlLowCoins, /disabled=""[^>]*>Expand<\/button>/);
+
+  // Insufficient villagers disables Expand button and shows crew reason
+  const htmlLowCrew = renderToString(
+    React.createElement(LandExpansionModal, {
+      isOpen: true,
+      selectedOrigin: { x: 8, y: 0 },
+      chunksCount: 4,
+      playerLevel: 3,
+      playerCoins: 120,
+      villagers: [],
+      founderRole: 'crafter',
+      onConfirm: async () => {},
+      onClose: () => {},
+      isSubmitting: false,
+    })
+  );
+  assert.ok(htmlLowCrew.includes('Requires 2 villagers (have 1).'));
+  assert.match(htmlLowCrew, /disabled=""[^>]*>Expand<\/button>/);
 });
 
 test('Civilization UI: MapGridView renders 8x8 unlocked chunks, darkened locked forest margin, and zoom controls', () => {

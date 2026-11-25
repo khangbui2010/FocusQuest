@@ -31,6 +31,21 @@ Tools / weapons: 103-107 daggers and swords, 117 hammer, 118 double axe, 119 axe
 Treasure chests 89-92.
 Used in Phase 4b (`src/ui/components/FocusSceneArea.tsx`): earth-toned characters `86`, `88`, `100` and hand-held tools `117`, `119` (alongside Tiny Town `3`/`15`, `4`/`16`, `5`, `17`, `29`, `106`).
 
+## Clock & Construction UI Icons (`public/assets/sprites/clock_tiles_16.png`)
+- Horizontal strip: `48 × 16` px (`3` tiles × `16 × 16` px, rendered via `ClockTileIcon` / `CLOCK_TILE_INDEX` in `TileImage.tsx` & `spriteRegistry.ts`):
+  - `0` (`CLOCK`): Pixel analog clock (queued / pending construction job badge & catalog preview)
+  - `1` (`HOURGLASS`): Pixel hourglass (active construction / clearing job badge)
+  - `2` (`STOPWATCH`): Pixel stopwatch (extra timer icon reserve)
+
+## Under-Construction 4-Stage Sprites (`src/ui/components/civilization/constructionSpriteData.ts`)
+- Generated offline from the finished Stone Age sprites in `spriteData.ts` using strictly the Tiny Town palette:
+  - Applies to: `stone_age_totem`, `stone_age_study_cave`, `stone_age_elder_hut`, `stone_age_foraging_post`, `stone_age_food_cache` (`stone_age_campfire` builds instantly in `0s` with no construction stage).
+  - 4 stages (`CONSTRUCTION_STAGE_COUNT = 4`, resolved by `getConstructionStageIndex(progress)` / `getConstructionSprite(definitionId, progress)`):
+    - Stage `0` (`0–24%`): Blueprint dashed cyan outline + wooden posts/corner anchors
+    - Stage `1` (`25–49%`): Lower `35%` revealed + scaffolding bar
+    - Stage `2` (`50–74%`): Lower `65%` revealed + scaffolding frame
+    - Stage `3` (`75–99%`): Lower `90%` revealed before full sprite swap upon job completion
+
 ## Palette used by Tiny Town (hex)
 Outline/dark: #3f2631, #3d212d, #262b44
 Greens: #84c669, #479f4a, #65a556, #8bd87d
@@ -38,3 +53,4 @@ Browns / oranges / sand: #eaa56c, #bd6c4a, #763b36, #cf8254, #e38628, #fdbe53, #
 Greys / blues: #c0cbdc, #8b9bb4, #5a6988, #52607c, #8c9cb5
 Reds: #c34b35, #e84537
 White / water: #ffffff, #009adc, #76e4ff
+

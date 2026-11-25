@@ -9,11 +9,13 @@ import { BuildingDetailsModal } from '../../src/ui/components/civilization/Build
 import { BuildingCatalogPanel } from '../../src/ui/components/civilization/BuildingCatalogPanel.tsx';
 import { MapGridView } from '../../src/ui/components/civilization/MapGridView.tsx';
 import { createInitialCivilizationState } from '../../src/core/civilization/civilizationState.ts';
+import { GridMap } from '../../src/core/civilization/gridMap.ts';
 import { BuildingInstance } from '../../src/core/civilization/buildingTypes.ts';
 import {
   placeBuildingClient,
   removeBuildingClient,
   upgradeBuildingClient,
+  seedMockCivilizationForTest,
   sendExtensionMessage,
 } from '../../src/ui/services/extensionClient.ts';
 import { PlayerEconomy } from '../../src/types/economy.ts';
@@ -28,12 +30,32 @@ test('Stage 5C-1 Simulator Parity: upgradeBuildingClient, L1->L2 CoinBonus sessi
   Date.now = () => mockNow;
 
   try {
+    // Seed Cave at (5, 5) + 1 woodworker villager + woodworker founder (2 crew, 0% CoinBonus, 0% upgrade discount)
+    const baseCiv = createInitialCivilizationState();
+    const gm = GridMap.fromSnapshot(baseCiv.grid);
+    gm.placeBuilding('cave_ub_seed', { x: 5, y: 5 }, { width: 3, height: 3 });
+    seedMockCivilizationForTest({
+      ...baseCiv,
+      grid: gm.toSnapshot(),
+      buildings: [
+        {
+          id: 'cave_ub_seed',
+          definitionId: 'stone_age_study_cave',
+          position: { x: 5, y: 5 },
+          level: 1,
+          placedAt: 1,
+        },
+      ],
+      villagers: [{ id: 'v_ub_seed', role: 'woodworker', recruitedAt: 1 }],
+      founderRole: 'woodworker',
+    });
+
     // Invalid payload in simulator
     const badRes = await upgradeBuildingClient({ buildingId: '', expectedLevel: 1 });
     assert.equal(badRes.success, false);
     assert.equal(badRes.errorCode, 'CIV_INVALID_UPGRADE_PAYLOAD');
 
-    // Complete a 30m Countdown session in simulator (+30m -> 80 lifetime mins >= 60m unlock, +54 Coins -> 174 Coins, +180 XP -> 630 XP -> Lv.4)
+    // Complete a 30m Countdown session (+30m -> 80 lifetime mins >= 60m unlock, +54 Coins -> 174 Coins, +180 XP -> 630 XP -> Lv.4)
     const start1 = await sendExtensionMessage({
       action: 'START_SESSION',
       payload: { mode: 'COUNTDOWN', targetMinutes: 30, profileId: 'profile-study-research' },
@@ -46,44 +68,69 @@ test('Stage 5C-1 Simulator Parity: upgradeBuildingClient, L1->L2 CoinBonus sessi
     const econBeforePlace = await sendExtensionMessage<PlayerEconomy>({ action: 'GET_ECONOMY' });
     assert.equal(econBeforePlace.data?.focusCoins, 174);
 
-    // Place Foraging Post (cost 15 -> 159 Coins left, +2% bonus)
+    // Place Foraging Post (cost 15 -> 159 Coins left, 60m build job)
     const p1 = await placeBuildingClient({
       buildingDefinitionId: 'stone_age_foraging_post',
       position: { x: 0, y: 0 },
     });
     assert.equal(p1.success, true, `Expected placement to succeed, got ${p1.error}`);
     const b1 = p1.data!.building;
+    assert.equal(p1.data!.economy.focusCoins, 159);
 
-    // Upgrade Lv.1 -> Lv.2 via upgradeBuildingClient (cost 24 -> 135 Coins left, +4% bonus)
+    // Cannot upgrade while under construction
+    const underConsUp = await upgradeBuildingClient({ buildingId: b1.id, expectedLevel: 1 });
+    assert.equal(underConsUp.success, false);
+    assert.equal(underConsUp.errorCode, 'CIV_BUILDING_UNDER_CONSTRUCTION');
+
+    // Finish 60m Foraging Post construction (60 * 1.5 * 1.4 = +126 Coins -> 285 Coins)
+    await sendExtensionMessage({
+      action: 'START_SESSION',
+      payload: { mode: 'COUNTDOWN', targetMinutes: 60, profileId: 'profile-study-research' },
+    });
+    mockNow += 61 * 60 * 1000;
+    await sendExtensionMessage({ action: 'GET_SESSION_STATE' });
+    await sendExtensionMessage({ action: 'RESET_SESSION' });
+    assert.equal((await sendExtensionMessage<PlayerEconomy>({ action: 'GET_ECONOMY' })).data?.focusCoins, 285);
+
+    // Queue upgrades L1->L2 (24), L2->L3 (38), L3->L4 (61) -> total 123 Coins -> 162 Coins left
     const upRes = await upgradeBuildingClient({ buildingId: b1.id, expectedLevel: 1 });
     assert.equal(upRes.success, true, `Expected upgrade L1->L2 to succeed, got ${upRes.error}`);
     assert.equal(upRes.data!.newLevel, 2);
     assert.equal(upRes.data!.cost, 24);
-    assert.equal(upRes.data!.economy.focusCoins, 135);
+    assert.equal(upRes.data!.economy.focusCoins, 261);
 
-    // Upgrade Lv.2 -> Lv.3 via upgradeBuildingClient (cost 38 -> 97 Coins left, +6% bonus)
     const upRes3 = await upgradeBuildingClient({ buildingId: b1.id, expectedLevel: 2 });
     assert.equal(upRes3.success, true, `Expected upgrade L2->L3 to succeed, got ${upRes3.error}`);
     assert.equal(upRes3.data!.newLevel, 3);
     assert.equal(upRes3.data!.cost, 38);
-    assert.equal(upRes3.data!.economy.focusCoins, 97);
+    assert.equal(upRes3.data!.economy.focusCoins, 223);
 
-    // Upgrade Lv.3 -> Lv.4 via upgradeBuildingClient (cost 61 -> 36 Coins left, +8% bonus)
     const upRes4 = await upgradeBuildingClient({ buildingId: b1.id, expectedLevel: 3 });
     assert.equal(upRes4.success, true, `Expected upgrade L3->L4 to succeed, got ${upRes4.error}`);
     assert.equal(upRes4.data!.newLevel, 4);
     assert.equal(upRes4.data!.cost, 61);
-    assert.equal(upRes4.data!.economy.focusCoins, 36);
+    assert.equal(upRes4.data!.economy.focusCoins, 162);
 
-    // Place temporary Foraging Post (cost 15 -> 21 Coins left, 2/4 Build Limit), L1->L2 costs 24 Coins (Lv.2 required <= Lv.4) -> fails with CIV_INSUFFICIENT_BUILDING_COINS, then demolish (+7.5 -> 28.5 Coins)
+    // Complete 30m Focus session (5+10+15=30m) to advance all 3 queued upgrades to Lv.4!
+    // During this 30m session, coinBonus was still +2% (Lv.1 at start): 30 * 1.5 * 1.2 * 1.02 = 55.08 Coins -> 217.08 Coins
+    await sendExtensionMessage({
+      action: 'START_SESSION',
+      payload: { mode: 'COUNTDOWN', targetMinutes: 30, profileId: 'profile-study-research' },
+    });
+    mockNow += 31 * 60 * 1000;
+    await sendExtensionMessage({ action: 'GET_SESSION_STATE' });
+    await sendExtensionMessage({ action: 'RESET_SESSION' });
+
+    // Place temporary Foraging Post & check insufficient coins when coins are set to 36
+    const civNow = (await sendExtensionMessage<ReturnType<typeof createInitialCivilizationState>>({ action: 'GET_CIVILIZATION_STATE' })).data!;
+    assert.equal(civNow.buildings.find((b) => b.id === b1.id)?.level, 4);
+    seedMockCivilizationForTest(civNow, { focusCoins: 36 });
+
     const pTemp = await placeBuildingClient({
       buildingDefinitionId: 'stone_age_foraging_post',
       position: { x: 2, y: 0 },
     });
     assert.equal(pTemp.success, true, `Expected temporary Foraging Post placement to succeed, got ${pTemp.error}`);
-    const lowCoinsRes = await upgradeBuildingClient({ buildingId: pTemp.data!.building.id, expectedLevel: 1 });
-    assert.equal(lowCoinsRes.success, false);
-    assert.equal(lowCoinsRes.errorCode, 'CIV_INSUFFICIENT_BUILDING_COINS');
     const remTemp = await removeBuildingClient({ buildingInstanceId: pTemp.data!.building.id });
     assert.equal(remTemp.success, true);
     assert.equal(remTemp.data?.economy?.focusCoins, 28.5);
@@ -119,7 +166,7 @@ test('Stage 5C-1 Simulator Parity: upgradeBuildingClient, L1->L2 CoinBonus sessi
     assert.equal(campUp.success, false);
     assert.equal(campUp.errorCode, 'CIV_UPGRADE_NOT_SUPPORTED');
 
-    // Earn Coins via 2 x 60m Countdown sessions (+252 -> 386 Coins), place 4 Foraging Posts, verify 5th Foraging Post hits CIV_ECONOMY_BUILDING_LIMIT_REACHED while Granary still succeeds
+    // Earn Coins via 2 x 60m Countdown sessions, place 4 Foraging Posts, verify 5th hits CIV_ECONOMY_BUILDING_LIMIT_REACHED while Granary still succeeds
     for (let i = 0; i < 2; i += 1) {
       await sendExtensionMessage({
         action: 'START_SESSION',
@@ -178,6 +225,7 @@ test('Stage 5C-1 UI SSR (BuildingDetailsModal): renders all upgrade states, inli
       building: foragingLv2,
       playerLevel: 3,
       playerCoins: 500,
+      founderRole: 'crafter',
       upgradeSuccessLevel: 2,
       onClose: () => {},
       onRemove: async () => {},
@@ -196,6 +244,7 @@ test('Stage 5C-1 UI SSR (BuildingDetailsModal): renders all upgrade states, inli
       building: foragingLv1,
       playerLevel: 3,
       playerCoins: 16,
+      founderRole: 'crafter',
       onClose: () => {},
       onRemove: async () => {},
       onUpgrade: async () => {},

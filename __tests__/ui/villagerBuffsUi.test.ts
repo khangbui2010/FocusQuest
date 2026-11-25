@@ -154,7 +154,7 @@ test('VillagerBuffs UI (LandExpansionModal): Woodworker discount strikethrough &
   assert.ok(!noDiscountHtml.includes('data-testid="expand-base-cost-strike"'));
   assert.ok(!noDiscountHtml.includes('data-testid="expand-discount-badge"'));
 
-  const woodworkers = makeVillagers({ woodworker: 4 }); // -20% of 60 = 48 Coins
+  const woodworkers = makeVillagers({ woodworker: 4 }); // -20% of 30 = 24 Coins
   const discountEn = renderLocale(
     'en',
     React.createElement(LandExpansionModal, {
@@ -169,10 +169,10 @@ test('VillagerBuffs UI (LandExpansionModal): Woodworker discount strikethrough &
     })
   );
   assert.ok(discountEn.includes('data-testid="expand-base-cost-strike"'));
-  assert.ok(discountEn.includes('60 Coins'));
+  assert.ok(discountEn.includes('30 Coins'));
   assert.ok(discountEn.includes('data-testid="expand-discount-badge"'));
   assert.ok(discountEn.includes('-20% Woodworker'));
-  assert.ok(discountEn.includes('48 Coins'));
+  assert.ok(discountEn.includes('24 Coins'));
 
   const discountVi = renderLocale(
     'vi',
@@ -188,7 +188,24 @@ test('VillagerBuffs UI (LandExpansionModal): Woodworker discount strikethrough &
     })
   );
   assert.ok(discountVi.includes('-20% Tiều phu'));
-  assert.ok(discountVi.includes('48 Coin'));
+  assert.ok(discountVi.includes('24 Coin'));
+
+  const founderWoodworkerHtml = renderLocale(
+    'en',
+    React.createElement(LandExpansionModal, {
+      isOpen: true,
+      selectedOrigin: { x: 8, y: 0 },
+      chunksCount: 4,
+      playerLevel: 3,
+      playerCoins: 120,
+      villagers: makeVillagers({ elder: 1 }),
+      founderRole: 'woodworker',
+      onConfirm: async () => {},
+      onClose: () => {},
+    })
+  );
+  assert.ok(founderWoodworkerHtml.includes('-5% Woodworker'));
+  assert.ok(founderWoodworkerHtml.includes('29 Coins'));
 });
 
 test('VillagerBuffs UI (RewardHelpModal, CivilizationHeader, BuildingCatalogPanel): Bilingual villager buffs, combined bonus, and era max level', () => {

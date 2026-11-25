@@ -22,13 +22,36 @@ import {
 import { BuildingInstance } from './buildingTypes.ts';
 import { GridCoordinate } from './types.ts';
 import { GridMap } from './gridMap.ts';
+import {
+  ConstructionJob,
+  isBuildingUnderConstruction,
+} from './jobs.ts';
 
 export const VILLAGE_CAVE_DEFINITION_ID = 'stone_age_study_cave';
+export const FOUNDER_VILLAGER_ID = 'founder_villager';
 
 export interface Villager {
   readonly id: string;
   readonly role: VillagerRole;
   readonly recruitedAt: number;
+}
+
+/**
+ * Pure helper returning villagers including the free Founder Villager (if selected),
+ * used for rendering on MapGridView and FocusSceneArea.
+ */
+export function getEffectiveVillagersForDisplay(
+  villagers: readonly Villager[] | null | undefined,
+  founderRole?: VillagerRole | null
+): readonly Villager[] {
+  const base = Array.isArray(villagers) ? villagers : [];
+  if (!founderRole || !isVillagerRole(founderRole)) {
+    return base;
+  }
+  if (base.some((v) => v.id === FOUNDER_VILLAGER_ID)) {
+    return base;
+  }
+  return [{ id: FOUNDER_VILLAGER_ID, role: founderRole, recruitedAt: 0 }, ...base];
 }
 
 export type RecruitFailureReason =
@@ -55,18 +78,23 @@ export interface VillagerIdleSpot {
 export interface EvaluateRecruitmentInput {
   readonly caveBuilding?: BuildingInstance;
   readonly villagers?: readonly Villager[];
+  readonly founderRole?: VillagerRole | null;
   readonly playerCoins: number;
   readonly role: unknown;
 }
 
 /**
- * Finds the active Meditation Cave instance on the map (or undefined if absent).
+ * Finds the active Rock Shelter instance on the map (or undefined if absent or still under construction).
  */
 export function findVillageCave(
-  buildings: readonly BuildingInstance[]
+  buildings: readonly BuildingInstance[],
+  jobs?: readonly ConstructionJob[] | null
 ): BuildingInstance | undefined {
   for (const building of buildings) {
-    if (building.definitionId === VILLAGE_CAVE_DEFINITION_ID) {
+    if (
+      building.definitionId === VILLAGE_CAVE_DEFINITION_ID &&
+      !isBuildingUnderConstruction(building.id, jobs)
+    ) {
       return building;
     }
   }
@@ -74,9 +102,9 @@ export function findVillageCave(
 }
 
 /**
- * Calculates village population capacity granted by Meditation Cave level.
- * Each cave level grants +2 villager capacity (Lv 1: 2, Lv 2: 4, Lv 3: 6, Lv 4: 8, Lv 5: 10).
- * Returns 0 if no cave is placed or if level is invalid.
+ * Calculates village population capacity granted by Rock Shelter level.
+ * Each shelter level grants +2 villager capacity (Lv 1: 2, Lv 2: 4, Lv 3: 6, Lv 4: 8, Lv 5: 10).
+ * Returns 0 if no shelter is placed or if level is invalid.
  */
 export function getVillagerCapacity(
   caveBuilding: Pick<BuildingInstance, 'level'> | null | undefined
@@ -110,12 +138,15 @@ export function getVillagerRecruitCost(currentVillagerCount: number): number {
 
 /**
  * Pure evaluator checking role validity, Cave existence, capacity, and player Coins.
+ * Founder villager consumes 0 Cave capacity slots, but counts toward total villager count
+ * in the recruitment cost curve `round(25 * 1.35^n)`.
  */
 export function evaluateRecruitment(input: EvaluateRecruitmentInput): RecruitEvaluationResult {
-  const { caveBuilding, villagers = [], playerCoins, role } = input;
+  const { caveBuilding, villagers = [], founderRole, playerCoins, role } = input;
   const currentCount = villagers.length;
+  const totalForCost = currentCount + (founderRole && isVillagerRole(founderRole) ? 1 : 0);
   const capacity = getVillagerCapacity(caveBuilding);
-  const cost = getVillagerRecruitCost(currentCount);
+  const cost = getVillagerRecruitCost(totalForCost);
 
   if (!isVillagerRole(role)) {
     return {

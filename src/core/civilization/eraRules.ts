@@ -22,6 +22,7 @@ import {
   VILLAGER_ROLES,
   VillagerRole,
 } from '../../ui/components/civilization/spriteRegistry.ts';
+import { ConstructionJob, isBuildingUnderConstruction } from './jobs.ts';
 
 function isValidEraLocal(era: unknown): era is CivilizationEra {
   return typeof era === 'string' && CIVILIZATION_ERAS.includes(era as CivilizationEra);
@@ -113,6 +114,8 @@ export interface EvaluateEraAdvanceInput {
   readonly era: CivilizationEra | unknown;
   readonly buildings: readonly BuildingInstance[] | null | undefined;
   readonly villagers?: readonly Villager[] | null;
+  readonly jobs?: readonly ConstructionJob[] | null;
+  readonly founderRole?: VillagerRole | null;
   readonly landExpansions?: number;
   readonly playerLevel: number;
   readonly totalFocusMinutes: number;
@@ -195,7 +198,8 @@ function countBuildingsMeetingFloor(
   buildings: readonly BuildingInstance[],
   definitionId: string,
   minLevel: number,
-  era: CivilizationEra
+  era: CivilizationEra,
+  jobs?: readonly ConstructionJob[] | null
 ): number {
   const def = getBuildingDefinition(definitionId);
   if (!def || !isEraUnlocked(era, def.era)) {
@@ -207,6 +211,7 @@ function countBuildingsMeetingFloor(
       b &&
       typeof b === 'object' &&
       b.definitionId === definitionId &&
+      !isBuildingUnderConstruction(b.id, jobs) &&
       typeof b.level === 'number' &&
       Number.isInteger(b.level) &&
       b.level >= minLevel
@@ -243,7 +248,8 @@ export function evaluateEraAdvance(input: EvaluateEraAdvanceInput | null | undef
 
   const validEra = input.era as CivilizationEra;
   const safeBuildings = Array.isArray(input.buildings) ? input.buildings : [];
-  const roleCounts = getVillagerRoleCounts(input.villagers);
+  const safeJobs = Array.isArray(input.jobs) ? input.jobs : null;
+  const roleCounts = getVillagerRoleCounts(input.villagers, input.founderRole);
   const safeLandExpansions = Math.floor(toNonNegativeFinite(input.landExpansions ?? 0));
   const safeLevel = Math.floor(toNonNegativeFinite(input.playerLevel));
   const safeMinutes = toNonNegativeFinite(input.totalFocusMinutes);
@@ -256,7 +262,8 @@ export function evaluateEraAdvance(input: EvaluateEraAdvanceInput | null | undef
       safeBuildings,
       bReq.definitionId,
       Math.max(1, bReq.minLevel),
-      validEra
+      validEra,
+      safeJobs
     );
 
     checks.push({

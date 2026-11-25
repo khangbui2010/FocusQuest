@@ -1,5 +1,5 @@
 import React from 'react';
-import { Coins, Clock, TrendingUp, Hammer, Compass, X } from 'lucide-react';
+import { Coins, Clock, TrendingUp, Hammer, Compass, X, Users } from 'lucide-react';
 import { BuildingDefinition } from '../../../core/civilization/buildingTypes.ts';
 import { formatRewardAmount } from '../../utils/formatters.ts';
 import { getLocalizedBuildingName, getLocalizedEraName } from '../../utils/buildingI18n.ts';
@@ -10,6 +10,8 @@ export interface CivilizationHeaderProps {
   focusCoins: number;
   lifetimeFocusMinutes: number;
   activeBonusRate: number;
+  busyCrew?: number;
+  totalCrew?: number;
   isPlacementMode: boolean;
   selectedBuildingDef: BuildingDefinition | null;
   onCancelPlacement: () => void;
@@ -26,6 +28,8 @@ export const CivilizationHeader: React.FC<CivilizationHeaderProps> = ({
   focusCoins,
   lifetimeFocusMinutes,
   activeBonusRate,
+  busyCrew = 0,
+  totalCrew = 0,
   isPlacementMode,
   selectedBuildingDef,
   onCancelPlacement,
@@ -66,7 +70,7 @@ export const CivilizationHeader: React.FC<CivilizationHeaderProps> = ({
             </span>
           </div>
 
-          <div className="mt-0.5 flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
+          <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 tabular-nums flex-wrap">
             <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300 font-medium">
               <Coins className="w-3 h-3 text-amber-500 shrink-0" />
               <span>{formatRewardAmount(focusCoins)}</span>
@@ -78,6 +82,15 @@ export const CivilizationHeader: React.FC<CivilizationHeaderProps> = ({
             >
               <Clock className="w-3 h-3 text-indigo-500 shrink-0" />
               <span>{`${lifetimeFocusMinutes}m`}</span>
+            </span>
+            <span aria-hidden="true" className="text-slate-300 dark:text-slate-700">·</span>
+            <span
+              data-testid="civ-header-crew"
+              className="inline-flex items-center gap-1 whitespace-nowrap text-slate-600 dark:text-slate-300 font-medium"
+              title={t('civ.header.crewTitle')}
+            >
+              <Users className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <span>{t('civ.header.crewBadge', { busy: busyCrew, total: totalCrew })}</span>
             </span>
           </div>
         </div>

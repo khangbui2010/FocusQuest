@@ -465,6 +465,35 @@ export class MessageHandler {
           return { success: true, data: result };
         }
 
+        case 'CANCEL_CONSTRUCTION_JOB': {
+          if (
+            !msg.payload ||
+            typeof msg.payload !== 'object' ||
+            typeof msg.payload.jobId !== 'string' ||
+            !msg.payload.jobId.trim()
+          ) {
+            return {
+              success: false,
+              error: 'CANCEL_CONSTRUCTION_JOB requires a valid jobId.',
+              errorCode: 'CIV_INVALID_CANCEL_JOB_PAYLOAD',
+            };
+          }
+          const result = await this.civilizationCoordinator.cancelConstructionJob(msg.payload);
+          return { success: true, data: result };
+        }
+
+        case 'SELECT_FOUNDER': {
+          if (!msg.payload || typeof msg.payload !== 'object') {
+            return {
+              success: false,
+              error: 'SELECT_FOUNDER requires a valid villager role.',
+              errorCode: 'CIV_INVALID_FOUNDER_PAYLOAD',
+            };
+          }
+          const result = await this.civilizationCoordinator.selectFounder(msg.payload);
+          return { success: true, data: result };
+        }
+
         // --- Quest Actions ---
         case 'GET_QUEST_STATE': {
           const questData = await this.questCoordinator.getQuestState();

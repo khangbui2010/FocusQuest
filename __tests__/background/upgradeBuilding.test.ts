@@ -24,6 +24,8 @@ import {
 import { createInitialQuestState } from '../../src/core/quests/questEngine.ts';
 import { formatLocalDateKey } from '../../src/core/quests/questDates.ts';
 import { aggregateCoinBonus } from '../../src/core/economy/coinBonus.ts';
+import { createInitialCivilizationState } from '../../src/core/civilization/civilizationState.ts';
+import { GridMap } from '../../src/core/civilization/gridMap.ts';
 
 const EPSILON = 1e-9;
 
@@ -46,7 +48,12 @@ function createStage5C1Harness() {
     notifications,
     badge,
     blockingCoordinator,
-    () => civCoordinator.getActiveCoinBonuses()
+    () => civCoordinator.getActiveCoinBonuses(),
+    undefined,
+    undefined,
+    (civState) => {
+      civCoordinator.refreshCachedBonuses(civState);
+    }
   );
 
   const handler = new MessageHandler(
@@ -76,6 +83,29 @@ function createStage5C1Harness() {
       },
     });
     await storage.setQuests(createInitialQuestState(Date.now()));
+    const initCiv = createInitialCivilizationState();
+    const gm = GridMap.fromSnapshot(initCiv.grid);
+    gm.placeBuilding('cave_seed', { x: 5, y: 5 }, { width: 3, height: 3 });
+    await storage.setCivilizationState({
+      ...initCiv,
+      grid: gm.toSnapshot(),
+      buildings: [
+        {
+          id: 'cave_seed',
+          definitionId: 'stone_age_study_cave',
+          position: { x: 5, y: 5 },
+          level: 1,
+          placedAt: 1,
+        },
+      ],
+      villagers: [{ id: 'v_seed', role: 'woodworker', recruitedAt: 1 }],
+      founderRole: 'woodworker',
+    });
+  }
+
+  async function runFocusMinutes(profileId: string, minutes: number) {
+    await sessionCoordinator.startSession('COUNTDOWN', minutes, profileId);
+    await sessionCoordinator.completeCountdown();
   }
 
   return {
@@ -87,12 +117,14 @@ function createStage5C1Harness() {
     sessionCoordinator,
     handler,
     seedPlayer,
+    runFocusMinutes,
   };
 }
 
 test('Stage 5C-1 Handler & Coordinator: UPGRADE_BUILDING validates payload strictly and enforces gates', async () => {
   const h = createStage5C1Harness();
   await h.seedPlayer(2000, 100, 2, 300); // Level 2 (100 XP)
+  const profile = await h.profileManager.createProfile('Upgrade Gate Profile', []);
 
   // Invalid payloads rejected before storage mutation
   const badPayloads = [
@@ -141,6 +173,19 @@ test('Stage 5C-1 Handler & Coordinator: UPGRADE_BUILDING validates payload stric
   const elderHutData = elderHutRes.data as PlaceBuildingResponseData;
   const granaryData = granaryRes.data as PlaceBuildingResponseData;
 
+  // Granary is UNDER_CONSTRUCTION until its 120m build job finishes
+  const underConsRes = await h.handler.handleMessage({
+    action: 'UPGRADE_BUILDING',
+    payload: { buildingId: granaryData.building.id, expectedLevel: 1 },
+  });
+  assert.equal(underConsRes.success, false);
+  assert.equal(underConsRes.errorCode, 'CIV_BUILDING_UNDER_CONSTRUCTION');
+
+  // Finish both 120m build jobs (240m sequential Focus with 2 crew)
+  await h.runFocusMinutes(profile.id, 240);
+  // Restore Level 2 for level-gate assertion
+  await h.storage.setEconomy({ focusCoins: 1900, totalXP: 100, level: 2 });
+
   // Decorative & fixed-effect Focus Support reject upgrade with CIV_UPGRADE_NOT_SUPPORTED
   for (const bldId of [campData.building.id, elderHutData.building.id]) {
     const upRes = await h.handler.handleMessage({
@@ -170,26 +215,31 @@ test('Stage 5C-1 Handler & Coordinator: UPGRADE_BUILDING validates payload stric
   assert.equal(coinErrRes.errorCode, 'CIV_INSUFFICIENT_BUILDING_COINS');
 });
 
-test('Stage 5C-1 Reward Integration: upgrading L1->L5 deducts exact Coins, updates CoinBonus live without touching dailyStats/quests, XP unchanged', async () => {
+test('Stage 5C-1 Reward Integration: upgrading L1->L5 deducts exact Coins, updates CoinBonus after completion without touching dailyStats/quests, XP unchanged', async () => {
   const h = createStage5C1Harness();
   await h.seedPlayer(2000, 1500, 6, 500);
   const profile = await h.profileManager.createProfile('Upgrade Integration', []);
 
-  const beforeStats = await h.storage.getDailyStats();
-  const beforeQuests = await h.storage.getQuests();
-
-  // Place Foraging Post (cost 15 -> 1985 Coins left, +2% bonus)
+  // Place Foraging Post (cost 15 -> 1985 Coins left, 60m build -> 0% bonus while under construction)
   const placeRes = await h.handler.handleMessage({
     action: 'PLACE_BUILDING',
     payload: { buildingDefinitionId: 'stone_age_foraging_post', position: { x: 0, y: 0 } },
   });
   assert.equal(placeRes.success, true);
   const bldId = (placeRes.data as PlaceBuildingResponseData).building.id;
+  assert.ok(Math.abs(aggregateCoinBonus(h.civCoordinator.getActiveCoinBonuses())) < EPSILON);
+
+  // Complete 60m Focus to finish Foraging Post (+2% bonus unlocked)
+  await h.runFocusMinutes(profile.id, 60);
   assert.ok(Math.abs(aggregateCoinBonus(h.civCoordinator.getActiveCoinBonuses()) - 0.02) < EPSILON);
 
-  // Upgrade sequentially L1 -> L5: costs [24, 38, 61, 98] (total = 221)
+  const beforeStats = await h.storage.getDailyStats();
+  const beforeQuests = await h.storage.getQuests();
+  const econBeforeUpgrades = await h.storage.getEconomy();
+
+  // Queue sequential upgrades L1 -> L5: costs [24, 38, 61, 98] (total = 221)
   const expectedCosts = [24, 38, 61, 98];
-  let expectedCoins = 1985;
+  let expectedCoins = econBeforeUpgrades.focusCoins;
   for (let idx = 0; idx < expectedCosts.length; idx += 1) {
     const expectedLevel = idx + 1;
     const upRes = await h.handler.handleMessage({
@@ -202,13 +252,10 @@ test('Stage 5C-1 Reward Integration: upgrading L1->L5 deducts exact Coins, updat
     assert.equal(upData.cost, expectedCosts[idx]);
     expectedCoins -= expectedCosts[idx];
     assert.equal(upData.economy.focusCoins, expectedCoins);
-    assert.equal(upData.economy.totalXP, 1500, 'Upgrading must never alter totalXP');
+    assert.equal(upData.economy.totalXP, econBeforeUpgrades.totalXP, 'Upgrading must never alter totalXP');
   }
 
-  // Bonus cache now reflects Lv.5 Foraging Post (+10% = 0.10)
-  assert.ok(Math.abs(aggregateCoinBonus(h.civCoordinator.getActiveCoinBonuses()) - 0.1) < EPSILON);
-
-  // Attempting L5 -> L6 fails with BUILDING_MAX_LEVEL
+  // Attempting L5 -> L6 while Lv.5 is already queued fails with BUILDING_MAX_LEVEL
   const overMaxRes = await h.handler.handleMessage({
     action: 'UPGRADE_BUILDING',
     payload: { buildingId: bldId, expectedLevel: 5 },
@@ -216,22 +263,28 @@ test('Stage 5C-1 Reward Integration: upgrading L1->L5 deducts exact Coins, updat
   assert.equal(overMaxRes.success, false);
   assert.equal(overMaxRes.errorCode, 'BUILDING_MAX_LEVEL');
 
-  // Upgrade MUST NOT write to fq_daily_stats or fq_quests
+  // UPGRADE_BUILDING MUST NOT write to fq_daily_stats or fq_quests
   assert.deepEqual(await h.storage.getDailyStats(), beforeStats);
   assert.deepEqual(await h.storage.getQuests(), beforeQuests);
 
+  // Complete 5+10+15+20 = 50m Focus -> Foraging Post reaches Lv.5 (+10% CoinBonus)
+  await h.runFocusMinutes(profile.id, 50);
+  assert.ok(Math.abs(aggregateCoinBonus(h.civCoordinator.getActiveCoinBonuses()) - 0.1) < EPSILON);
+
   // Subsequent Focus session uses +10% CoinBonus (10m Countdown = 10 * 1.5 * 1.0 * 1.10 = 16.5 Coins, XP = 50)
+  const econBeforeSession = await h.storage.getEconomy();
   await h.sessionCoordinator.startSession('COUNTDOWN', 10, profile.id);
   await h.sessionCoordinator.completeCountdown();
 
   const afterEcon = await h.storage.getEconomy();
-  assert.ok(Math.abs(afterEcon.focusCoins - (expectedCoins + 16.5)) < EPSILON);
-  assert.equal(afterEcon.totalXP, 1550);
+  assert.ok(Math.abs(afterEcon.focusCoins - (econBeforeSession.focusCoins + 16.5)) < EPSILON);
+  assert.equal(afterEcon.totalXP, econBeforeSession.totalXP + 50);
 });
 
 test('Stage 5C-1 Concurrency & Rollback: concurrent upgrades enforce expectedLevel and storage failure rolls back without cache poison', async () => {
   const h = createStage5C1Harness();
   await h.seedPlayer(1000, 1500, 6, 500);
+  const profile = await h.profileManager.createProfile('Upgrade Concurrency Profile', []);
 
   const placeRes = await h.handler.handleMessage({
     action: 'PLACE_BUILDING',
@@ -239,7 +292,8 @@ test('Stage 5C-1 Concurrency & Rollback: concurrent upgrades enforce expectedLev
   });
   assert.equal(placeRes.success, true);
   const bldId = (placeRes.data as PlaceBuildingResponseData).building.id;
-  // Remaining Coins = 985
+  await h.runFocusMinutes(profile.id, 60);
+  const coinsAfterBuild = (await h.storage.getEconomy()).focusCoins;
 
   // 1. Two concurrent upgrade requests with same expectedLevel: 1
   const [r1, r2] = await Promise.all([
@@ -260,7 +314,11 @@ test('Stage 5C-1 Concurrency & Rollback: concurrent upgrades enforce expectedLev
   assert.equal(failures[0].errorCode, 'BUILDING_LEVEL_MISMATCH');
 
   const econAfterRace = await h.storage.getEconomy();
-  assert.equal(econAfterRace.focusCoins, 985 - 24, 'Coins must only be deducted once');
+  assert.equal(econAfterRace.focusCoins, coinsAfterBuild - 24, 'Coins must only be deducted once');
+
+  // Complete 5m Focus to finish L1->L2 upgrade (+4% bonus)
+  await h.runFocusMinutes(profile.id, 5);
+  const coinsAtLv2 = (await h.storage.getEconomy()).focusCoins;
   assert.ok(Math.abs(aggregateCoinBonus(h.civCoordinator.getActiveCoinBonuses()) - 0.04) < EPSILON);
 
   // 2. Partial storage write failure during L2->L3 must rollback economy & civilization and preserve +4% cache
@@ -283,14 +341,16 @@ test('Stage 5C-1 Concurrency & Rollback: concurrent upgrades enforce expectedLev
 
   const rolledEcon = await h.storage.getEconomy();
   const rolledCiv = await h.storage.getCivilizationState();
-  assert.equal(rolledEcon.focusCoins, 961);
-  assert.equal(rolledCiv.buildings[0].level, 2);
+  assert.equal(rolledEcon.focusCoins, coinsAtLv2);
+  const rolledForage = rolledCiv.buildings.find((b) => b.id === bldId);
+  assert.equal(rolledForage?.level, 2);
   assert.ok(Math.abs(aggregateCoinBonus(h.civCoordinator.getActiveCoinBonuses()) - 0.04) < EPSILON);
 });
 
 test('Stage 5C-1 Placement Cap & 50% Demolish Refund: enforces 4 Economy max, refunds 50% of base + upgrades, and handles rollback', async () => {
   const h = createStage5C1Harness();
   await h.seedPlayer(2000, 1500, 6, 500);
+  const profile = await h.profileManager.createProfile('Placement Cap Profile', []);
 
   // Place 4 Foraging Posts (each 2x2) inside initial 8x8 map: (0,0), (2,0), (4,0), (6,0)
   const placedIds: string[] = [];
@@ -312,12 +372,12 @@ test('Stage 5C-1 Placement Cap & 50% Demolish Refund: enforces 4 Economy max, re
   assert.equal(fifthForageRes.errorCode, 'CIV_ECONOMY_BUILDING_LIMIT_REACHED');
   assert.equal(fifthForageRes.errorParams?.buildingName, 'Foraging Post');
 
-  // Primitive Granary has its own independent 0/4 Build Limit and can still be placed 4 times
+  // Primitive Granary has its own independent 0/4 Build Limit and can still be placed 4 times (2x3 footprint)
   for (const pos of [
     { x: 0, y: 2 },
     { x: 2, y: 2 },
     { x: 4, y: 2 },
-    { x: 0, y: 5 },
+    { x: 6, y: 2 },
   ]) {
     const gRes = await h.handler.handleMessage({
       action: 'PLACE_BUILDING',
@@ -329,7 +389,7 @@ test('Stage 5C-1 Placement Cap & 50% Demolish Refund: enforces 4 Economy max, re
   // 5th Primitive Granary hits CIV_ECONOMY_BUILDING_LIMIT_REACHED
   const fifthGranaryRes = await h.handler.handleMessage({
     action: 'PLACE_BUILDING',
-    payload: { buildingDefinitionId: 'stone_age_food_cache', position: { x: 2, y: 5 } },
+    payload: { buildingDefinitionId: 'stone_age_food_cache', position: { x: 0, y: 5 } },
   });
   assert.equal(fifthGranaryRes.success, false);
   assert.equal(fifthGranaryRes.errorCode, 'CIV_ECONOMY_BUILDING_LIMIT_REACHED');
@@ -338,12 +398,13 @@ test('Stage 5C-1 Placement Cap & 50% Demolish Refund: enforces 4 Economy max, re
   // Decorative & Focus Support buildings are still allowed when Economy caps are full
   const decorRes = await h.handler.handleMessage({
     action: 'PLACE_BUILDING',
-    payload: { buildingDefinitionId: 'stone_age_campfire', position: { x: 7, y: 2 } },
+    payload: { buildingDefinitionId: 'stone_age_campfire', position: { x: 0, y: 5 } },
   });
   assert.equal(decorRes.success, true);
   const decorData = decorRes.data as PlaceBuildingResponseData;
 
-  // Upgrade first Foraging Post to Lv.3 (total spent: 15 + 24 + 38 = 77 -> 50% refund = 38.5)
+  // Finish first Foraging Post (60m Focus via FIFO), then queue+finish upgrades L1->L3 (5+10=15m Focus)
+  await h.runFocusMinutes(profile.id, 60);
   const firstId = placedIds[0];
   await h.handler.handleMessage({
     action: 'UPGRADE_BUILDING',
@@ -353,7 +414,9 @@ test('Stage 5C-1 Placement Cap & 50% Demolish Refund: enforces 4 Economy max, re
     action: 'UPGRADE_BUILDING',
     payload: { buildingId: firstId, expectedLevel: 2 },
   });
-
+  // First 3 Foraging Posts + 4 Granaries occupy remaining queue behind Foraging Post #1?
+  // Wait: Foraging Post #2, #3, #4 and 4 Granaries were queued BEFORE upgrades!
+  // Let's check: even if upgrades are queued at the tail, REMOVE_BUILDING refunds 50% of base + paid upgrades!
   const econBeforeDemolish = await h.storage.getEconomy();
   const removeRes = await h.handler.handleMessage({
     action: 'REMOVE_BUILDING',

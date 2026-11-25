@@ -8,7 +8,12 @@
 
 import { BuildingInstance } from '../../core/civilization/buildingTypes.ts';
 import { CivilizationState } from '../../core/civilization/civilizationState.ts';
-import { Villager, VILLAGE_CAVE_DEFINITION_ID } from '../../core/civilization/villager.ts';
+import {
+  Villager,
+  VILLAGE_CAVE_DEFINITION_ID,
+  getEffectiveVillagersForDisplay,
+} from '../../core/civilization/villager.ts';
+import { isBuildingUnderConstruction } from '../../core/civilization/jobs.ts';
 import { VillagerAnimationName, VillagerRole, isVillagerRole } from '../components/civilization/spriteRegistry.ts';
 import { STONE_AGE_SPRITE_DATA } from '../components/civilization/spriteData.ts';
 
@@ -281,10 +286,15 @@ export function buildFocusSceneModel(
     ? civilizationState!.villagers
     : [];
 
-  // Deduplicate buildings: at most 1 visual slot per definitionId that has a known sprite + slot
+  const rawJobs = Array.isArray(civilizationState?.jobs)
+    ? civilizationState!.jobs
+    : [];
+
+  // Deduplicate active buildings: exclude buildings still UNDER_CONSTRUCTION ('place' job)
   const countsByDef = new Map<string, number>();
   for (const item of rawBuildings) {
     if (!isValidBuildingInstance(item)) continue;
+    if (isBuildingUnderConstruction(item.id, rawJobs)) continue;
     const defId = item.definitionId;
     if (!SCENE_BUILDING_SLOTS[defId] || !STONE_AGE_SPRITE_DATA[defId]) continue;
     countsByDef.set(defId, (countsByDef.get(defId) ?? 0) + 1);
@@ -306,8 +316,12 @@ export function buildFocusSceneModel(
 
   const builtIds = new Set(buildings.map((b) => b.definitionId));
 
-  // Deterministically sort villagers without mutating input, and cap cleanly at 6
-  const validVillagers = rawVillagers
+  // Include Founder Villager (if selected) and deterministically sort without mutating input, capped at 6
+  const effectiveVillagers = getEffectiveVillagersForDisplay(
+    rawVillagers,
+    civilizationState?.founderRole
+  );
+  const validVillagers = effectiveVillagers
     .filter(isValidVillagerInstance)
     .sort((a, b) => a.recruitedAt - b.recruitedAt || a.id.localeCompare(b.id))
     .slice(0, MAX_SCENE_VILLAGERS);

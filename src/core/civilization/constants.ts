@@ -17,11 +17,11 @@ export const INITIAL_CHUNK_COUNT =
 export const INITIAL_ORIGIN_X = 0;
 export const INITIAL_ORIGIN_Y = 0;
 
-// Milestone 5B.6a: Land expansion cost & level gate constants
-export const LAND_EXPANSION_BASE_COST = 60;
-export const LAND_EXPANSION_RATIO_BASE = 1.25;
-export const LAND_EXPANSION_RATIO_STEP = 0.01;
-export const LAND_EXPANSION_RATIO_CAP = 1.25;
+// Milestone 5E-1 (Stage C): Arithmetic Land Expansion cost & level gate constants
+export const LAND_EXPANSION_BASE_COST = 30;
+export const LAND_EXPANSION_INITIAL_INCREMENT = 10;
+export const LAND_EXPANSION_STEP_BONUS = 5;
+export const LAND_EXPANSION_STEP_GROUP_SIZE = 5;
 export const LAND_EXPANSION_LEVEL_OFFSET = 2;
 
 // Milestone 5C-1: Building Upgrade, Demolish Refund & Economy Cap constants

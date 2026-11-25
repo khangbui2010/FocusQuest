@@ -27,14 +27,22 @@ import {
 import { calculateUpgradeCost, getBuildingDefinition } from './buildingCatalog.ts';
 import { getEffectiveMaxLevel } from './eraRules.ts';
 import { applyCostDiscount } from './villagerBuffs.ts';
+import {
+  ConstructionJob,
+  getEffectiveTargetLevel,
+  getUpgradeJobSpec,
+  isBuildingUnderConstruction,
+} from './jobs.ts';
 
 export type UpgradeFailureReason =
   | 'BUILDING_NOT_FOUND'
+  | 'BUILDING_UNDER_CONSTRUCTION'
   | 'NON_UPGRADEABLE_CATEGORY'
   | 'BUILDING_MAX_LEVEL'
   | 'ERA_LOCKED'
   | 'LEVEL_MISMATCH'
   | 'PLAYER_LEVEL_REQUIRED'
+  | 'NOT_ENOUGH_VILLAGERS'
   | 'INSUFFICIENT_COINS'
   | 'INVALID_STATE';
 
@@ -204,18 +212,44 @@ export function calculateTotalBuildingCoinsSpent(
   return total;
 }
 
+export interface DemolishRefundOptions {
+  readonly placeJob?: Pick<ConstructionJob, 'paidCoins'>;
+  readonly upgradeJobs?: readonly Pick<ConstructionJob, 'paidCoins'>[];
+}
+
 /**
- * Computes exact Coins refunded when demolishing a building at `level`.
+ * Computes exact Coins refunded (50%) when demolishing a building at `level`
+ * or cancelling/demolishing an under-construction / queued-upgrade building.
  */
 export function calculateBuildingDemolishRefund(
   definition: BuildingDefinition | undefined,
-  level: number
+  level: number,
+  options?: DemolishRefundOptions
 ): number {
   if (!definition) {
     return 0;
   }
+  if (options?.placeJob) {
+    const placePaid =
+      typeof options.placeJob.paidCoins === 'number' &&
+      Number.isFinite(options.placeJob.paidCoins) &&
+      options.placeJob.paidCoins > 0
+        ? options.placeJob.paidCoins
+        : 0;
+    return placePaid * BUILDING_DEMOLISH_REFUND_RATE;
+  }
   const spent = calculateTotalBuildingCoinsSpent(definition, level);
-  return spent * BUILDING_DEMOLISH_REFUND_RATE;
+  const queuedUpgradeSpent = Array.isArray(options?.upgradeJobs)
+    ? options.upgradeJobs.reduce(
+        (sum, job) =>
+          sum +
+          (typeof job.paidCoins === 'number' && Number.isFinite(job.paidCoins) && job.paidCoins > 0
+            ? job.paidCoins
+            : 0),
+        0
+      )
+    : 0;
+  return (spent + queuedUpgradeSpent) * BUILDING_DEMOLISH_REFUND_RATE;
 }
 
 function isBuildingEraUnlockedForUpgrade(
@@ -238,6 +272,8 @@ export interface EvaluateBuildingUpgradeInput {
   readonly playerCoins: number;
   readonly expectedLevel?: number;
   readonly upgradeDiscountRate?: number;
+  readonly jobs?: readonly ConstructionJob[];
+  readonly totalVillagers?: number;
 }
 
 /**
@@ -254,6 +290,8 @@ export function evaluateBuildingUpgrade(
     playerCoins,
     expectedLevel,
     upgradeDiscountRate = 0,
+    jobs,
+    totalVillagers,
   } = input;
 
   const safeDiscountRate =
@@ -281,7 +319,10 @@ export function evaluateBuildingUpgrade(
 
   const effectiveMaxLevel = getEffectiveMaxLevel(definition, currentEra);
   const isCategoryUpgradeable = isBuildingDefinitionUpgradeable(definition);
-  const currentCoinBonusRate = getBuildingCoinBonusRateAtLevel(definition, instance.level);
+  const fromLevel = instance && Number.isInteger(instance.level)
+    ? getEffectiveTargetLevel(instance, jobs)
+    : instance?.level ?? 0;
+  const currentCoinBonusRate = getBuildingCoinBonusRateAtLevel(definition, fromLevel);
 
   if (!Number.isInteger(instance.level) || instance.level < 1) {
     return {
@@ -301,18 +342,36 @@ export function evaluateBuildingUpgrade(
     };
   }
 
-  if (expectedLevel !== undefined && instance.level !== expectedLevel) {
+  if (isBuildingUnderConstruction(instance.id, jobs)) {
     return {
       canUpgrade: false,
-      reason: 'LEVEL_MISMATCH',
-      currentLevel: instance.level,
+      reason: 'BUILDING_UNDER_CONSTRUCTION',
+      currentLevel: fromLevel,
       nextLevel: null,
       maxLevel: effectiveMaxLevel,
       isCategoryUpgradeable,
       baseCost: 0,
       discountRate: safeDiscountRate,
       cost: 0,
-      requiredPlayerLevel: getBuildingUpgradeRequiredPlayerLevel(definition, instance.level),
+      requiredPlayerLevel: definition.unlockRequirements.minPlayerLevel,
+      shortfallCoins: 0,
+      currentCoinBonusRate,
+      nextCoinBonusRate: currentCoinBonusRate,
+    };
+  }
+
+  if (expectedLevel !== undefined && fromLevel !== expectedLevel) {
+    return {
+      canUpgrade: false,
+      reason: 'LEVEL_MISMATCH',
+      currentLevel: fromLevel,
+      nextLevel: null,
+      maxLevel: effectiveMaxLevel,
+      isCategoryUpgradeable,
+      baseCost: 0,
+      discountRate: safeDiscountRate,
+      cost: 0,
+      requiredPlayerLevel: getBuildingUpgradeRequiredPlayerLevel(definition, fromLevel),
       shortfallCoins: 0,
       currentCoinBonusRate,
       nextCoinBonusRate: currentCoinBonusRate,
@@ -323,7 +382,7 @@ export function evaluateBuildingUpgrade(
     return {
       canUpgrade: false,
       reason: 'NON_UPGRADEABLE_CATEGORY',
-      currentLevel: instance.level,
+      currentLevel: fromLevel,
       nextLevel: null,
       maxLevel: effectiveMaxLevel,
       isCategoryUpgradeable: false,
@@ -337,11 +396,11 @@ export function evaluateBuildingUpgrade(
     };
   }
 
-  if (instance.level >= effectiveMaxLevel) {
+  if (fromLevel >= effectiveMaxLevel) {
     return {
       canUpgrade: false,
       reason: 'BUILDING_MAX_LEVEL',
-      currentLevel: instance.level,
+      currentLevel: fromLevel,
       nextLevel: null,
       maxLevel: effectiveMaxLevel,
       isCategoryUpgradeable: true,
@@ -355,10 +414,10 @@ export function evaluateBuildingUpgrade(
     };
   }
 
-  const nextLevel = instance.level + 1;
-  const baseCost = calculateUpgradeCost(definition, instance.level);
+  const nextLevel = fromLevel + 1;
+  const baseCost = calculateUpgradeCost(definition, fromLevel);
   const cost = baseCost > 0 ? applyCostDiscount(baseCost, safeDiscountRate) : 0;
-  const requiredPlayerLevel = getBuildingUpgradeRequiredPlayerLevel(definition, instance.level);
+  const requiredPlayerLevel = getBuildingUpgradeRequiredPlayerLevel(definition, fromLevel);
   const nextCoinBonusRate = getBuildingCoinBonusRateAtLevel(definition, nextLevel);
   const shortfallCoins = playerCoins < cost ? Math.max(0, cost - playerCoins) : 0;
 
@@ -366,7 +425,7 @@ export function evaluateBuildingUpgrade(
     return {
       canUpgrade: false,
       reason: 'ERA_LOCKED',
-      currentLevel: instance.level,
+      currentLevel: fromLevel,
       nextLevel,
       maxLevel: effectiveMaxLevel,
       isCategoryUpgradeable: true,
@@ -384,7 +443,29 @@ export function evaluateBuildingUpgrade(
     return {
       canUpgrade: false,
       reason: 'PLAYER_LEVEL_REQUIRED',
-      currentLevel: instance.level,
+      currentLevel: fromLevel,
+      nextLevel,
+      maxLevel: effectiveMaxLevel,
+      isCategoryUpgradeable: true,
+      baseCost,
+      discountRate: safeDiscountRate,
+      cost,
+      requiredPlayerLevel,
+      shortfallCoins,
+      currentCoinBonusRate,
+      nextCoinBonusRate,
+    };
+  }
+
+  if (
+    typeof totalVillagers === 'number' &&
+    Number.isFinite(totalVillagers) &&
+    totalVillagers < getUpgradeJobSpec(fromLevel).crew
+  ) {
+    return {
+      canUpgrade: false,
+      reason: 'NOT_ENOUGH_VILLAGERS',
+      currentLevel: fromLevel,
       nextLevel,
       maxLevel: effectiveMaxLevel,
       isCategoryUpgradeable: true,
@@ -402,7 +483,7 @@ export function evaluateBuildingUpgrade(
     return {
       canUpgrade: false,
       reason: 'INSUFFICIENT_COINS',
-      currentLevel: instance.level,
+      currentLevel: fromLevel,
       nextLevel,
       maxLevel: effectiveMaxLevel,
       isCategoryUpgradeable: true,
@@ -419,7 +500,7 @@ export function evaluateBuildingUpgrade(
   return {
     canUpgrade: true,
     reason: null,
-    currentLevel: instance.level,
+    currentLevel: fromLevel,
     nextLevel,
     maxLevel: effectiveMaxLevel,
     isCategoryUpgradeable: true,

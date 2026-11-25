@@ -13,7 +13,11 @@ import { BlockingCoordinator } from '../../src/background/blockingCoordinator.ts
 import { SessionCoordinator } from '../../src/background/sessionCoordinator.ts';
 import { MessageHandler } from '../../src/background/messageHandler.ts';
 import { CivilizationCoordinator } from '../../src/background/civilizationCoordinator.ts';
-import { CivilizationState } from '../../src/core/civilization/civilizationState.ts';
+import {
+  CivilizationState,
+  createInitialCivilizationState,
+} from '../../src/core/civilization/civilizationState.ts';
+import { GridMap } from '../../src/core/civilization/gridMap.ts';
 import { PlayerEconomy } from '../../src/types/economy.ts';
 
 function createCivilizationTestHarness(initialCoins = 200, initialLevel = 2) {
@@ -35,7 +39,12 @@ function createCivilizationTestHarness(initialCoins = 200, initialLevel = 2) {
     notifications,
     badge,
     blockingCoordinator,
-    () => civilizationCoordinator.getActiveCoinBonuses()
+    () => civilizationCoordinator.getActiveCoinBonuses(),
+    undefined,
+    undefined,
+    (civState) => {
+      civilizationCoordinator.refreshCachedBonuses(civState);
+    }
   );
 
   const handler = new MessageHandler(
@@ -71,6 +80,33 @@ function createCivilizationTestHarness(initialCoins = 200, initialLevel = 2) {
           coinsEarned: 50,
           xpEarned: 100,
         },
+      });
+    },
+    async seedCrew(count: 1 | 2 = 2) {
+      const initCiv = createInitialCivilizationState();
+      if (count === 1) {
+        await storage.setCivilizationState({
+          ...initCiv,
+          founderRole: 'elder',
+        });
+        return;
+      }
+      const gm = GridMap.fromSnapshot(initCiv.grid);
+      gm.placeBuilding('cave_msg_seed', { x: 5, y: 0 }, { width: 3, height: 3 });
+      await storage.setCivilizationState({
+        ...initCiv,
+        grid: gm.toSnapshot(),
+        buildings: [
+          {
+            id: 'cave_msg_seed',
+            definitionId: 'stone_age_study_cave',
+            position: { x: 5, y: 0 },
+            level: 1,
+            placedAt: 1,
+          },
+        ],
+        villagers: [{ id: 'v_msg_seed', role: 'elder', recruitedAt: 1 }],
+        founderRole: 'elder',
       });
     },
   };
@@ -243,11 +279,11 @@ test('Civilization Messages: PLACE_BUILDING rejects collision and preserves play
 });
 
 test('Civilization Messages: Concurrent purchases serialize safely without negative balance', async () => {
-  const { handler, storage, seedEconomy, seedFocusMinutes } = createCivilizationTestHarness();
-  // Foraging post costs 15 Coins. Seed exactly 20 Coins.
-  // Two concurrent purchases of 15 coins each (30 total) would overdraw without atomic mutex.
+  const { handler, storage, seedEconomy, seedFocusMinutes, seedCrew } = createCivilizationTestHarness();
+  // Foraging post costs 15 Coins (1 crew). Seed 20 Coins & 1 founder crew.
   await seedEconomy(20, 2);
   await seedFocusMinutes(100);
+  await seedCrew(1);
 
   const [res1, res2] = await Promise.all([
     handler.handleMessage({
@@ -332,12 +368,14 @@ test('Civilization Messages: REMOVE_BUILDING rejects non-existent building ID', 
   assert.ok(removeResp.error?.includes('not found'));
 });
 
-test('Civilization Messages: EXPAND_LAND expands territory by chunk origin and deducts Coins atomically', async () => {
-  const { handler, storage, seedEconomy } = createCivilizationTestHarness(100, 3);
+test('Civilization Messages: EXPAND_LAND queues clearing job, unlocks after 60m Focus, and deducts Coins atomically', async () => {
+  const { handler, storage, profileManager, sessionCoordinator, seedEconomy, seedCrew } =
+    createCivilizationTestHarness(100, 3);
   await seedEconomy(100, 3);
+  await seedCrew(2);
+  const profile = await profileManager.createProfile('Expand Msg', []);
 
-  // Initial grid has 4x4 chunks at (0,0), (4,0), (0,4), (4,4) - total 4 chunks (64 cells)
-  // First purchase (k=1) requires Lv. 3 and costs 60 Coins
+  // First purchase (k=1) requires Lv. 3, 2 crew, 60m Focus, and costs 30 Coins
   const expandResp = await handler.handleMessage({
     action: 'EXPAND_LAND',
     payload: { origin: { x: 8, y: 0 } },
@@ -351,20 +389,25 @@ test('Civilization Messages: EXPAND_LAND expands territory by chunk origin and d
     cost: number;
   };
   assert.deepStrictEqual(data.newChunk, { x: 8, y: 0 });
-  assert.strictEqual(data.cost, 60);
-  assert.strictEqual(data.economy.focusCoins, 40);
-  assert.strictEqual(data.civilizationState.grid.chunks.length, 5);
-  assert.strictEqual('terrainFeatures' in data.civilizationState.grid, false);
+  assert.strictEqual(data.cost, 30);
+  assert.strictEqual(data.economy.focusCoins, 70);
+  assert.strictEqual(data.civilizationState.grid.chunks.length, 4);
+  assert.strictEqual(data.civilizationState.jobs?.length, 1);
+
+  await sessionCoordinator.startSession('COUNTDOWN', 60, profile.id);
+  await sessionCoordinator.completeCountdown();
 
   const storedCiv = await storage.getCivilizationState();
   assert.strictEqual(storedCiv.grid.chunks.length, 5);
-  const storedEcon = await storage.getEconomy();
-  assert.strictEqual(storedEcon.focusCoins, 40);
+  assert.strictEqual('terrainFeatures' in storedCiv.grid, false);
 });
 
 test('Civilization Messages: EXPAND_LAND rejects deprecated direction/slotIndex and supports negative origin coordinates', async () => {
-  const { handler, storage, seedEconomy } = createCivilizationTestHarness(500, 5);
+  const { handler, storage, profileManager, sessionCoordinator, seedEconomy, seedCrew } =
+    createCivilizationTestHarness(500, 5);
   await seedEconomy(500, 5);
+  await seedCrew(2);
+  const profile = await profileManager.createProfile('Negative Origin', []);
 
   // Deprecated cardinal direction must be rejected without mutating coins or chunks
   const deprecatedDir = await handler.handleMessage({
@@ -388,8 +431,12 @@ test('Civilization Messages: EXPAND_LAND rejects deprecated direction/slotIndex 
     cost: number;
   };
   assert.deepStrictEqual(westData.newChunk, { x: -4, y: 0 });
-  assert.strictEqual(westData.cost, 60);
-  assert.strictEqual(westData.economy.focusCoins, 440);
+  assert.strictEqual(westData.cost, 30);
+  assert.strictEqual(westData.economy.focusCoins, 470);
+
+  // Complete 60m Focus session to unlock (-4, 0)
+  await sessionCoordinator.startSession('COUNTDOWN', 60, profile.id);
+  await sessionCoordinator.completeCountdown();
 
   // Verify building can now be placed in the newly unlocked negative territory (-4, 0)
   const placeResp = await handler.handleMessage({
@@ -402,13 +449,14 @@ test('Civilization Messages: EXPAND_LAND rejects deprecated direction/slotIndex 
   assert.strictEqual(placeResp.success, true);
 
   const storedCiv = await storage.getCivilizationState();
-  assert.strictEqual(storedCiv.buildings.length, 1);
-  assert.strictEqual(storedCiv.buildings[0].position.x, -4);
+  assert.strictEqual(storedCiv.buildings.length, 2);
+  assert.ok(storedCiv.buildings.some((b) => b.position.x === -4));
 });
 
 test('Civilization Messages: EXPAND_LAND rejects non-adjacent isolated origin without deducting Coins', async () => {
-  const { handler, storage, seedEconomy } = createCivilizationTestHarness(500, 5);
+  const { handler, storage, seedEconomy, seedCrew } = createCivilizationTestHarness(500, 5);
   await seedEconomy(500, 5);
+  await seedCrew(2);
 
   const expandResp = await handler.handleMessage({
     action: 'EXPAND_LAND',
@@ -424,6 +472,7 @@ test('Civilization Messages: EXPAND_LAND rejects non-adjacent isolated origin wi
 test('Civilization Messages: EXPAND_LAND enforces Level gate, Coins gate, alignment, and IEEE-754 float balance', async () => {
   // 1. Level too low (Lv. 2 < Lv. 3) even with 500 Coins -> reject, 0 Coins deducted
   const h1 = createCivilizationTestHarness();
+  await h1.seedCrew(2);
   await h1.storage.setEconomy({ focusCoins: 500, totalXP: 150, level: 2 });
   const levelFail = await h1.handler.handleMessage({
     action: 'EXPAND_LAND',
@@ -434,21 +483,24 @@ test('Civilization Messages: EXPAND_LAND enforces Level gate, Coins gate, alignm
   assert.strictEqual((await h1.storage.getEconomy()).focusCoins, 500);
   assert.strictEqual((await h1.storage.getCivilizationState()).grid.chunks.length, 4);
 
-  // 2. Insufficient Coins (Lv. 3, 59.5 Coins < 60) -> reject, 0 Coins deducted
+  // 2. Insufficient Coins (Lv. 3, 29.5 Coins < 30) -> reject, 0 Coins deducted
   const h2 = createCivilizationTestHarness();
-  await h2.storage.setEconomy({ focusCoins: 59.5, totalXP: 350, level: 3 });
+  await h2.seedCrew(2);
+  await h2.storage.setEconomy({ focusCoins: 29.5, totalXP: 350, level: 3 });
   const coinFail = await h2.handler.handleMessage({
     action: 'EXPAND_LAND',
     payload: { origin: { x: 8, y: 0 } },
   });
   assert.strictEqual(coinFail.success, false);
   assert.ok(coinFail.error?.includes('Insufficient coins'));
-  assert.strictEqual((await h2.storage.getEconomy()).focusCoins, 59.5);
+  assert.strictEqual((await h2.storage.getEconomy()).focusCoins, 29.5);
   assert.strictEqual((await h2.storage.getCivilizationState()).grid.chunks.length, 4);
 
-  // 3. Valid decimal Coins (75.375 - 60 = 15.375 exact IEEE-754 float without flooring)
+  // 3. Valid decimal Coins (45.375 - 30 = 15.375 exact IEEE-754 float without flooring)
   const h3 = createCivilizationTestHarness();
-  await h3.storage.setEconomy({ focusCoins: 75.375, totalXP: 350, level: 3 });
+  await h3.seedCrew(2);
+  const profile3 = await h3.profileManager.createProfile('Float Balance', []);
+  await h3.storage.setEconomy({ focusCoins: 45.375, totalXP: 350, level: 3 });
   const floatOk = await h3.handler.handleMessage({
     action: 'EXPAND_LAND',
     payload: { origin: { x: 8, y: 0 } },
@@ -456,6 +508,18 @@ test('Civilization Messages: EXPAND_LAND enforces Level gate, Coins gate, alignm
   assert.strictEqual(floatOk.success, true);
   const finalEcon = await h3.storage.getEconomy();
   assert.ok(Math.abs(finalEcon.focusCoins - 15.375) < 1e-9);
+
+  // Rejects duplicate origin while clearing
+  const dupClearing = await h3.handler.handleMessage({
+    action: 'EXPAND_LAND',
+    payload: { origin: { x: 8, y: 0 } },
+  });
+  assert.strictEqual(dupClearing.success, false);
+  assert.strictEqual(dupClearing.errorCode, 'CIV_EXPAND_ALREADY_QUEUED');
+
+  // Complete 60m Focus session to unlock (8, 0), then verify CHUNK_ALREADY_EXISTS
+  await h3.sessionCoordinator.startSession('COUNTDOWN', 60, profile3.id);
+  await h3.sessionCoordinator.completeCountdown();
 
   // 4. Rejects already-unlocked chunk origin without deducting Coins
   await h3.storage.setEconomy({ focusCoins: 200, totalXP: 1000, level: 5 });
