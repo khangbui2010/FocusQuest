@@ -285,7 +285,15 @@ export class StorageManager {
       const rawCiv = await this.getCivilizationStateInternal();
       const sanitizedCiv = sanitizeCivilizationState(rawCiv);
       if (sanitizedCiv && Array.isArray(sanitizedCiv.jobs) && sanitizedCiv.jobs.length > 0) {
-        const advancedCiv = advanceJobs(sanitizedCiv, validJobSeconds);
+        const scheduleOptions =
+          params.session.assignedJobIds !== undefined ||
+          params.session.autoContinueJobs !== undefined
+            ? {
+                priorityJobIds: params.session.assignedJobIds,
+                autoContinue: params.session.autoContinueJobs,
+              }
+            : undefined;
+        const advancedCiv = advanceJobs(sanitizedCiv, validJobSeconds, scheduleOptions);
         const validation = validateCivilizationState(advancedCiv);
         if (validation.isValid) {
           finalCivilizationState = {

@@ -81,4 +81,6 @@ export interface SessionSnapshot {
   accumulatedFocusMs?: number;     // Confirmed focus milliseconds accumulated up to lastCheckpointAt
   pomodoroConfig?: PomodoroConfig; // Configuration if session is in Pomodoro mode
   pomodoroState?: PomodoroState;   // Real-time interval/phase state if session is in Pomodoro mode
+  assignedJobIds?: readonly string[]; // Pre-session selected construction job IDs in priority order (undefined = Auto FIFO)
+  autoContinueJobs?: boolean;         // Whether queued jobs continue FIFO once assigned slots finish (default true)
 }

@@ -46,6 +46,12 @@ export const ALL_KNOWN_ERROR_CODES: readonly ErrorCode[] = [
   'INVALID_TARGET_MINUTES',
   'SESSION_ALREADY_ACTIVE',
   'SESSION_PROFILE_NOT_FOUND',
+  'SESSION_INVALID_JOB_ASSIGNMENT',
+  'SESSION_JOB_NOT_FOUND',
+  'SESSION_JOB_DUPLICATE',
+  'SESSION_JOB_TOO_MANY',
+  'SESSION_JOB_INSUFFICIENT_CREW',
+  'SESSION_JOB_UPGRADE_ORDER',
   'NO_ACTIVE_SESSION_PAUSE',
   'NO_SESSION_RESUME',
   'NO_SESSION_GIVE_UP',
@@ -446,6 +452,35 @@ function translateByErrorCode(
           ? `Cannot start session: profile with ID '${profileId}' not found.`
           : 'Cannot start session: selected profile not found.';
     }
+    case 'SESSION_INVALID_JOB_ASSIGNMENT':
+      return isVi
+        ? 'Danh sách công việc giao cho phiên không hợp lệ.'
+        : 'Invalid session construction job assignment.';
+    case 'SESSION_JOB_NOT_FOUND':
+      return isVi
+        ? 'Một công việc được chọn không còn tồn tại trên bản đồ.'
+        : 'An assigned construction job no longer exists.';
+    case 'SESSION_JOB_DUPLICATE':
+      return isVi
+        ? 'Không thể chọn trùng cùng một công việc trong phiên.'
+        : 'Duplicate construction job ID in session assignment.';
+    case 'SESSION_JOB_TOO_MANY': {
+      const max = str('max', '4');
+      return isVi
+        ? `Chỉ được giao tối đa ${max} công việc cùng lúc trong một phiên.`
+        : `At most ${max} construction jobs can be assigned concurrently.`;
+    }
+    case 'SESSION_JOB_INSUFFICIENT_CREW': {
+      const required = str('required', '1');
+      const available = str('available', '0');
+      return isVi
+        ? `Công việc đã chọn cần ${required} dân làng (hiện có ${available}).`
+        : `Assigned jobs require ${required} villagers, but only ${available} are available.`;
+    }
+    case 'SESSION_JOB_UPGRADE_ORDER':
+      return isVi
+        ? 'Công trình cần hoàn thành cấp nâng trước đó trước khi giao cấp tiếp theo.'
+        : 'A lower-level upgrade on this building must run before assigning this upgrade.';
     case 'NO_ACTIVE_SESSION_PAUSE':
       return isVi ? 'Không có phiên tập trung đang chạy để tạm dừng.' : 'No active session to pause.';
     case 'NO_SESSION_RESUME':

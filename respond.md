@@ -1,96 +1,91 @@
-# BÁO CÁO NGHIỆM THU — MILESTONE 5E-1: CÔNG VIỆC XÂY DỰNG THEO ĐỘI DÂN LÀNG, ĐẾM NGƯỢC ĐẾN GIÂY, MỞ ĐẤT CẤP SỐ CỘNG, DÂN LÀNG KHỞI ĐẦU & ĐỔI TÊN HANG
+# BÁO CÁO NGHIỆM THU — MILESTONE 5E-2: GIAO VIỆC TRƯỚC PHIÊN FOCUS (`Giao việc`) & CẢNH FOCUS `1–4` Ô LÀM VIỆC
 
-> **Lưu trữ báo cáo cũ:** Bản báo cáo **Milestone 5D-1** trước đó đã được sao lưu nguyên vẹn sang `respond_5e1_prev.md`; mọi file `respond_*_prev.md` khác (`respond_5d1_prev.md`, `respond_v5_2_prev.md`, `respond_cleanup1_prev.md`, `respond_villager_*_prev.md`, `respond_5c1_prev.md`, `respond_5c_prev.md`, v.v.) vẫn được giữ nguyên vẹn.
+> **Lưu trữ báo cáo cũ:** Bản báo cáo **Milestone 5E-1c** trước đó đã được sao lưu nguyên vẹn sang `respond_5e2_prev.md`; mọi file `respond_*_prev.md` khác (`respond_5e1c_prev.md`, `respond_5e1b_prev.md`, `respond_5e1_prev.md`, `respond_5d1_prev.md`, `respond_v5_2_prev.md`, `respond_cleanup1_prev.md`, `respond_villager_*_prev.md`, `respond_5c1_prev.md`, `respond_5c_prev.md`, v.v.) vẫn được giữ nguyên vẹn.
 >
-> **Trạng thái nghiệm thu:** Đã triển khai hoàn chỉnh **Milestone 5E-1** qua đủ **5 chặng A → E**, đồng bộ toàn bộ tài liệu (`PRODUCT_SPEC.md`, `ARCHITECTURE.md`, `PROJECT_STATUS.md`, `README.md`, `docs/sprites/TILE_INDEX.md`) và hoàn tất kiểm định tự động (**`715 / 715 PASS`** liên tiếp 3/3 lượt, **`npm run lint` = `0` lỗi TypeScript**, **`npm run build` = PASS** với **`30` tệp, `1,423,416 B`, `0` tệp audio**, không tồn tại `public/assets/aistudio`). **Kiểm tra trực quan & tương tác trên Google Chrome thật (`>= 116`) chưa thực hiện và cần bạn kiểm chứng khi nghiệm thu.**
+> **Trạng thái nghiệm thu:** Đã hoàn tất trọn vẹn **Mục 0** (gỡ dụng cụ lơ lửng khỏi Bản đồ), **Mục 1** (giao việc thủ công/tự động trước phiên, xác thực nguyên tử ở Background/Storage & đồng bộ Simulator), **Mục 2** (`FocusSceneArea` hiển thị `0` hoặc `1–4` khung làm việc đều nhau với dân thật không trùng lặp & búa/rìu/cuốc chim chỉ vung khi đang Focus), và **Mục 3** (bổ sung `12` test mới `0` xóa test cũ, đồng bộ tài liệu & kiểm định toàn repo: **`npm run lint` = `0` lỗi**, **`npm run clean && npm run build` = PASS** với **`30` tệp, `1,463,539 B`, `0` tệp audio**, **`npm test` = `725 / 725 PASS`**, **`689 / 689` khóa EN/VI**, **`128` ErrorCodes**). **Kiểm thử trực quan & tương tác trên Google Chrome thật (`>= 116`) chưa được thực hiện trong môi trường headless và cần bạn kiểm chứng theo checklist mục 6.**
 
 ---
 
-## 1. Đối Chiếu Chặng 0 Với Mã Hiện Tại
+## 0. Đối Chiếu Mã Hiện Tại Ở Giai Đoạn 0 (Làm Chuẩn Theo Mã Thực Tế)
 
-1. **Giữ nguyên Schema & ID công trình cũ:** Giữ `CURRENT_SCHEMA_VERSION = 5` (`fq_civilization` giữ `CURRENT_CIVILIZATION_SCHEMA_VERSION = 2` với các trường bổ sung tùy chọn tương thích ngược `jobs?: readonly ConstructionJob[]` và `founderRole?: VillagerRole | null`), giữ `era === 'STONE_AGE'` (`5C-2 Bronze Age` chưa kích hoạt), giữ nguyên ID `stone_age_study_cave` ở mọi tầng dữ liệu/storage/migration (`v4_villagersSchema.ts` giữ nguyên hành vi lịch sử).
-2. **Đặt tên móc đồng bộ & helper chuẩn mã hiện hành:**
-   - Tiến độ công việc xây dựng nối qua `advanceCivilizationJobsSeconds` trong `StorageManager.commitSessionOutcomeInternal` (cùng giao dịch `setMultiple` dưới `StorageMutex` + cập nhật `CivilizationCoordinator.refreshCachedBonuses()`), được `SessionCoordinator` truyền vào **duy nhất** ở 4 nhánh `COMPLETED` hợp lệ (`questOutcomeDelta.completedFocusMinutes * 60`).
-   - Hỗ trợ dân làng khởi đầu dùng `FOUNDER_VILLAGER_ID = 'founder_villager'` + helper thuần `getEffectiveVillagersForDisplay(villagers, founderRole)` trong `src/core/civilization/villager.ts` để giữ nguyên mảng `villagers` đã tuyển trong storage và không phá công thức sức chứa Hang.
-3. **Bù đường dẫn & tài nguyên:** Nối tài sản `public/assets/sprites/clock_tiles_16.png` (`48×16`, 3 tile `CLOCK`/`HOURGLASS`/`STOPWATCH`) và ma trận 4 giai đoạn dựng khung trong `src/ui/components/civilization/constructionSpriteData.ts`.
-
----
-
-## 2. Chi Tiết Triển Khai Theo Chặng (A → E)
-
-### Chặng A — Động cơ Job, Hàng Đợi Đội Dân Làng FIFO & Quyết Toán Giây Focus
-- **`src/core/civilization/jobs.ts` (nguồn chân lý duy nhất):**
-  - Bảng thiết kế tập trung: *Campfire* (`0` dân / `0s` tức thì); *Ancient Totem*, *Rock Shelter*, *Foraging Post* (`1` dân / `3600s` = `60` phút); *Elder's Hut*, *Primitive Granary* (`2` dân / `7200s` = `120` phút); nâng cấp `L → L+1` (`1` dân nếu `L <= 2`, `2` dân nếu `L >= 3`, thời lượng `300 × L` giây = `5, 10, 15, 20` phút); mở rộng 1 chunk đất (`2` dân / `3600s` = `60` phút).
-  - **`assignJobsFifo(jobs, totalVillagers)`:** Tối đa `MAX_ACTIVE_CONSTRUCTION_JOBS = 4` việc `ACTIVE` cùng lúc theo thứ tự FIFO trong giới hạn tổng thợ (`recruited + founder`); các việc nâng cấp cùng `buildingId` chạy tuần tự theo `targetLevel` tăng dần.
-  - **`advanceJobs` & `projectJobs`:** Mô phỏng theo bước sự kiện rời rạc liên tục theo **số nguyên giây Focus** (mang phần giây thừa trong cùng phiên sang job tiếp theo vừa mở khóa khi có thợ rảnh); `0` lời gọi `Date.now()` / `Math.random()`.
-- **`CivilizationCoordinator`, `SessionCoordinator` & `StorageManager`:**
-  - `PLACE_BUILDING`, `UPGRADE_BUILDING` (cho phép xếp hàng nhiều bậc liên tiếp qua `getEffectiveTargetLevel`, chặn khi nhà đang xây lần đầu bằng `CIV_BUILDING_UNDER_CONSTRUCTION`), `EXPAND_LAND` (chặn trùng chunk đang dọn bằng `CIV_EXPAND_ALREADY_QUEUED`), và `CANCEL_CONSTRUCTION_JOB` (hoàn **`100%`** nếu chưa làm giây nào, **`50%`** nếu `> 0s`, hủy nối tầng upgrade cao hơn trên cùng công trình; `REMOVE_BUILDING` hoàn `50%` luôn mọi job gắn với công trình bị phá).
-  - Cô lập hoàn toàn công trình đang xây lần đầu (`isBuildingUnderConstruction`): **`0` `CoinBonus`**, không tính sức chứa *Rock Shelter* (`findVillageCave`), không mở `Focus Streak` (`focusStatUnlock.ts`), và không tính vào `evaluateEraAdvance`.
-  - Kiểm thử Chặng A: `__tests__/core/jobs.test.ts` & `__tests__/background/constructionJobsIntegration.test.ts`.
-
-### Chặng B — Sprite 4 Giai Đoạn, Badge Đồng Hồ, Chiếu `1s` UI & Modals
-- **Assets & Registry:** Tích hợp `public/assets/sprites/clock_tiles_16.png` (`ClockTileIcon` / `CLOCK_TILE_INDEX` trong `TileImage.tsx` & `spriteRegistry.ts`) và `constructionSpriteData.ts` (`0–24%` phác thảo xanh, `25–49%` lộ `35%`, `50–74%` lộ `65%`, `75–99%` lộ `90%`).
-- **Chiếu `1s` thuần UI (`src/ui/components/civilization/jobProjection.ts`):** `computeLiveSessionElapsedFocusSeconds` + `isLiveFocusTicking` chỉ đếm tiến 1s trên UI khi `status === 'RUNNING'` ở pha `FOCUS`; đứng yên khi `PAUSED`, `SHORT_BREAK`, `LONG_BREAK` hoặc kết thúc (`0` ghi storage).
-- **UI & Simulator:** Cập nhật `MapGridView.tsx` (hiển thị sprite 4 giai đoạn, huy hiệu đồng hồ `MM:SS`/`H:MM:SS`, nút/khung chunk đang dọn rừng), `ClearingChunkModal.tsx`, `BuildingDetailsModal.tsx` (danh sách hàng đợi job, nút Cancel hiển thị đúng hoàn `100%`/`50%` từ `getCancelJobRefundPreview`), `BuildingCatalogPanel.tsx` (hiện số thợ & phút thi công), `FocusSceneArea.tsx` + `focusSceneModel.ts` (ẩn công trình đang xây lần đầu khỏi trại cho tới khi xong), và đồng bộ 100% simulator `extensionClient.ts`.
-- Kiểm thử Chặng B: `__tests__/ui/constructionJobsUi.test.ts`.
-
-### Chặng C — Mở Rộng Đất Theo Cấp Số Cộng Bậc Thang
-- Cập nhật `src/core/civilization/constants.ts` & `src/core/civilization/landExpansion.ts`:
-  - `LAND_EXPANSION_BASE_COST = 30`, `INITIAL_INCREMENT = 10`, `STEP_BONUS = 5` mỗi `5` lần mở rộng → `k = 1..8: [30, 40, 50, 60, 70, 80, 95, 110]`, `k = 20: 355`.
-  - Giữ cổng `Player Level >= k + 2` và giảm giá **Woodworker** (`-5%/người`, trần `-40%` via `applyCostDiscount`), nối trực tiếp vào job dọn đất `2` dân / `60` phút của `EXPAND_LAND`.
-- Cập nhật test tương ứng: `__tests__/core/landExpansion.test.ts` & `__tests__/core/eraRules.test.ts`.
-
-### Chặng D — Dân Làng Khởi Đầu (`Founder Villager`) & Đổi Tên Hang Trú Ẩn
-- **Dân làng khởi đầu miễn phí (`SELECT_FOUNDER`):**
-  - Thêm `SelectFounderPayload`, `CIV_INVALID_FOUNDER_PAYLOAD`, `CIV_FOUNDER_ALREADY_SELECTED`, `CIV_FOUNDER_NOT_SELECTED` (`src/types/{errors,messages}.ts`, `src/i18n/errorTranslator.ts`), `CivilizationCoordinator.selectFounder`, `MessageHandler`, và parity simulator trong `extensionClient.ts`.
-  - Tạo `src/ui/components/civilization/FounderPickerModal.tsx` (`absolute inset-0 z-40` bên trong `CivilizationScreen.tsx`), buộc chọn `1` lần trong 3 vai trò (`crafter | elder | woodworker`). Miễn phí `0` Coin, `0` chỗ trong *Rock Shelter*, cộng `+1` thợ ngay lập tức (kích hoạt job pending nếu có), tính vào công thức giá tuyển thêm `Math.round(25 × 1.35^totalCount)`, và hiển thị qua `getEffectiveVillagersForDisplay` trên cả `MapGridView` lẫn `FocusSceneArea`.
-- **Đổi tên hiển thị Hang (`stone_age_study_cave`):** Đổi toàn bộ nhãn giao diện, thông báo lỗi & tài liệu người dùng từ `"Meditation Cave"` / `"Hang Thiền định"` sang **`"Rock Shelter"`** / **`"Hang trú ẩn"`** (giữ nguyên ID `stone_age_study_cave`).
-- Kiểm thử Chặng D: `__tests__/background/founderSelection.test.ts` + cập nhật `civilizationView.test.ts`, `fullBilingual.test.ts`, `spriteRegistry.test.ts`, `villagerMapUi.test.ts`.
-
-### Chặng E — Mô Hình Kinh Tế 5E-1, Tài Liệu & Kiểm Định Toàn Repo
-- Nâng cấp `__tests__/core/economyBalance.test.ts`:
-  - `simulateStoneToBronzeProgression5E1` chạy thật với Founder Villager, `assignJobsFifo`, `advanceJobs(civState, mins * 60)`, `GridMap` đặt công trình/mở rộng thật và đánh giá `evaluateEraAdvance` chỉ trên công trình + chunk đã hoàn thành.
-  - Kết quả đo thực tế trên 7 hồ sơ (Founder `crafter`):
-    - **`3h: 1×180m`**: **6 ngày** *(không buff: 9 ngày)*
-    - **`3h: 3×60m` (tham chiếu)**: **7 ngày** *(không buff: 8 ngày)*
-    - **`3h: 4×45m`**: **8 ngày** *(không buff: 9 ngày)*
-    - **`2h: 1×120m`**: **9 ngày** *(không buff: 12 ngày)*
-    - **`2h: 2×60m`**: **10 ngày** *(không buff: 12 ngày)*
-    - **`1.5h: 2×45m`**: **14 ngày** *(không buff: 17 ngày)*
-    - **`1h: 1×60m`**: **18 ngày** *(không buff: 23 ngày)*
-  - Bổ sung Suite 5 kiểm tra Founder counts in roles (0 Cave slots), dãy mở rộng `[30, 40, 50, 60, 70, 80, 95, 110]`, và cô lập công trình/Hang đang xây.
-- Đồng bộ đầy đủ `PRODUCT_SPEC.md`, `ARCHITECTURE.md`, `PROJECT_STATUS.md`, `README.md` và `docs/sprites/TILE_INDEX.md`.
+| Thành phần / Khóa trong mô tả | Định danh thực tế trong mã hiện tại | Cách xử lý trong 5E-2 |
+|---|---|---|
+| `MapGridView.tsx` dụng cụ lơ lửng (`building-tool-*`, `clearing-tool-*`, `building-upgrade-tool-*`, `.fq-tool-strike`) | Tồn tại từ 5E-1b/5E-1c tại `src/ui/components/civilization/MapGridView.tsx` cùng `CONSTRUCTION_TOOL_TILES` / `getConstructionToolSpec` | Tách `CONSTRUCTION_TOOL_TILES` & `getConstructionToolSpec` sang `src/ui/components/civilization/constructionTools.ts` (re-export từ `MapGridView.tsx`), gỡ bỏ toàn bộ dụng cụ & `.fq-tool-strike` khỏi Bản đồ |
+| Mô hình dân làng khởi đầu + tuyển dân | `founderRole?: VillagerRole \| null`, `FOUNDER_POOL_ID = 'founder_villager'` + `Villager = { id, role, recruitedAt }` (`src/core/civilization/villager.ts`) | Tránh vòng lặp import `villager.ts -> jobs.ts`; xử lý xác định `founder_villager` trước rồi `villagers` sắp theo `(recruitedAt, id)` trong `assignVillagersToActiveJobs` (`src/core/civilization/jobs.ts`) |
+| Giao thức bắt đầu phiên | `StartSessionPayload` (`src/types/messages.ts`), `SessionSnapshot` (`src/types/session.ts`), `SessionCoordinator.startSession` | Bổ sung hai trường tùy chọn tương thích ngược `assignedJobIds?: readonly string[]` và `autoContinueJobs?: boolean` (không tăng `CURRENT_SCHEMA_VERSION = 6`) |
+| Quyết toán tiến độ sau phiên Focus | `StorageManager.commitSessionOutcomeInternal` (`src/storage/storageManager.ts`) & `extensionClient.ts` | Truyền `{ priorityJobIds: session.assignedJobIds, autoContinue: session.autoContinueJobs }` vào `advanceJobs(...)` chỉ khi phiên `COMPLETED` hợp lệ |
+| Hiệu ứng sprite `VillagerSprite` | `VillagerAnimationName = 'idle' \| 'walk_down' \| 'walk_right' \| 'walk_left'` (`spriteRegistry.ts`, không có `'work'`) | Trong khung làm việc `FocusSceneArea`, gắn `<VillagerSprite animation="idle" ... />` bên trong lớp `.fq-scene-villager-work` khi `working && !reducedMotion` |
+| Nhãn Hang trong từ điển | `stone_age_study_cave` -> *Rock Shelter* / *Hang trú ẩn* (`buildingI18n.ts`) | Dùng `getLocalizedBuildingName(locale, defId)` giữ nhất quán EN/VI ở cả thẻ Giao việc lẫn khung `FocusSceneArea` |
 
 ---
 
-## 3. Kết Quả Kiểm Định Tự Động Thực Tế
+## 1. Mục 0 — Dọn Dụng Cụ Lơ Lửng Trên Bản Đồ
 
-| Hạng mục kiểm định | Lệnh / Công cụ | Kết quả đo được | Ghi chú |
+- **Tách nguồn công cụ dùng chung (`src/ui/components/civilization/constructionTools.ts`):** Giữ nguyên ánh xạ Tiny Dungeon `#117` (búa cho `place`/`upgrade`), Tiny Town `#127` (rìu cho `expand`), và Tiny Town `#115` (cuốc chim khi đặt `stone_age_study_cave`); `MapGridView.tsx` re-export lại để bảo toàn API.
+- **Gỡ khỏi `MapGridView.tsx`:** Xóa hoàn toàn phần tử `building-tool-*`, `clearing-tool-*`, `building-upgrade-tool-*` và việc gắn `.fq-tool-strike` trên cả 3 loại việc (`place`, `upgrade`, `expand`). Giữ nguyên vẹn `ConstructionFence` (4 cọc gỗ + vải viền rìa trong suốt), `.fq-construction-scaffold`, nhãn `"Đang đào"`/`"Digging"`, `"Đang dọn rừng"`/`"Clearing forest"`, và `ClockTileIcon` + đếm ngược `1s`.
+- **Cập nhật assertion test cũ (KHÔNG xóa):** Cập nhật `__tests__/ui/constructionJobsUi.test.ts` (dòng `677–729`) từ kiểm tra dụng cụ bay trên Bản đồ sang xác nhận `MapGridView` **không** render `building-tool-`, `clearing-tool-`, `building-upgrade-tool-` hay `.fq-tool-strike`.
+
+---
+
+## 2. Mục 1 — Giao Việc Cho Dân Làng Trước Phiên Focus
+
+- **Lõi điều phối thuần (`src/core/civilization/jobs.ts`):**
+  - `assignJobsWithSchedule(jobs, totalVillagers, options?)`: giữ nguyên hành vi FIFO nếu không truyền tùy chọn; khi có `priorityJobIds`, kích hoạt trước các việc hợp lệ theo thứ tự yêu cầu (bỏ qua an toàn ID không còn tồn tại / đã hủy, giữ chặt trần `<= 4` việc `ACTIVE`, tổng `crewRequired <= totalCrew`, và nâng cấp tuần tự từng bậc trên cùng công trình), sau đó lấp tiếp theo FIFO khi `autoContinue !== false` (hoặc giữ nguyên trạng thái chờ nếu `autoContinue === false`).
+  - `validateSessionJobAssignment`: kiểm tra đầy đủ `SESSION_INVALID_JOB_ASSIGNMENT`, `SESSION_JOB_NOT_FOUND`, `SESSION_JOB_DUPLICATE`, `SESSION_JOB_TOO_MANY`, `SESSION_JOB_INSUFFICIENT_CREW`, `SESSION_JOB_UPGRADE_ORDER`.
+  - `assignVillagersToActiveJobs`: gán danh sách dân thật (`founder_villager` + `villagers`) cho tối đa `4` việc `ACTIVE` theo đúng `crewRequired`, bảo đảm `0` dân làng xuất hiện trùng lặp ở 2 khung cùng lúc.
+  - Mở rộng `advanceJobs` và `projectJobs` nhận `options?: JobScheduleOptions`.
+- **Background, Storage & Simulator (`errors.ts`, `errorTranslator.ts`, `session.ts`, `messages.ts`, `messageHandler.ts`, `sessionCoordinator.ts`, `storageManager.ts`, `extensionClient.ts`):**
+  - Đăng ký `6` mã lỗi `SESSION_*` mới (`128` mã chuẩn hóa, EN/VI đầy đủ).
+  - `MessageHandler` + `SessionCoordinator.startSession` kiểm tra `assignedJobIds` nguyên tử bên trong `this.storage.runExclusive` **trước** khi đổi `activeProfileId` hay lưu `currentSession`.
+  - `StorageManager.commitSessionOutcomeInternal` & `extensionClient.ts` (đủ cả nhánh `GET_SESSION_STATE`, `ADVANCE_POMODORO_STAGE`, `FINISH_STOPWATCH`) truyền `{ priorityJobIds, autoContinue }` vào `advanceJobs` chỉ khi phiên `COMPLETED` hợp lệ (`Give Up`, `INTERRUPTED`, Pomodoro break và Stopwatch `< 5m` giữ nguyên `0s`; việc bị hủy giữa phiên được bỏ qua an toàn).
+- **Giao diện Trước phiên (`src/ui/components/FocusJobAssignmentCard.tsx`, `TimerView.tsx`, `App.tsx`, `CivilizationScreen.tsx`):**
+  - Hiển thị thẻ **"Giao việc"** / **"Assign Jobs"** ngay trong `TimerView` `IDLE` (`STATE 3`), ẩn/khóa hoàn toàn khi phiên đang chạy (`STATE 2`).
+  - Hỗ trợ bật/tắt **Tự động** (mặc định ON = FIFO), thanh dân làng thật (`crewUsed/totalCrew`, `Free: N`), danh sách việc có icon/thời gian còn lại/số thợ + khóa trực quan khi vượt trần `4` việc, thiếu dân hoặc chờ cấp nâng cấp trước, checkbox *Tự động tiếp tục việc chờ*, và nút `"Mở Bản đồ"` / `"Go to Map"` khi hàng đợi trống.
+  - Đồng bộ `projectJobs` theo lịch của phiên đang chạy trên cả `TimerView` lẫn `CivilizationScreen`, đồng thời bổ sung `res.data.jobs, res.data.founderRole` vào fallback tính `CoinBonus` tại `TimerView.tsx:262-267`.
+
+---
+
+## 3. Mục 2 — `FocusSceneArea` Với `1–4` Khung Làm Việc
+
+- **Mô hình thuần (`src/ui/utils/focusWorkSceneModel.ts`) & Giao diện (`src/ui/components/FocusSceneArea.tsx`, `src/index.css`):**
+  - **`0` việc `ACTIVE`:** Giữ nguyên hoàn toàn cảnh trại cổ đại SVG (`viewBox="0 0 360 220"`, `buildFocusSceneModel`).
+  - **`1–4` việc `ACTIVE`:** Chia vùng `flex-1 min-h-[160px]` thành `1` (`grid-cols-1`), `2` (`grid-cols-2`), `3` (`grid-cols-3`) hoặc `4` (`grid-cols-2 grid-rows-2`) khung làm việc bằng nhau (`data-testid="focus-work-grid"`), giữ nguyên chip trạng thái góc trên trái & nút chuông góc trên phải.
+  - Mỗi khung `focus-work-subscene-${jobId}` hiển thị nền trời/đồi xác định, sprite công trình đang dựng (`getConstructionSprite`) / giàn gỗ nâng cấp (`getBuildingSprite` + `.fq-construction-scaffold`) / cây rừng dọn đất, đúng `crewRequired` (`1` hoặc `2`) dân thật (`<VillagerSprite animation="idle" ... />`) không trùng giữa các khung, `ClockTileIcon` + đồng hồ đếm ngược `1s`, và công cụ (`#117`/`#127`/`#115`) **chỉ có `.fq-tool-strike` (`data-tool-animated="true"`) khi `sceneState === 'working' && !reducedMotion`** — đứng yên hoàn toàn khi `paused`, `resting` (Pomodoro break) hoặc `prefers-reduced-motion`.
+  - Xác nhận tĩnh `FocusSceneArea.tsx` và `focusWorkSceneModel.ts` không chứa `Math.random` hay `Date.now`.
+
+---
+
+## 4. Mục 3 — Kiểm Thử Bổ Sung & Đồng Bộ Tài Liệu
+
+- **+`12` test mới (`713` → `725`, `0` test bị xóa):**
+  - `__tests__/core/jobsAssignment5e2.test.ts` (`6` tests): `assignJobsWithSchedule` (`FIFO`, `priorityJobIds`, `autoContinue`, bỏ qua ID hủy, trần `4`, nâng cấp tuần tự), khớp `advanceJobs`/`projectJobs`, toàn bộ `6` mã `validateSessionJobAssignment`, và `assignVillagersToActiveJobs` không trùng dân làng.
+  - `__tests__/core/economyBalance.test.ts` (`+1` `Suite 6`): mô phỏng Stone → Bronze với ưu tiên công trình Kinh tế/Hang qua `assignJobsWithSchedule` giữ tiến độ trong biên `±1` ngày so với 5E-1 FIFO và `0` thu nhập thụ động.
+  - `__tests__/background/sessionJobAssignment5e2.test.ts` (`3` tests): kiểm tra từ chối `START_SESSION` sai phạm không làm bẩn `currentSession`/`activeProfileId`, lưu bền vững `assignedJobIds`/`autoContinueJobs` qua `GET_SESSION_STATE`, quyết toán đúng `COUNTDOWN`/`POMODORO_COUNTDOWN`/`STOPWATCH` & bỏ qua job bị hủy giữa phiên, và parity đầy đủ trên simulator `extensionClient.ts`.
+  - `__tests__/ui/focusJobAssignmentUi5e2.test.ts` (`2` tests): SSR `TimerView` IDLE & `FocusJobAssignmentCard` EN/VI, khóa đủ `3` trường hợp, ẩn thẻ khi phiên chạy, và `FocusSceneArea` `0..4` khung làm việc (lưới, không trùng dân, đếm ngược `1s`, trạng thái động/tĩnh của dụng cụ ở `working`/`paused`/`resting`/`reducedMotion`, kiểm tra tĩnh không `Math.random`/`Date.now`).
+- **Tài liệu đã đồng bộ:** `PRODUCT_SPEC.md` (`1.12.0-synced`), `ARCHITECTURE.md` (`1.15.0`), `PROJECT_STATUS.md`, `README.md`.
+
+---
+
+## 5. Kết Quả Kiểm Định Tự Động Thực Tế
+
+| Hạng mục kiểm định | Lệnh / Công cụ | Kết quả đo được thực tế | Ghi chú |
 |---|---|---|---|
-| **Typecheck & Lint (Node)** | `npm run lint` (`tsc --noEmit`) & `lint_applet` | **PASS (Exit 0 — `0` lỗi)** | Không lỗi TS/nhập thiếu trên toàn bộ `src/` và `__tests__/` |
-| **Compile Applet** | `compile_applet` | **PASS** | Biên dịch sạch |
-| **Test Suite (`npm test`)** | `tsx --test` (**3 lượt liên tiếp**) | **`715 / 715 PASS` (`0` fail, `0` skipped)** | 3/3 lượt xanh hoàn toàn (~37s/lượt) |
-| **Production Build** | `npm run clean && npm run build` | **PASS (`30` tệp, `1,423,416 B`)** | **`0` tệp audio**, không có `public/assets/aistudio` |
-| **Artifacts chính trong `dist/`** | Vite 8 MV3 build | `popup-*.js`: `902.95 kB` · `popup-*.css`: `101.67 kB` · `questEngine-*.js`: `173.50 kB` · `background.js`: `120.40 kB` · `translator-*.js`: `83.75 kB` · `offscreen.js`: `3.88 kB` · `blocked.js`: `1.32 kB` | MV3 CSP-safe |
-| **Parity EN/VI & ErrorCodes** | Static Guard (`i18nStaticGuard.test.ts`) | **`665 / 665` khóa (`100%`)** · **`122` ErrorCodes** | Dịch đầy đủ EN/VI, 0 khóa mồ côi |
+| **Typecheck & Lint** | `npm run lint` (`tsc --noEmit`) & `lint_applet` | **PASS (Exit 0 — `0` lỗi)** | Toàn bộ `src/` và `__tests__/` sạch lỗi TypeScript |
+| **Production Build** | `npm run clean && npm run build` & `compile_applet` | **PASS (`30` tệp, `1,463,539 B`, `946ms`)** | `1,776` modules; **`0` tệp audio** trong `public/` & `dist/`; `manifest.json` giữ nguyên `5` quyền cũ (`storage`, `alarms`, `notifications`, `declarativeNetRequest`, `offscreen`) |
+| **Artifacts chính trong `dist/`** | Vite 8.3.8 MV3 build | `popup-CZ_FD62E.js`: `932.34 kB` · `popup-BQa59KUc.css`: `105.03 kB` · `questEngine-Bwl469rV.js`: `176.98 kB` · `background.js`: `121.64 kB` · `translator-BTFEKZ2F.js`: `86.38 kB` · `offscreen.js`: `3.87 kB` · `blocked.js`: `1.32 kB` | MV3 CSP-safe |
+| **Test Suite (`npm test`)** | `npm test` (chạy 1 lượt sau build) | **`725 / 725 PASS` (`0` fail, `0` skipped)** | Thời gian chạy `32,284.96 ms` (~32.3s); `i18nStaticGuard` xanh (`6/6` kiểm tra) |
+| **Parity EN/VI & ErrorCodes** | `locales/{en,vi}.ts` & `errorTranslator.ts` | **`689 / 689` khóa (`100%`) · `128` ErrorCodes** | `0` chuỗi JSX/accessibility hardcode |
+| **Chrome thật (`>= 116`)** | Kiểm thử trực quan & tương tác trên Chrome thật | **CHƯA THỰC HIỆN** | Môi trường headless không chạy trình duyệt thật; cần kiểm chứng theo checklist mục 6 |
 
 ---
 
-## 4. Bảng Kiểm Bất Biến Kinh Tế & Kiến Trúc 5E-1
+## 6. Checklist Kiểm Chứng Trên Chrome Thật (`>= 116`)
 
-- [x] **Zero Passive Income & Đồng hồ hệ thống:** Tuyệt đối không có thu nhập thụ động hay tiến độ công trình chạy nền; `advanceJobs` chỉ cộng tiến độ theo **số nguyên giây Focus** của phiên `COMPLETED` hợp lệ (`Give Up`, `INTERRUPTED` và thời gian Break không đẩy tiến độ).
-- [x] **Chiếu `1s` UI tách biệt Storage:** `projectJobs` / `jobProjection.ts` không ghi storage và không làm thay đổi thưởng Coins/XP đang quyết toán.
-- [x] **Mở đất cấp số cộng & Đội thợ FIFO:** Chi phí `[30, 40, 50, 60, 70, 80, 95, 110, ...]` (`k=20 → 355`), `Player Level >= k + 2`, giảm giá Woodworker `-5%.. -40%`, tối đa `4` việc `ACTIVE` đồng thời theo thứ tự FIFO.
-- [x] **Dân làng khởi đầu & Đổi tên Hang:** `Founder Villager` chọn 1 lần (`0` Coin, `0` slot Hang), tính vào đội xây dựng + tuyển dân `25×1.35^n`; tên hiển thị dùng `"Rock Shelter"` / `"Hang trú ẩn"` (giữ nguyên ID `stone_age_study_cave`), giữ nguyên `era = 'STONE_AGE'` (`5C-2` chưa kích hoạt), giữ nguyên `manifest.json`.
+1. **Bản đồ sạch dụng cụ lơ lửng (Mục 0):** Mở tab Bản đồ khi đang đặt công trình, nâng cấp công trình và mở đất → kiểm tra chỉ còn hàng rào 4 cọc + vải căng rìa / giàn gỗ nâng cấp / nhãn `"Đang đào"` hoặc `"Đang dọn rừng"` + đồng hồ đếm ngược, **không còn** búa/rìu/cuốc chim lơ lửng trên Bản đồ.
+2. **Giao việc Trước phiên khi trống & khi có việc:** Vào tab Focus khi chưa có việc → thấy thẻ `"Giao việc"` trống kèm nút `"Mở Bản đồ"`; xếp `>= 3` việc (gồm nâng cấp nối tiếp `Lv.2` & `Lv.3` của cùng công trình) rồi quay lại tab Focus → kiểm tra nút **Tự động**, chọn thủ công tối đa `4` việc, khóa thiếu dân & khóa `"Chờ Lv.2"`, và checkbox `"Tự động tiếp tục việc chờ"`.
+3. **Thay đổi lịch & Khóa khi đang chạy phiên:** Tắt `Tự động`, bỏ tick việc FIFO đầu tiên và chọn việc ở dưới (kèm tắt *Tự động tiếp tục*), bấm Bắt đầu phiên → thẻ `"Giao việc"` biến mất/khóa cứng; đóng mở lại popup trong lúc chạy phiên vẫn giữ đúng việc đã giao và đếm ngược `1s`.
+4. **Cảnh Focus `0` vs `1–4` ô làm việc:** Thử khi `0` việc (vẫn hiện trại cổ đại như trước), `1` việc, `2` việc, `3` việc và `4` việc `ACTIVE` tại popup `400×600px` → kiểm tra các khung chia đều không tràn chữ, không dân làng nào xuất hiện ở 2 ô cùng lúc, búa/rìu/cuốc chim vung nhịp nhàng khi đang Focus, chip trạng thái & nút chuông ở góc trên hoạt động bình thường.
+5. **Tạm dừng, Pomodoro Break & `prefers-reduced-motion`:** Bấm Tạm dừng hoặc để Pomodoro sang pha Nghỉ (`SHORT_BREAK`/`LONG_BREAK`), và bật `prefers-reduced-motion` trong DevTools → toàn bộ dụng cụ & đồng hồ ở các khung làm việc đứng yên hoàn toàn, không cộng thêm giây xây dựng ngoài pha Focus.
+6. **Quyết toán thật khi hoàn thành vs Give Up:** Cho phiên ngắn hoàn thành đủ 100% → chỉ việc được ưu tiên tiến lên (và việc chờ chỉ chạy tiếp nếu đã bật *Tự động tiếp tục*); thử `Give Up` giữa chừng → mọi việc giữ nguyên số giây ban đầu.
 
----
-
-## 5. Checklist Kiểm Chứng Thủ Công Trên Chrome (`>= 116`) *(Chờ Thực Hiện)*
-
-1. Mở `chrome://extensions/` → Bật Developer mode → **Load unpacked** (hoặc Reload) thư mục `dist/`.
-2. Mở Popup tab **Map** lần đầu (khi chưa chọn Founder): kiểm tra `FounderPickerModal` hiện 3 vai trò với sprite pixel & cảnh báo chọn cố định; chọn 1 vai trò và xác nhận dân làng xuất hiện ngay trên bản đồ + thanh đếm dân/buff cập nhật.
-3. Đặt **Campfire** (`0s` — xong tức thì) rồi đặt **Foraging Post** hoặc **Rock Shelter** (`1` dân, `60m`): kiểm tra sprite khung dựng 4 giai đoạn, huy hiệu đồng hồ `clock_tiles_16.png` (`CLOCK`/`HOURGLASS`) + đếm ngược `MM:SS`, thử nâng/xếp hàng & nút hủy (`100%` trước khi chạy / `50%` sau khi chạy Focus).
-4. Hoàn thành một phiên Focus ngắn và kiểm tra: tiến độ xây/dọn đất giảm đúng theo giây Focus thực tế, `FocusSceneArea` ẩn công trình chưa xây xong và hiển thị Founder Villager, thông báo lỗi/chi tiết hiển thị `"Rock Shelter"` / `"Hang trú ẩn"` đúng ngôn ngữ EN/VI.
-5. Kiểm tra bảng mở đất (`LandExpansionModal` & `ClearingChunkModal`) hiển thị giá khởi đầu `30` Coins (giảm theo Woodworker nếu có) + yêu cầu `2` dân / `60m`.
-
-DỪNG — CHỜ DUYỆT MILESTONE 5E-1.
+**DỪNG — CHỜ DUYỆT MILESTONE 5E-2.**

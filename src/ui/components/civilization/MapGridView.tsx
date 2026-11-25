@@ -25,17 +25,21 @@ import {
   CLOCK_TILE_INDEX,
   ClockTileIcon,
   PixelSprite,
-  SpriteSheetPack,
-  TileImage,
   VillagerSprite,
   getBuildingSprite,
   getConstructionSprite,
 } from './spriteRegistry.ts';
-import { REUSED_TINY_TOWN_TILES } from './spriteData.ts';
+import {
+  CONSTRUCTION_TOOL_TILES,
+  getConstructionToolSpec,
+} from './constructionTools.ts';
+export type { ConstructionToolSpec } from './constructionTools.ts';
+export { CONSTRUCTION_TOOL_TILES, getConstructionToolSpec };
 import { formatJobCountdown } from './jobProjection.ts';
 import { useVillagerWander } from './useVillagerWander.ts';
 import { TERRAIN_DECOR_SEED } from './terrainDecor.ts';
 import { TerrainBitmapCanvas } from './TerrainBitmapCanvas.tsx';
+import { ConstructionFence } from './ConstructionFence.tsx';
 import {
   ActiveExpansionReveal,
   EXPANSION_IMPACT_MS,
@@ -62,6 +66,7 @@ import {
 import { ExpansionRevealOverlay } from './ExpansionRevealOverlay.tsx';
 import { formatRewardAmount } from '../../utils/formatters.ts';
 import { getLocalizedBuildingName } from '../../utils/buildingI18n.ts';
+import { MAP_CELL_PX, MAP_RENDER_MULTIPLIER } from './civilizationScale.ts';
 import { useTranslation } from '../../../i18n/I18nContext.tsx';
 
 export {
@@ -90,7 +95,7 @@ export interface MapGridViewProps {
   onCameraReturnArrived?: () => void;
 }
 
-export const CELL_SIZE = 32;
+export const CELL_SIZE = MAP_CELL_PX;
 export const ZOOM_PIXEL_DENOMINATOR = 16;
 export const FOREST_MARGIN_CHUNKS = 2;
 export const FOREST_MARGIN_CELLS = FOREST_MARGIN_CHUNKS * CHUNK_WIDTH;
@@ -105,42 +110,6 @@ const EMPTY_VILLAGERS: readonly Villager[] = [];
 const EMPTY_JOBS: readonly ConstructionJob[] = [];
 
 const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
-
-export const CONSTRUCTION_TOOL_TILES = Object.freeze({
-  HAMMER_PACK: 'tiny-dungeon' as SpriteSheetPack,
-  HAMMER_TILE: 117,
-  AXE_PACK: 'tiny-town' as SpriteSheetPack,
-  AXE_TILE: REUSED_TINY_TOWN_TILES.WOODCUTTER_AXE, // 127
-  PICKAXE_PACK: 'tiny-town' as SpriteSheetPack,
-  PICKAXE_TILE: 115,
-});
-
-export interface ConstructionToolSpec {
-  readonly pack: SpriteSheetPack;
-  readonly tileIndex: number;
-}
-
-export function getConstructionToolSpec(
-  kind: 'place' | 'upgrade' | 'expand',
-  definitionId?: string
-): ConstructionToolSpec {
-  if (kind === 'expand') {
-    return {
-      pack: CONSTRUCTION_TOOL_TILES.AXE_PACK,
-      tileIndex: CONSTRUCTION_TOOL_TILES.AXE_TILE,
-    };
-  }
-  if (kind === 'place' && definitionId === 'stone_age_study_cave') {
-    return {
-      pack: CONSTRUCTION_TOOL_TILES.PICKAXE_PACK,
-      tileIndex: CONSTRUCTION_TOOL_TILES.PICKAXE_TILE,
-    };
-  }
-  return {
-    pack: CONSTRUCTION_TOOL_TILES.HAMMER_PACK,
-    tileIndex: CONSTRUCTION_TOOL_TILES.HAMMER_TILE,
-  };
-}
 
 export function snapZoomToIntegerPixels(rawZoom: number, minZoom = MIN_ZOOM): number {
   const clamped = Math.min(MAX_ZOOM, Math.max(minZoom, rawZoom));
@@ -963,8 +932,6 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
           const height = CHUNK_HEIGHT * CELL_SIZE;
           const isActive = job.status === 'ACTIVE';
           const countdownText = formatJobCountdown(job.remainingSeconds);
-          const clearTool = getConstructionToolSpec('expand');
-          const animateTool = isActive && !reducedMotion;
           const clearingDisabled =
             isSubmitting || cameraLocked || Boolean(placementDef) || isExpansionActive;
 
@@ -986,32 +953,17 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
                 onInspectClearingChunk?.(job);
               }}
               style={{ left, top, width, height }}
-              className="absolute z-[15] box-border rounded-sm border-2 border-dashed border-amber-300/90 bg-amber-950/35 hover:bg-amber-950/50 text-amber-50 flex flex-col items-center justify-center gap-1 transition-colors cursor-pointer disabled:cursor-default overflow-visible"
+              className="absolute z-[15] box-border rounded-sm bg-transparent hover:bg-amber-950/10 hover:ring-1 hover:ring-amber-300/75 focus-visible:ring-2 focus-visible:ring-amber-300 text-amber-50 flex flex-col items-center justify-center gap-1 transition-colors cursor-pointer disabled:cursor-default overflow-visible"
             >
-              {/* Thin translucent cloth veil over clearing plot */}
-              <span
-                data-testid={`clearing-tarp-${origin.x}-${origin.y}`}
-                aria-hidden="true"
-                className="fq-construction-tarp absolute inset-0 pointer-events-none rounded-sm"
+              {/* 4-stake perimeter construction fence leaving interior transparent */}
+              <ConstructionFence
+                width={width}
+                height={height}
+                status={job.status}
+                reducedMotion={reducedMotion}
+                variant="clearing"
+                testId={`clearing-tarp-${origin.x}-${origin.y}`}
               />
-              {/* Hovering Woodcutter Axe (Tiny Town 127) */}
-              <span
-                data-testid={`clearing-tool-${origin.x}-${origin.y}`}
-                data-tool-pack={clearTool.pack}
-                data-tool-tile={clearTool.tileIndex}
-                data-tool-animated={animateTool ? 'true' : 'false'}
-                aria-hidden="true"
-                className="relative z-[1] pointer-events-none drop-shadow-[0_1px_2px_rgba(15,23,42,0.85)]"
-              >
-                <span className={animateTool ? 'block fq-tool-strike' : 'block opacity-85'}>
-                  <TileImage
-                    pack={clearTool.pack}
-                    tileIndex={clearTool.tileIndex}
-                    size={16}
-                    className="block"
-                  />
-                </span>
-              </span>
               <span
                 data-testid={`clearing-timer-${origin.x}-${origin.y}`}
                 className="relative z-[1] px-1.5 py-0.5 rounded bg-slate-950/85 border border-amber-400/65 inline-flex items-center gap-1 text-[10px] font-mono font-semibold tabular-nums leading-none shadow-xs"
@@ -1090,20 +1042,8 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
               })
             : '';
 
-          const placeTool = placeJob
-            ? getConstructionToolSpec('place', inst.definitionId)
-            : null;
-          const animatePlaceTool = Boolean(
-            placeJob && placeJob.status === 'ACTIVE' && !reducedMotion
-          );
           const isDiggingCave = Boolean(
             placeJob && inst.definitionId === 'stone_age_study_cave'
-          );
-
-          const upgradeTool =
-            !placeJob && nextUpgrade ? getConstructionToolSpec('upgrade', inst.definitionId) : null;
-          const animateUpgradeTool = Boolean(
-            !placeJob && nextUpgrade && nextUpgrade.status === 'ACTIVE' && !reducedMotion
           );
 
           return (
@@ -1130,9 +1070,7 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
               style={{ left, top, width, height }}
               className={
                 sprite
-                  ? `absolute z-10 flex items-center justify-center rounded-xs transition-all hover:brightness-110 hover:ring-1 hover:ring-white/80 cursor-pointer overflow-visible ${
-                      placeJob ? 'ring-1 ring-sky-400/75 bg-sky-950/15' : ''
-                    }`
+                  ? 'absolute z-10 flex items-center justify-center rounded-xs transition-all hover:brightness-110 hover:ring-1 hover:ring-white/80 cursor-pointer overflow-visible'
                   : `absolute z-10 border rounded-sm shadow-xs flex flex-col items-center justify-center p-0.5 transition-transform hover:brightness-105 cursor-pointer overflow-visible ${categoryStyle}`
               }
             >
@@ -1141,51 +1079,34 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
                   sprite={sprite}
                   width={width}
                   height={height}
-                  className={`block w-full h-full pointer-events-none drop-shadow-[0_1px_1px_rgba(38,43,68,0.45)] ${
-                    placeJob ? 'opacity-95' : ''
-                  }`}
+                  className="block w-full h-full pointer-events-none drop-shadow-[0_1px_1px_rgba(38,43,68,0.45)]"
                 />
               ) : (
                 renderBuildingIcon(def?.iconIdentifier ?? '', widthCells > 1 ? 'w-4 h-4' : 'w-3 h-3')
               )}
 
-              {placeJob && placeTool ? (
+              {placeJob ? (
                 <>
-                  {/* Thin translucent cloth veil over blueprint */}
-                  <span
-                    data-testid={`building-tarp-${inst.id}`}
-                    aria-hidden="true"
-                    className="fq-construction-tarp absolute inset-0 pointer-events-none rounded-xs"
+                  {/* 4-stake perimeter construction fence leaving sprite interior transparent */}
+                  <ConstructionFence
+                    width={width}
+                    height={height}
+                    status={placeJob.status}
+                    reducedMotion={reducedMotion}
+                    variant="building"
+                    testId={`building-tarp-${inst.id}`}
                   />
-                  {/* Hovering tool icon above blueprint */}
-                  <span
-                    data-testid={`building-tool-${inst.id}`}
-                    data-tool-pack={placeTool.pack}
-                    data-tool-tile={placeTool.tileIndex}
-                    data-tool-animated={animatePlaceTool ? 'true' : 'false'}
-                    aria-hidden="true"
-                    className="absolute -top-3.5 left-1/2 -translate-x-1/2 z-[12] pointer-events-none drop-shadow-[0_1px_2px_rgba(15,23,42,0.85)]"
-                  >
-                    <span className={animatePlaceTool ? 'block fq-tool-strike' : 'block opacity-85'}>
-                      <TileImage
-                        pack={placeTool.pack}
-                        tileIndex={placeTool.tileIndex}
-                        size={14}
-                        className="block"
-                      />
-                    </span>
-                  </span>
                   {isDiggingCave && (
                     <span
                       data-testid={`building-digging-badge-${inst.id}`}
-                      className="absolute bottom-4 left-1/2 -translate-x-1/2 px-1 py-[1px] rounded bg-slate-950/85 border border-amber-300/70 text-[8px] font-semibold text-amber-100 leading-none whitespace-nowrap pointer-events-none shadow-xs"
+                      className="absolute bottom-4 left-1/2 -translate-x-1/2 z-[12] px-1 py-[1px] rounded bg-slate-950/85 border border-amber-300/70 text-[8px] font-semibold text-amber-100 leading-none whitespace-nowrap pointer-events-none shadow-xs"
                     >
                       {t('civ.job.diggingBadge')}
                     </span>
                   )}
                   <span
                     data-testid={`building-place-timer-${inst.id}`}
-                    className="absolute bottom-0.5 left-1/2 -translate-x-1/2 px-1 py-[1px] rounded bg-slate-950/85 border border-sky-400/70 text-[8px] font-mono font-semibold text-sky-100 leading-none tabular-nums whitespace-nowrap inline-flex items-center gap-0.5 pointer-events-none"
+                    className="absolute bottom-0.5 left-1/2 -translate-x-1/2 z-[12] px-1 py-[1px] rounded bg-slate-950/85 border border-sky-400/70 text-[8px] font-mono font-semibold text-sky-100 leading-none tabular-nums whitespace-nowrap inline-flex items-center gap-0.5 pointer-events-none"
                   >
                     <ClockTileIcon
                       tileIndex={
@@ -1200,35 +1121,13 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
                 </>
               ) : (
                 <>
-                  {nextUpgrade && upgradeTool && (
-                    <>
-                      {/* Wooden scaffolding frame over existing building sprite during upgrade */}
-                      <span
-                        data-testid={`building-upgrade-scaffold-${inst.id}`}
-                        aria-hidden="true"
-                        className="fq-construction-scaffold absolute inset-0 pointer-events-none rounded-xs"
-                      />
-                      {/* Hovering Hammer (Tiny Dungeon 117) above upgrading building */}
-                      <span
-                        data-testid={`building-upgrade-tool-${inst.id}`}
-                        data-tool-pack={upgradeTool.pack}
-                        data-tool-tile={upgradeTool.tileIndex}
-                        data-tool-animated={animateUpgradeTool ? 'true' : 'false'}
-                        aria-hidden="true"
-                        className="absolute -top-3.5 left-1/2 -translate-x-1/2 z-[12] pointer-events-none drop-shadow-[0_1px_2px_rgba(15,23,42,0.85)]"
-                      >
-                        <span
-                          className={animateUpgradeTool ? 'block fq-tool-strike' : 'block opacity-85'}
-                        >
-                          <TileImage
-                            pack={upgradeTool.pack}
-                            tileIndex={upgradeTool.tileIndex}
-                            size={14}
-                            className="block"
-                          />
-                        </span>
-                      </span>
-                    </>
+                  {nextUpgrade && (
+                    /* Wooden scaffolding frame over existing building sprite during upgrade */
+                    <span
+                      data-testid={`building-upgrade-scaffold-${inst.id}`}
+                      aria-hidden="true"
+                      className="fq-construction-scaffold absolute inset-0 pointer-events-none rounded-xs"
+                    />
                   )}
                   {(widthCells > 1 || inst.level > 1) && (
                     <span
@@ -1303,7 +1202,7 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
                   <VillagerSprite
                     role={v.role}
                     animation={v.animation}
-                    scale={2}
+                    scale={MAP_RENDER_MULTIPLIER}
                     reducedMotion={reducedMotion}
                   />
                 </div>

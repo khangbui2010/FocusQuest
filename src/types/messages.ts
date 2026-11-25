@@ -65,6 +65,8 @@ export interface StartSessionPayload {
   targetMinutes: number; // 0 for Stopwatch
   profileId: string;
   pomodoroConfig?: PomodoroConfig;
+  assignedJobIds?: readonly string[];
+  autoContinueJobs?: boolean;
 }
 
 export interface SwitchProfilePayload {

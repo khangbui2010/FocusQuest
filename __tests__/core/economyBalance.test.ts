@@ -43,6 +43,7 @@ import {
   EXPAND_JOB_SPEC,
   advanceJobs,
   assignJobsFifo,
+  assignJobsWithSchedule,
   getClearingOrigins,
   getEffectiveTargetLevel,
   getPlaceJobSpec,
@@ -148,6 +149,12 @@ interface SimOptions {
   readonly maxCrafters?: number;
   readonly maxWoodworkers?: number;
   readonly useVillagerBuffs?: boolean;
+  readonly scheduleOptionsFactory?: (jobs: readonly ConstructionJob[]) =>
+    | {
+        readonly priorityJobIds?: readonly string[];
+        readonly autoContinue?: boolean;
+      }
+    | undefined;
 }
 
 interface SimResult {
@@ -668,7 +675,8 @@ export function simulateStoneToBronzeProgression5E1(
 
       // Advance construction jobs by valid integer Focus seconds
       if ((civState.jobs?.length ?? 0) > 0) {
-        civState = advanceJobs(civState, mins * 60);
+        const scheduleOpts = options.scheduleOptionsFactory?.(civState.jobs ?? []);
+        civState = advanceJobs(civState, mins * 60, scheduleOpts);
         completedJobsMinutes += mins;
       }
 
@@ -916,4 +924,61 @@ test('EconomyBalance Suite 5: 5E-1 Founder & Construction Crew gating invariants
   assert.strictEqual(bonuses.length, 1);
   assert.strictEqual(bonuses[0].rate, VILLAGER_CRAFTER_COIN_BONUS_RATE);
 });
+
+test('EconomyBalance Suite 6 (5E-2): Prioritizing economy & cave jobs via assignJobsWithSchedule preserves Bronze Age days within +-1d and zero passive income', () => {
+  const baseline60 = simulateStoneToBronzeProgression5E1([60]);
+  const baseline60x3 = simulateStoneToBronzeProgression5E1([60, 60, 60]);
+
+  const prioritizeEconomyAndCave = (jobs: readonly ConstructionJob[]) => {
+    const rank = (j: ConstructionJob) =>
+      j.definitionId === 'stone_age_study_cave'
+        ? 0
+        : j.definitionId === 'stone_age_foraging_post' || j.definitionId === 'stone_age_food_cache'
+        ? 1
+        : 2;
+    const priorityJobIds = [...jobs]
+      .sort((a, b) => rank(a) - rank(b) || a.createdAt - b.createdAt)
+      .slice(0, 4)
+      .map((j) => j.id);
+    return {
+      priorityJobIds,
+      autoContinue: true,
+    };
+  };
+
+  const manual60 = simulateStoneToBronzeProgression5E1([60], {
+    scheduleOptionsFactory: prioritizeEconomyAndCave,
+  });
+  const manual60x3 = simulateStoneToBronzeProgression5E1([60, 60, 60], {
+    scheduleOptionsFactory: prioritizeEconomyAndCave,
+  });
+
+  assert.ok(manual60.daysToEligible < 99 && manual60x3.daysToEligible < 99, '5E-2 scheduled run must reach Bronze Age');
+  assert.ok(
+    Math.abs(manual60.daysToEligible - baseline60.daysToEligible) <= 1,
+    `[60] manual=${manual60.daysToEligible}d vs 5E-1=${baseline60.daysToEligible}d exceeded +-1d`
+  );
+  assert.ok(
+    Math.abs(manual60x3.daysToEligible - baseline60x3.daysToEligible) <= 1,
+    `[60,60,60] manual=${manual60x3.daysToEligible}d vs 5E-1=${baseline60x3.daysToEligible}d exceeded +-1d`
+  );
+
+  // Also verify assignJobsWithSchedule returns identical idle/active breakdown when no priority list is set
+  const sampleJobs = [
+    {
+      id: 'j_bal',
+      kind: 'place' as const,
+      status: 'PENDING' as const,
+      definitionId: 'stone_age_foraging_post',
+      buildingId: 'b_bal',
+      crewRequired: 1,
+      totalSeconds: 3600,
+      remainingSeconds: 3600,
+      paidCoins: 15,
+      createdAt: 1,
+    },
+  ];
+  assert.deepStrictEqual(assignJobsWithSchedule(sampleJobs, 2), assignJobsFifo(sampleJobs, 2));
+});
+
 

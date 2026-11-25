@@ -33,8 +33,8 @@ Used in Phase 4b (`src/ui/components/FocusSceneArea.tsx`): earth-toned character
 
 ## Clock & Construction UI Icons (`public/assets/sprites/clock_tiles_16.png`)
 - Horizontal strip: `48 × 16` px (`3` tiles × `16 × 16` px, rendered via `ClockTileIcon` / `CLOCK_TILE_INDEX` in `TileImage.tsx` & `spriteRegistry.ts`):
-  - `0` (`CLOCK`): Pixel analog clock (queued / pending construction job badge & catalog preview)
-  - `1` (`HOURGLASS`): Pixel hourglass (active construction / clearing job badge)
+  - `0` (`CLOCK`): Pixel analog clock (active construction / clearing job badge & catalog preview)
+  - `1` (`HOURGLASS`): Pixel hourglass (queued / pending construction / clearing job badge)
   - `2` (`STOPWATCH`): Pixel stopwatch (extra timer icon reserve)
 
 ## Under-Construction 4-Stage Sprites (`src/ui/components/civilization/constructionSpriteData.ts`)

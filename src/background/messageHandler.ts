@@ -111,12 +111,48 @@ export class MessageHandler {
               };
             }
           }
-          const { mode, targetMinutes, profileId, pomodoroConfig } = msg.payload;
+          if (msg.payload.assignedJobIds !== undefined) {
+            if (
+              !Array.isArray(msg.payload.assignedJobIds) ||
+              msg.payload.assignedJobIds.some(
+                (id) => typeof id !== 'string' || id.trim().length === 0
+              )
+            ) {
+              return {
+                success: false,
+                error: 'assignedJobIds must be an array of non-empty job ID strings.',
+                errorCode: 'SESSION_INVALID_JOB_ASSIGNMENT',
+              };
+            }
+          }
+          if (
+            msg.payload.autoContinueJobs !== undefined &&
+            typeof msg.payload.autoContinueJobs !== 'boolean'
+          ) {
+            return {
+              success: false,
+              error: 'autoContinueJobs must be a boolean.',
+              errorCode: 'SESSION_INVALID_JOB_ASSIGNMENT',
+            };
+          }
+          const {
+            mode,
+            targetMinutes,
+            profileId,
+            pomodoroConfig,
+            assignedJobIds,
+            autoContinueJobs,
+          } = msg.payload;
+          const jobOptions =
+            assignedJobIds !== undefined || autoContinueJobs !== undefined
+              ? { assignedJobIds, autoContinueJobs }
+              : undefined;
           const session = await this.sessionCoordinator.startSession(
             mode,
             targetMinutes,
             profileId,
-            pomodoroConfig
+            pomodoroConfig,
+            jobOptions
           );
           return { success: true, data: session };
         }

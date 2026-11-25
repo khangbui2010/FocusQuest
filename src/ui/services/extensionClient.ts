@@ -88,6 +88,7 @@ import {
   getTotalVillagerCount,
   getUpgradeJobSpec,
   getUpgradeJobsForBuilding,
+  validateSessionJobAssignment,
 } from '../../core/civilization/jobs.ts';
 import { isVillagerRole } from '../components/civilization/spriteRegistry.ts';
 import { calculatePlayerLevel } from '../../core/economy/levelSystem.ts';
@@ -820,8 +821,20 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
           const questDelta = toQuestOutcomeDelta(completedSession, getLocalDateKey(now));
           if (questDelta) {
             mockQuestState = applyCompletedSession(mockQuestState, questDelta, now);
+            const scheduleOpts =
+              completedSession.assignedJobIds !== undefined ||
+              completedSession.autoContinueJobs !== undefined
+                ? {
+                    priorityJobIds: completedSession.assignedJobIds,
+                    autoContinue: completedSession.autoContinueJobs,
+                  }
+                : undefined;
             mockCivilizationState = {
-              ...advanceJobs(mockCivilizationState, questDelta.completedFocusMinutes * 60),
+              ...advanceJobs(
+                mockCivilizationState,
+                questDelta.completedFocusMinutes * 60,
+                scheduleOpts
+              ),
               lastUpdated: now,
             };
             mockGridMap = GridMap.fromSnapshot(mockCivilizationState.grid);
@@ -881,6 +894,22 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
 
     case 'START_SESSION': {
       const payload = (message as { payload: StartSessionPayload }).payload;
+      if (payload.assignedJobIds !== undefined) {
+        const validation = validateSessionJobAssignment({
+          jobs: mockCivilizationState.jobs,
+          villagers: mockCivilizationState.villagers,
+          founderRole: mockCivilizationState.founderRole,
+          assignedJobIds: payload.assignedJobIds,
+        });
+        if (!validation.valid) {
+          return {
+            success: false,
+            error: validation.errorMessage ?? 'Invalid session construction job assignment.',
+            errorCode: validation.errorCode ?? 'SESSION_INVALID_JOB_ASSIGNMENT',
+            errorParams: validation.errorParams,
+          };
+        }
+      }
       const isPomodoro = payload.mode === 'POMODORO_COUNTDOWN' || payload.mode === 'POMODORO_STOPWATCH';
       const validatedPomoConfig = isPomodoro
         ? TimeCalculator.validatePomodoroConfig(payload.pomodoroConfig).config
@@ -955,6 +984,12 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
               accumulatedXp: initialXp,
             }
           : undefined,
+        ...(payload.assignedJobIds !== undefined
+          ? { assignedJobIds: [...payload.assignedJobIds] }
+          : {}),
+        ...(payload.autoContinueJobs !== undefined
+          ? { autoContinueJobs: payload.autoContinueJobs }
+          : {}),
       };
       mockState.currentSession = newSession;
       mockState.isBlockingActive = true;
@@ -1049,8 +1084,20 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
             const questDelta = toQuestOutcomeDelta(completedSession, getLocalDateKey(now));
             if (questDelta) {
               mockQuestState = applyCompletedSession(mockQuestState, questDelta, now);
+              const scheduleOpts =
+                completedSession.assignedJobIds !== undefined ||
+                completedSession.autoContinueJobs !== undefined
+                  ? {
+                      priorityJobIds: completedSession.assignedJobIds,
+                      autoContinue: completedSession.autoContinueJobs,
+                    }
+                  : undefined;
               mockCivilizationState = {
-                ...advanceJobs(mockCivilizationState, questDelta.completedFocusMinutes * 60),
+                ...advanceJobs(
+                  mockCivilizationState,
+                  questDelta.completedFocusMinutes * 60,
+                  scheduleOpts
+                ),
                 lastUpdated: now,
               };
               mockGridMap = GridMap.fromSnapshot(mockCivilizationState.grid);
@@ -1434,8 +1481,20 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
       const questDelta = toQuestOutcomeDelta(updatedSession, getLocalDateKey(now));
       if (questDelta) {
         mockQuestState = applyCompletedSession(mockQuestState, questDelta, now);
+        const scheduleOpts =
+          updatedSession.assignedJobIds !== undefined ||
+          updatedSession.autoContinueJobs !== undefined
+            ? {
+                priorityJobIds: updatedSession.assignedJobIds,
+                autoContinue: updatedSession.autoContinueJobs,
+              }
+            : undefined;
         mockCivilizationState = {
-          ...advanceJobs(mockCivilizationState, questDelta.completedFocusMinutes * 60),
+          ...advanceJobs(
+            mockCivilizationState,
+            questDelta.completedFocusMinutes * 60,
+            scheduleOpts
+          ),
           lastUpdated: now,
         };
         mockGridMap = GridMap.fromSnapshot(mockCivilizationState.grid);

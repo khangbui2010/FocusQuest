@@ -50,6 +50,13 @@ import { CivilizationEra } from '../../core/civilization/buildingTypes.ts';
 import { CivilizationState } from '../../core/civilization/civilizationState.ts';
 import { DurationPresetChips } from './DurationPresetChips.tsx';
 import { FocusSceneArea, resolveFocusSceneState } from './FocusSceneArea.tsx';
+import { FocusJobAssignmentCard } from './FocusJobAssignmentCard.tsx';
+import { computeLiveSessionElapsedFocusSeconds } from './civilization/jobProjection.ts';
+import {
+  MAX_ACTIVE_CONSTRUCTION_JOBS,
+  assignJobsWithSchedule,
+  getTotalVillagerCount,
+} from '../../core/civilization/jobs.ts';
 import { getSessionModeLabel } from '../utils/sessionModeLabel.ts';
 import {
   localizeErrorMessage,
@@ -146,7 +153,11 @@ interface TimerViewProps {
   onStartSession: (
     mode: SessionMode,
     targetMinutes: number,
-    pomodoroConfig?: PomodoroConfig
+    pomodoroConfig?: PomodoroConfig,
+    jobAssignment?: {
+      readonly assignedJobIds?: readonly string[];
+      readonly autoContinueJobs?: boolean;
+    }
   ) => Promise<void>;
   onPauseSession: () => Promise<void>;
   onResumeSession: () => Promise<void>;
@@ -159,6 +170,7 @@ interface TimerViewProps {
   isLoading: boolean;
   initialActionError?: string | null;
   onOpenProfiles: () => void;
+  onNavigateToMap?: () => void;
   chimeEnabled?: boolean;
   onToggleChime?: (enabled: boolean) => Promise<void> | void;
 }
@@ -182,6 +194,7 @@ export const TimerView: React.FC<TimerViewProps> = ({
   isLoading,
   initialActionError = null,
   onOpenProfiles,
+  onNavigateToMap,
   chimeEnabled: propChimeEnabled,
   onToggleChime,
 }) => {
@@ -246,7 +259,12 @@ export const TimerView: React.FC<TimerViewProps> = ({
     getCivilizationStateClient()
       .then((res) => {
         if (isMounted && res.success && res.data) {
-          const bonuses = extractCivilizationCoinBonuses(res.data.buildings, res.data.villagers);
+          const bonuses = extractCivilizationCoinBonuses(
+            res.data.buildings,
+            res.data.villagers,
+            res.data.jobs,
+            res.data.founderRole
+          );
           const rate = aggregateCoinBonus(bonuses);
           setInternalBonusRate(rate);
           if (propCivState === undefined) {
@@ -270,6 +288,17 @@ export const TimerView: React.FC<TimerViewProps> = ({
 
   const activeBonusRate = internalBonusRate ?? 0;
   const effectiveCivState = propCivState !== undefined ? propCivState : internalCivState;
+
+  // Pre-session Villager Job Assignment state (Milestone 5E-2)
+  const [autoAssignJobs, setAutoAssignJobs] = useState<boolean>(true);
+  const [manualJobIds, setManualJobIds] = useState<readonly string[]>([]);
+  const [autoContinueJobs, setAutoContinueJobs] = useState<boolean>(true);
+
+  const validManualJobIds = useMemo(() => {
+    const jobs = Array.isArray(effectiveCivState?.jobs) ? effectiveCivState.jobs : [];
+    const jobSet = new Set(jobs.map((j) => j.id));
+    return manualJobIds.filter((id) => jobSet.has(id));
+  }, [effectiveCivState?.jobs, manualJobIds]);
 
   // Pomodoro custom config state with persistent restore
   const [pomoConfig, setPomoConfig] = useState<PomodoroConfig>(getInitialPomodoroConfig);
@@ -679,6 +708,7 @@ export const TimerView: React.FC<TimerViewProps> = ({
     const modalFinishMultiplier = activeMultiplierDisplay;
 
     const sceneState = resolveFocusSceneState(session);
+    const liveFocusSeconds = computeLiveSessionElapsedFocusSeconds(session, effectiveCurrentTime);
     const sceneStatusLabel = isPaused
       ? t('timer.status.paused')
       : isBreakPhase
@@ -691,7 +721,7 @@ export const TimerView: React.FC<TimerViewProps> = ({
 
     return (
       <div className="flex-1 min-h-0 flex flex-col gap-2.5 p-3 overflow-y-auto animate-fade-in">
-        {/* Dynamic FocusSceneArea reflecting built buildings & recruited villagers */}
+        {/* Dynamic FocusSceneArea reflecting built buildings, active jobs & recruited villagers */}
         <FocusSceneArea
           era={era}
           sceneState={sceneState}
@@ -705,6 +735,8 @@ export const TimerView: React.FC<TimerViewProps> = ({
             effectiveChimeEnabled ? t('timer.chime.onLabel') : t('timer.chime.offLabel')
           }
           civilizationState={effectiveCivState}
+          session={session}
+          liveFocusSeconds={liveFocusSeconds}
         />
 
         {/* Compact Pause Auto-Resume Notice (shown only while PAUSED) */}
@@ -1557,6 +1589,66 @@ export const TimerView: React.FC<TimerViewProps> = ({
           </div>
         )}
 
+        {/* Pre-session Villager Job Assignment */}
+        <FocusJobAssignmentCard
+          civilizationState={effectiveCivState}
+          autoMode={autoAssignJobs}
+          selectedJobIds={validManualJobIds}
+          autoContinue={autoContinueJobs}
+          disabled={isLoading}
+          onToggleAutoMode={(nextAuto) => {
+            if (!nextAuto) {
+              const jobs = Array.isArray(effectiveCivState?.jobs) ? effectiveCivState.jobs : [];
+              const totalCrew = getTotalVillagerCount(
+                effectiveCivState?.villagers,
+                effectiveCivState?.founderRole
+              );
+              const fifoActive = assignJobsWithSchedule(jobs, totalCrew).jobs
+                .filter((j) => j.status === 'ACTIVE')
+                .map((j) => j.id);
+              setManualJobIds(fifoActive);
+            }
+            setAutoAssignJobs(nextAuto);
+          }}
+          onToggleJob={(jobId) => {
+            const jobs = Array.isArray(effectiveCivState?.jobs) ? effectiveCivState.jobs : [];
+            const totalCrew = getTotalVillagerCount(
+              effectiveCivState?.villagers,
+              effectiveCivState?.founderRole
+            );
+            const baseIds = autoAssignJobs
+              ? assignJobsWithSchedule(jobs, totalCrew).jobs
+                  .filter((j) => j.status === 'ACTIVE')
+                  .map((j) => j.id)
+              : [...validManualJobIds];
+            if (autoAssignJobs) {
+              setAutoAssignJobs(false);
+            }
+            if (baseIds.includes(jobId)) {
+              setManualJobIds(baseIds.filter((id) => id !== jobId));
+              return;
+            }
+            if (baseIds.length >= MAX_ACTIVE_CONSTRUCTION_JOBS) {
+              return;
+            }
+            const jobMap = new Map(jobs.map((j) => [j.id, j]));
+            const targetJob = jobMap.get(jobId);
+            if (!targetJob) {
+              return;
+            }
+            const usedCrew = baseIds.reduce(
+              (sum, id) => sum + Math.max(0, jobMap.get(id)?.crewRequired ?? 0),
+              0
+            );
+            if (usedCrew + targetJob.crewRequired > totalCrew) {
+              return;
+            }
+            setManualJobIds([...baseIds, jobId]);
+          }}
+          onToggleAutoContinue={setAutoContinueJobs}
+          onNavigateToMap={onNavigateToMap}
+        />
+
         {/* Active Profile blocking notice */}
         <div className="pt-1">
           <div className="flex items-center justify-between text-xs mb-1.5">
@@ -1600,14 +1692,29 @@ export const TimerView: React.FC<TimerViewProps> = ({
         type="button"
         data-testid="start-focus-session-btn"
         onClick={() => {
+          const jobAssignment = !autoAssignJobs
+            ? {
+                assignedJobIds: [...validManualJobIds],
+                autoContinueJobs,
+              }
+            : !autoContinueJobs
+            ? { autoContinueJobs }
+            : undefined;
           if (selectedPrimaryTab === 'POMODORO') {
             handleAction(() =>
-              onStartSession(pomodoroSubMode, pomoConfig.focusDurationMinutes, pomoConfig)
+              onStartSession(
+                pomodoroSubMode,
+                pomoConfig.focusDurationMinutes,
+                pomoConfig,
+                jobAssignment
+              )
             );
           } else if (selectedPrimaryTab === 'COUNTDOWN') {
-            handleAction(() => onStartSession('COUNTDOWN', targetMinutes));
+            handleAction(() =>
+              onStartSession('COUNTDOWN', targetMinutes, undefined, jobAssignment)
+            );
           } else {
-            handleAction(() => onStartSession('STOPWATCH', 0));
+            handleAction(() => onStartSession('STOPWATCH', 0, undefined, jobAssignment));
           }
         }}
         disabled={isLoading || !activeProfile}

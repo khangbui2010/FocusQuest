@@ -20,12 +20,12 @@ Focus Quest transforms daily study and focused work into a civilization-building
     - `DECORATIVE`: Campfire (`4`, builds instantly `0 crew / 0m`) and Ancient Totem (`8`, `1 crew / 60m`).
     - `FOCUS_SUPPORT`: Unlocks statistics and focus insights (`Elder's Hut` `20`, `2 crew / 120m`), and anchors villager housing (**`Rock Shelter`**, `stone_age_study_cave`, `12`, `1 crew / 60m`: 3×3 footprint, max 1 per map, upgradeable Lv. 1–5 for 2–10 recruited villager capacity).
     - `ECONOMY_EFFECT`: Grants additive CoinBonus percentages (`Foraging Post` `15`, `+2%/lv`, `1 crew / 60m`; `Primitive Granary` `30`, `+3%/lv`, `2 crew / 120m`; upgradeable up to Lv. 5 via `UPGRADE_BUILDING`, Build Limit: 4 per type; max Stone Age build+upgrade total `3,907` Coins).
-    - **Focus-Only Construction Progress (`jobs.ts` & Schema v6 `v6_constructionJobsSchema.ts`):** All non-instant builds, upgrades (`L→L+1`: `1` crew `L<=2` / `2` crew `L>=3`, `5×L` min), and land clearings enter an automatic FIFO queue (max `4` concurrent `ACTIVE` jobs bounded by total villagers). Persisted progress advances strictly in integer seconds upon eligible `COMPLETED` Focus sessions (`advanceJobs`), with cancellation refunds (`100%` unstarted / `50%` started) and pure-UI `1s` countdown overlays (`ClockTileIcon`, cloth/scaffold overlays, hovering tools, and 4-stage blueprint sprites). Under-construction buildings grant 0 bonuses/capacity until completed.
+    - **Focus-Only Construction Progress (`jobs.ts` & Schema v6 `v6_constructionJobsSchema.ts`):** All non-instant builds, upgrades (`L→L+1`: `1` crew `L<=2` / `2` crew `L>=3`, `5×L` min), and land clearings enter a queue (max `4` concurrent `ACTIVE` jobs bounded by total villagers) with pre-session priority assignment (`Assign Jobs` / `assignJobsWithSchedule` / `autoContinueJobs` on `TimerView` & `SessionSnapshot`) or automatic FIFO fallback. Persisted progress advances strictly in integer seconds upon eligible `COMPLETED` Focus sessions (`advanceJobs`), with cancellation refunds (`100%` unstarted / `50%` started) and pure-UI `1s` countdown overlays (`ClockTileIcon`, `ConstructionFence` 4-stake perimeter ribbons, upgrade scaffolding, and 4-stage blueprint sprites on Map; `1–4` equal work sub-scenes with distinct villagers and focus-active tools in `FocusSceneArea`). Under-construction buildings grant 0 bonuses/capacity until completed.
   - **Founder Villager, Role Buffs & Pure Era Rules (`Villager V2–V5.2` + `5E-1`):** First-time map visit prompts a permanent free **Founder Villager** (`SELECT_FOUNDER` via `FounderPickerModal`: `crafter | elder | woodworker`, consumes 0 Coins and 0 Rock Shelter capacity slots while counting toward total crew and the `round(25 × 1.35^n)` recruit cost curve). Recruited villagers unlock additive buffs (**Crafter** `+5%` CoinBonus cap `+40%`, **Woodworker** `-5%` expansion discount cap `-40%` while preserving `k+2` level gate, **Elder** `-6%` upgrade discount cap `-30%`, **Complete Tribe** `+10%` → `+150%` Stone Age ceiling), wander unlocked tiles (`villagerWander.ts`), and animate inside `FocusSceneArea`. Pure `eraRules.ts` (`STONE_TO_BRONZE_ADVANCE_REQUIREMENTS`) gates progression at all 3 villager roles, `3` completed land expansions, `Lv.9`, `500` focus mins, and Lv.5 Rock Shelter/Economy floors = `4,407` Coins; Era switching remains deferred to `5C-2`.
 - **Focus Music Player (MV3 Offscreen Streaming):** Streams curated tracks from the online `FocusQuest-LOFI-archive` catalog through a Chrome Offscreen Document (`Chrome >= 116`), persisting playback position past Chrome's 30s audio idle cutoff with a session-scoped mini-player and expandable bottom sheet.
 - **Map-First 5-Tab Popup & Analytics Engine (`Stage 5c`):** Compact `Quests | Focus | Map | Awards | Stats` bottom navigation (hidden inside active/post-focus sessions until Exit), upgraded `StatsView` (`Day | Month | Year` navigation, custom SVG `StatsBarChart`, and `Focus Streak` gated by `Elder's Hut` `FOCUS_STAT_UNLOCK`), and half-up 2-decimal UI display (`formatRewardAmount`) preserving full IEEE-754 precision in storage.
 - **Daily & Weekly Quest Pool (`Stage 2b`, `Stage 5c`, `Milestone 5D-1`):** 3-slot Daily (`9` quests, fixed cap `40C · 100XP`) & 3-slot Weekly (`10` quests, fixed cap `150C · 370XP`) pool with deterministic non-repeating rotation at midnight / Monday (`hashQuestSeed` + `selectQuestsForPeriod`, zero user reroll), manual claim (`CLAIM_QUEST_REWARD`), `Navbar` unclaimed badge, slot/Hard tags, Quest Streak (zero passive Coins), Schema v5 migration (`v5_questPoolSchema`), and atomic Session-Quest settlement under `StorageMutex`.
-- **Full EN/VI Localization & MV3 CSP Compliance (`Stage 6+7`, `Stage 5C-1`, `Villager V2–V5.2`, `CLEANUP-1`, `5D-1`, `5E-1`):** `665`-key EN/VI dictionary parity enforced by static `t(...)`/`translate(...)` key-usage tests, dynamic `RewardHelpModal`, all 7 Chrome notification paths, `122` structured `ErrorCode`s with technical error sanitization (`errorTranslator.ts`), Chrome `_locales`, and CSP-safe `blocked.html` + `blocked.js`.
+- **Full EN/VI Localization & MV3 CSP Compliance (`Stage 6+7`, `Stage 5C-1`, `Villager V2–V5.2`, `CLEANUP-1`, `5D-1`, `5E-1`, `5E-2`):** `689`-key EN/VI dictionary parity enforced by static `t(...)`/`translate(...)` key-usage tests, dynamic `RewardHelpModal`, all 7 Chrome notification paths, `128` structured `ErrorCode`s with technical error sanitization (`errorTranslator.ts`), Chrome `_locales`, and CSP-safe `blocked.html` + `blocked.js`.
 - **Concurrency & Transaction Safety:** All mutations execute inside atomic critical sections guarded by `StorageMutex` with rollback compensation.
 
 ---
@@ -70,7 +70,7 @@ npm install
 # Start local interactive dev preview (Port 3000)
 npm run dev
 
-# Run comprehensive test suite (715/715 PASS — 0 failures)
+# Run comprehensive test suite (725/725 PASS — 0 failures)
 npm test
 
 # Typecheck and lint codebase (0 TypeScript errors)
@@ -80,15 +80,14 @@ npm run lint
 npm run build
 ```
 
-> **Verification scope:** Automated tests execute on Node.js (`tsx --test`) using React SSR (`renderToString`), mock 2D canvas context, and mock Chrome adapters for background services. Previously completed milestones (`UX-1`–`UX-6`, `UX-5` terrain canvas, `UX-5.1` persistent camera, `LOFI-1`/`1b`/`2`, and `Milestone 5B.5` stages `1a`–`7` including `2b`, `5c`, `6+7`) have been verified and accepted in unpacked Chrome (`>= 116`). **Stage 5C-1**, **Milestone Villager V2–V5.2**, **CLEANUP-1**, **Milestone 5D-1 (Quest Pool)**, and **Milestone 5E-1 (Construction Jobs & Founder Villager)** (`715/715 PASS`, `npm run lint` `0` errors, Vite build **PASS**) await visual/runtime verification in unpacked Chrome.
+> **Verification scope:** Automated tests execute on Node.js (`tsx --test`) using React SSR (`renderToString`), mock 2D canvas context, and mock Chrome adapters for background services. Previously completed milestones (`UX-1`–`UX-6`, `UX-5` terrain canvas, `UX-5.1` persistent camera, `LOFI-1`/`1b`/`2`, and `Milestone 5B.5` stages `1a`–`7` including `2b`, `5c`, `6+7`) have been verified and accepted in unpacked Chrome (`>= 116`). **Stage 5C-1**, **Milestone Villager V2–V5.2**, **CLEANUP-1**, **Milestone 5D-1 (Quest Pool)**, **Milestone 5E-1/1b/1c**, and **Milestone 5E-2 (Job Assignment & Multi-Site Focus Scene)** (`725/725 PASS`, `npm run lint` `0` errors, Vite build **PASS**) await visual/runtime verification in unpacked Chrome.
 
 ---
 
 ## 🗺️ Roadmap
 
-- **Milestone 5E-2 — Manual Crew Assignment & Multi-Site Focus Scene:** Interactive crew assignment during Focus sessions and multi-building construction focus view.
 - **Milestone 5C — Stage 5C-2 Era Progression:** Advance civilization progression from the Stone Age into the **Bronze Age** and subsequent historical eras (currently paused awaiting sprites/assets).
-- **Awards System:** Implement achievement tracking and milestones to replace the remaining `Awards` tab `"Coming soon"` placeholder (`Quests`, `Stats`, and Milestone `5B.5` localization/polish are complete).
+- **Awards System:** Implement achievement tracking and milestones to replace the remaining `Awards` tab `"Coming soon"` placeholder (`Quests`, `Stats`, `5E-1`, and `5E-2` are complete).
 
 ---
 

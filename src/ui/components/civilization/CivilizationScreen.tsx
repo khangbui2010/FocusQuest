@@ -366,10 +366,19 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
     [sessionSnapshot, nowTickMs]
   );
 
-  const projectedCivState = useMemo(
-    () => (civState ? projectJobs(civState, liveFocusSeconds) : null),
-    [civState, liveFocusSeconds]
-  );
+  const projectedCivState = useMemo(() => {
+    if (!civState) return null;
+    const scheduleOpts =
+      sessionSnapshot &&
+      (sessionSnapshot.assignedJobIds !== undefined ||
+        sessionSnapshot.autoContinueJobs !== undefined)
+        ? {
+            priorityJobIds: sessionSnapshot.assignedJobIds,
+            autoContinue: sessionSnapshot.autoContinueJobs,
+          }
+        : undefined;
+    return projectJobs(civState, liveFocusSeconds, scheduleOpts);
+  }, [civState, liveFocusSeconds, sessionSnapshot]);
 
   const crewSummary = useMemo(
     () =>

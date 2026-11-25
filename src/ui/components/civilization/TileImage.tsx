@@ -17,9 +17,11 @@ export function getTileSourceCoords(tileIndex: number): {
   x: number;
   y: number;
 } {
+  const numericIndex =
+    typeof tileIndex === 'number' && Number.isFinite(tileIndex) ? tileIndex : 0;
   const safeIndex = Math.max(
     0,
-    Math.min(PACKED_SHEET_COLUMNS * PACKED_SHEET_ROWS - 1, Math.floor(tileIndex))
+    Math.min(PACKED_SHEET_COLUMNS * PACKED_SHEET_ROWS - 1, Math.floor(numericIndex))
   );
   const col = safeIndex % PACKED_SHEET_COLUMNS;
   const row = Math.floor(safeIndex / PACKED_SHEET_COLUMNS);
@@ -53,7 +55,10 @@ export const TileImage: React.FC<TileImageProps> = ({
   style,
 }) => {
   const sheetPath = getSpriteSheetPath(pack);
-  const { col, row } = getTileSourceCoords(tileIndex);
+  const safeTileIndex =
+    typeof tileIndex === 'number' && Number.isFinite(tileIndex) ? Math.floor(tileIndex) : 0;
+  const safeSize = typeof size === 'number' && Number.isFinite(size) && size > 0 ? size : PACKED_TILE_PX;
+  const { col, row } = getTileSourceCoords(safeTileIndex);
 
   const hasPositionClass = /\b(absolute|fixed|sticky|relative)\b/.test(className);
   const hasDisplayClass = /\b(block|inline-block|inline|flex|inline-flex|grid|hidden)\b/.test(
@@ -71,11 +76,11 @@ export const TileImage: React.FC<TileImageProps> = ({
   return (
     <span
       data-tile-pack={pack}
-      data-tile-index={tileIndex}
+      data-tile-index={safeTileIndex}
       className={spanClassName}
       style={{
-        width: size,
-        height: size,
+        width: safeSize,
+        height: safeSize,
         ...style,
       }}
     >
@@ -86,10 +91,10 @@ export const TileImage: React.FC<TileImageProps> = ({
         aria-hidden={alt ? undefined : true}
         style={{
           position: 'absolute',
-          left: -col * size,
-          top: -row * size,
-          width: PACKED_SHEET_COLUMNS * size,
-          height: PACKED_SHEET_ROWS * size,
+          left: -col * safeSize,
+          top: -row * safeSize,
+          width: PACKED_SHEET_COLUMNS * safeSize,
+          height: PACKED_SHEET_ROWS * safeSize,
           maxWidth: 'none',
           maxHeight: 'none',
           imageRendering: 'pixelated',
@@ -128,7 +133,10 @@ export const ClockTileIcon: React.FC<ClockTileIconProps> = ({
   alt = '',
   style,
 }) => {
-  const safeIndex = Math.max(0, Math.min(CLOCK_TILES_COUNT - 1, Math.floor(tileIndex)));
+  const numericIndex =
+    typeof tileIndex === 'number' && Number.isFinite(tileIndex) ? tileIndex : 0;
+  const safeIndex = Math.max(0, Math.min(CLOCK_TILES_COUNT - 1, Math.floor(numericIndex)));
+  const safeSize = typeof size === 'number' && Number.isFinite(size) && size > 0 ? size : PACKED_TILE_PX;
   const hasPositionClass = /\b(absolute|fixed|sticky|relative)\b/.test(className);
   const hasDisplayClass = /\b(block|inline-block|inline|flex|inline-flex|grid|hidden)\b/.test(
     className
@@ -147,8 +155,8 @@ export const ClockTileIcon: React.FC<ClockTileIconProps> = ({
       data-clock-tile-index={safeIndex}
       className={spanClassName}
       style={{
-        width: size,
-        height: size,
+        width: safeSize,
+        height: safeSize,
         ...style,
       }}
     >
@@ -159,10 +167,10 @@ export const ClockTileIcon: React.FC<ClockTileIconProps> = ({
         aria-hidden={alt ? undefined : true}
         style={{
           position: 'absolute',
-          left: -safeIndex * size,
+          left: -safeIndex * safeSize,
           top: 0,
-          width: CLOCK_TILES_COUNT * size,
-          height: size,
+          width: CLOCK_TILES_COUNT * safeSize,
+          height: safeSize,
           maxWidth: 'none',
           maxHeight: 'none',
           imageRendering: 'pixelated',

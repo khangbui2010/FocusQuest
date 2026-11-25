@@ -15,6 +15,7 @@ import { BuildingCatalogPanel } from '../../src/ui/components/civilization/Build
 import { BuildingDetailsModal } from '../../src/ui/components/civilization/BuildingDetailsModal.tsx';
 import { ClearingChunkModal } from '../../src/ui/components/civilization/ClearingChunkModal.tsx';
 import { MapGridView } from '../../src/ui/components/civilization/MapGridView.tsx';
+import { ConstructionFence } from '../../src/ui/components/civilization/ConstructionFence.tsx';
 import { SpriteGallery } from '../../src/ui/components/civilization/SpriteGallery.tsx';
 import { StatsView } from '../../src/ui/components/StatsView.tsx';
 import {
@@ -537,7 +538,7 @@ test('5E-1 Stage B SSR: ClearingChunkModal, MapGridView overlays, and SpriteGall
   assert.ok(galleryHtml.includes('data-testid="gallery-construction-stone_age_elder_hut"'));
 });
 
-test('5E-1b UI Patch: cloth tarp, wooden upgrade scaffold, hovering tools + reduced-motion, EN/VI labels, and PENDING countdowns', async () => {
+test('5E-1b UI Patch: perimeter construction fence, wooden upgrade scaffold, hovering tools + reduced-motion, EN/VI labels, and PENDING countdowns', async () => {
   const { projectJobs } = await import('../../src/core/civilization/jobs.ts');
   const { getConstructionToolSpec } = await import(
     '../../src/ui/components/civilization/MapGridView.tsx'
@@ -662,26 +663,22 @@ test('5E-1b UI Patch: cloth tarp, wooden upgrade scaffold, hovering tools + redu
     })
   );
 
-  // 1. Cloth tarp overlay on placement (ACTIVE & PENDING) and clearing chunk
+  // 1. Perimeter construction fence (4 corner stakes + 4 ribbons, no full-cell tarp overlay) on placement (ACTIVE & PENDING) and clearing chunk
   assert.ok(mapEn.includes('data-testid="building-tarp-b_cave_dig"'));
   assert.ok(mapEn.includes('data-testid="building-tarp-b_forage_pend"'));
   assert.ok(mapEn.includes('data-testid="clearing-tarp-8-0"'));
-  assert.ok(mapEn.includes('fq-construction-tarp'));
+  assert.ok(!mapEn.includes('fq-construction-tarp'));
+  assert.ok(mapEn.includes('data-testid="fence-stake-tl"'));
+  assert.ok(mapEn.includes('data-testid="fence-stake-br"'));
+  assert.ok(mapEn.includes('data-testid="fence-ribbon-back"'));
+  assert.ok(mapEn.includes('data-testid="fence-ribbon-front"'));
+  assert.ok(mapEn.includes('fq-fence-ribbon-sway'));
 
-  // 2. Hovering tool icons: Pickaxe (115) for Cave, Hammer (117) for Forage & Upgrade, Axe (127) for Clearing
-  assert.ok(
-    mapEn.includes('data-testid="building-tool-b_cave_dig" data-tool-pack="tiny-town" data-tool-tile="115" data-tool-animated="true"')
-  );
-  assert.ok(
-    mapEn.includes('data-testid="clearing-tool-8-0" data-tool-pack="tiny-town" data-tool-tile="127" data-tool-animated="true"')
-  );
-  assert.ok(
-    mapEn.includes('data-testid="building-tool-b_forage_pend" data-tool-pack="tiny-dungeon" data-tool-tile="117" data-tool-animated="false"')
-  );
-  assert.ok(
-    mapEn.includes('data-testid="building-upgrade-tool-b_granary_up" data-tool-pack="tiny-dungeon" data-tool-tile="117" data-tool-animated="false"')
-  );
-  assert.ok(mapEn.includes('fq-tool-strike'));
+  // 2. Milestone 5E-2 Section 0: MapGridView renders zero hovering/animated tool icons across all 3 job kinds
+  assert.ok(!mapEn.includes('data-testid="building-tool-'));
+  assert.ok(!mapEn.includes('data-testid="clearing-tool-'));
+  assert.ok(!mapEn.includes('data-testid="building-upgrade-tool-'));
+  assert.ok(!mapEn.includes('fq-tool-strike'));
 
   // 3. EN & VI short labels ("Digging"/"Đang đào" only on Rock Shelter; "Clearing forest"/"Đang dọn rừng")
   assert.ok(mapEn.includes('data-testid="building-digging-badge-b_cave_dig"'));
@@ -702,7 +699,7 @@ test('5E-1b UI Patch: cloth tarp, wooden upgrade scaffold, hovering tools + redu
   assert.ok(mapEn.includes('data-testid="building-place-timer-b_forage_pend"'));
   assert.ok(mapEn.includes('1:00:00'));
 
-  // 6. Reduced motion disables strike animation even on ACTIVE jobs
+  // 6. Reduced motion disables fence sway animation even on ACTIVE jobs
   const originalWindow = (globalThis as { window?: unknown }).window;
   (globalThis as { window: unknown }).window = {
     matchMedia: () => ({ matches: true }),
@@ -720,7 +717,8 @@ test('5E-1b UI Patch: cloth tarp, wooden upgrade scaffold, hovering tools + redu
       })
     );
     assert.ok(!reducedHtml.includes('fq-tool-strike'));
-    assert.ok(reducedHtml.includes('data-tool-animated="false"'));
+    assert.ok(!reducedHtml.includes('fq-fence-ribbon-sway'));
+    assert.ok(reducedHtml.includes('data-fence-animated="false"'));
   } finally {
     if (originalWindow === undefined) {
       delete (globalThis as { window?: unknown }).window;
@@ -787,4 +785,152 @@ test('5E-1b UI Patch: cloth tarp, wooden upgrade scaffold, hovering tools + redu
   assert.ok(abandonedHtml.includes('30:00'));
   assert.ok(interruptedHtml.includes('30:00'));
 });
+
+test('5E-1c ConstructionFence: 4 corner stakes, 4 perimeter ribbons, transparent interior, ACTIVE/PENDING/reduced-motion, and excludes finished & upgrade', () => {
+  // 1. Standalone ConstructionFence: ACTIVE animated vs PENDING static/dimmed vs reducedMotion static
+  const activeFenceHtml = renderToString(
+    React.createElement(ConstructionFence, {
+      width: 64,
+      height: 64,
+      status: 'ACTIVE',
+      reducedMotion: false,
+      variant: 'building',
+      testId: 'fence-active-sample',
+    })
+  );
+  assert.ok(activeFenceHtml.includes('data-testid="fence-active-sample"'));
+  assert.ok(activeFenceHtml.includes('data-fence-status="ACTIVE"'));
+  assert.ok(activeFenceHtml.includes('data-fence-animated="true"'));
+  assert.ok(activeFenceHtml.includes('pointer-events-none'));
+  assert.ok(activeFenceHtml.includes('fill="none"'));
+  assert.ok(activeFenceHtml.includes('fq-fence-ribbon-sway'));
+  assert.ok(activeFenceHtml.includes('fq-fence-ribbon-sway-side'));
+  assert.ok(!activeFenceHtml.includes('opacity-65'));
+  assert.ok(!activeFenceHtml.includes('fq-construction-tarp'));
+  for (const corner of ['tl', 'tr', 'bl', 'br']) {
+    assert.ok(activeFenceHtml.includes(`data-testid="fence-stake-${corner}"`));
+    assert.ok(activeFenceHtml.includes(`data-testid="fence-stake-shadow-${corner}"`));
+  }
+  for (const edge of ['back', 'front', 'left', 'right']) {
+    assert.ok(activeFenceHtml.includes(`data-testid="fence-ribbon-${edge}"`));
+  }
+
+  const pendingFenceHtml = renderToString(
+    React.createElement(ConstructionFence, {
+      width: 128,
+      height: 128,
+      status: 'PENDING',
+      reducedMotion: false,
+      variant: 'clearing',
+      testId: 'fence-pending-sample',
+    })
+  );
+  assert.ok(pendingFenceHtml.includes('data-fence-status="PENDING"'));
+  assert.ok(pendingFenceHtml.includes('data-fence-animated="false"'));
+  assert.ok(pendingFenceHtml.includes('opacity-65'));
+  assert.ok(!pendingFenceHtml.includes('fq-fence-ribbon-sway'));
+  assert.ok(pendingFenceHtml.includes('viewBox="0 0 128 128"'));
+
+  const reducedActiveHtml = renderToString(
+    React.createElement(ConstructionFence, {
+      width: 32,
+      height: 32,
+      status: 'ACTIVE',
+      reducedMotion: true,
+      variant: 'building',
+      testId: 'fence-reduced-sample',
+    })
+  );
+  assert.ok(reducedActiveHtml.includes('data-fence-animated="false"'));
+  assert.ok(!reducedActiveHtml.includes('fq-fence-ribbon-sway'));
+
+  // 2. MapGridView integration: present on new build & clearing, absent on completed & upgrade (upgrade keeps scaffold only)
+  const baseCiv = createInitialCivilizationState();
+  const placingBuilding: BuildingInstance = {
+    id: 'b_place_5e1c',
+    definitionId: 'stone_age_foraging_post',
+    position: { x: 0, y: 0 },
+    level: 1,
+    placedAt: 100,
+  };
+  const finishedBuilding: BuildingInstance = {
+    id: 'b_done_5e1c',
+    definitionId: 'stone_age_campfire',
+    position: { x: 2, y: 0 },
+    level: 1,
+    placedAt: 100,
+  };
+  const upgradingBuilding: BuildingInstance = {
+    id: 'b_up_5e1c',
+    definitionId: 'stone_age_food_cache',
+    position: { x: 4, y: 0 },
+    level: 1,
+    placedAt: 100,
+  };
+  const jobs: ConstructionJob[] = [
+    {
+      id: 'j_place_5e1c',
+      kind: 'place',
+      status: 'ACTIVE',
+      definitionId: 'stone_age_foraging_post',
+      buildingId: 'b_place_5e1c',
+      crewRequired: 1,
+      totalSeconds: 3600,
+      remainingSeconds: 1800,
+      paidCoins: 15,
+      createdAt: 100,
+    },
+    {
+      id: 'j_up_5e1c',
+      kind: 'upgrade',
+      status: 'ACTIVE',
+      buildingId: 'b_up_5e1c',
+      targetLevel: 2,
+      crewRequired: 1,
+      totalSeconds: 300,
+      remainingSeconds: 180,
+      paidCoins: 54,
+      createdAt: 101,
+    },
+    {
+      id: 'j_expand_5e1c',
+      kind: 'expand',
+      status: 'PENDING',
+      origin: { x: 8, y: 0 },
+      purchaseIndex: 1,
+      crewRequired: 2,
+      totalSeconds: 3600,
+      remainingSeconds: 3600,
+      paidCoins: 30,
+      createdAt: 102,
+    },
+  ];
+  const mapHtml = renderLocale(
+    'en',
+    React.createElement(MapGridView, {
+      civilizationState: {
+        ...baseCiv,
+        buildings: [placingBuilding, finishedBuilding, upgradingBuilding],
+        jobs,
+      },
+      projectedJobs: jobs,
+      placementDef: null,
+      onPlaceBuilding: () => {},
+      onInspectBuilding: () => {},
+      onInspectClearingChunk: () => {},
+    })
+  );
+
+  assert.ok(mapHtml.includes('data-testid="building-tarp-b_place_5e1c"'));
+  assert.ok(mapHtml.includes('data-testid="clearing-tarp-8-0"'));
+  assert.ok(!mapHtml.includes('data-testid="building-tarp-b_done_5e1c"'));
+  assert.ok(!mapHtml.includes('data-testid="building-tarp-b_up_5e1c"'));
+  assert.ok(mapHtml.includes('data-testid="building-upgrade-scaffold-b_up_5e1c"'));
+  assert.ok(!mapHtml.includes('fq-construction-tarp'));
+  assert.ok(!mapHtml.includes('bg-amber-950/35'));
+  assert.ok(!mapHtml.includes('bg-sky-950/15'));
+  assert.ok(mapHtml.includes('30:00'));
+  assert.ok(mapHtml.includes('Lv.2 · 03:00'));
+});
+
 

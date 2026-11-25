@@ -115,7 +115,11 @@ interface PopupShellProps {
   handleStartSession: (
     mode: SessionMode,
     targetMinutes: number,
-    pomodoroConfig?: PomodoroConfig
+    pomodoroConfig?: PomodoroConfig,
+    jobAssignment?: {
+      readonly assignedJobIds?: readonly string[];
+      readonly autoContinueJobs?: boolean;
+    }
   ) => Promise<void>;
   handlePauseSession: () => Promise<void>;
   handleResumeSession: () => Promise<void>;
@@ -275,6 +279,7 @@ export const PopupShell: React.FC<PopupShellProps> = ({
             onRefreshSession={refreshState}
             isLoading={isLoading}
             onOpenProfiles={() => setIsProfileSheetOpen(true)}
+            onNavigateToMap={() => handleChangeTab('map')}
             chimeEnabled={settings?.chimeEnabled}
             onToggleChime={handleToggleChime}
           />
@@ -539,20 +544,40 @@ export const App: React.FC<AppProps> = ({
   const handleStartSession = async (
     mode: SessionMode,
     targetMinutes: number,
-    pomodoroConfig?: PomodoroConfig
+    pomodoroConfig?: PomodoroConfig,
+    jobAssignment?: {
+      readonly assignedJobIds?: readonly string[];
+      readonly autoContinueJobs?: boolean;
+    }
   ) => {
     setIsLoading(true);
-    await sendExtensionMessage({
-      action: 'START_SESSION',
-      payload: {
-        mode,
-        targetMinutes,
-        profileId: activeProfile?.id || 'profile-study-research',
-        pomodoroConfig,
-      },
-    });
-    await refreshState();
-    setIsLoading(false);
+    try {
+      const res = await sendExtensionMessage({
+        action: 'START_SESSION',
+        payload: {
+          mode,
+          targetMinutes,
+          profileId: activeProfile?.id || 'profile-study-research',
+          pomodoroConfig,
+          ...(jobAssignment?.assignedJobIds !== undefined
+            ? { assignedJobIds: [...jobAssignment.assignedJobIds] }
+            : {}),
+          ...(jobAssignment?.autoContinueJobs !== undefined
+            ? { autoContinueJobs: jobAssignment.autoContinueJobs }
+            : {}),
+        },
+      });
+      if (!res.success) {
+        throw new AppError(
+          (res.errorCode as ErrorCode) ?? 'ACTION_FAILED',
+          res.error || 'Failed to start session.',
+          res.errorParams
+        );
+      }
+      await refreshState();
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handlePauseSession = async () => {

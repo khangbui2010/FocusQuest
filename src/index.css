@@ -273,26 +273,33 @@
   animation: fq-villager-steps-4 var(--villager-duration, 600ms) steps(4) infinite;
 }
 
-/* Milestone 5E-1b: Construction cloth tarp, wooden upgrade scaffold & hovering tool strike */
-.fq-construction-tarp {
-  background-color: rgba(241, 245, 249, 0.24);
-  background-image:
-    repeating-linear-gradient(
-      45deg,
-      rgba(255, 255, 255, 0.22) 0px,
-      rgba(255, 255, 255, 0.22) 2px,
-      rgba(148, 163, 184, 0.14) 2px,
-      rgba(148, 163, 184, 0.14) 5px
-    ),
-    repeating-linear-gradient(
-      -45deg,
-      rgba(255, 255, 255, 0.16) 0px,
-      rgba(255, 255, 255, 0.16) 2px,
-      transparent 2px,
-      transparent 5px
-    );
-  border: 1.5px dashed rgba(248, 250, 252, 0.85);
-  box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.45);
+/* Milestone 5E-1c: Construction perimeter fence ribbon sway, wooden upgrade scaffold & hovering tool strike */
+@keyframes fq-fence-sway {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(1.25px);
+  }
+}
+
+@keyframes fq-fence-sway-side {
+  0%,
+  100% {
+    transform: translateX(0px);
+  }
+  50% {
+    transform: translateX(1px);
+  }
+}
+
+.fq-fence-ribbon-sway {
+  animation: fq-fence-sway 2.2s ease-in-out infinite;
+}
+
+.fq-fence-ribbon-sway-side {
+  animation: fq-fence-sway-side 2.2s ease-in-out infinite;
 }
 
 .fq-construction-scaffold {
@@ -319,6 +326,66 @@
   animation: fq-tool-strike 1.05s steps(3, end) infinite;
 }
 
+/* Milestone 5E-2b: Hand-held tool swing anchored at villager grip toward target subject */
+@keyframes fq-work-tool-strike-right {
+  0%,
+  100% {
+    transform: rotate(-18deg);
+  }
+  45% {
+    transform: rotate(34deg);
+  }
+  70% {
+    transform: rotate(12deg);
+  }
+}
+
+@keyframes fq-work-tool-strike-left {
+  0%,
+  100% {
+    transform: rotate(18deg);
+  }
+  45% {
+    transform: rotate(-34deg);
+  }
+  70% {
+    transform: rotate(-12deg);
+  }
+}
+
+.fq-work-hand-tool-strike-right {
+  transform-origin: 20% 85%;
+  animation: fq-work-tool-strike-right 0.9s steps(3, end) infinite;
+}
+
+.fq-work-hand-tool-strike-left {
+  transform-origin: 80% 85%;
+  animation: fq-work-tool-strike-left 0.9s steps(3, end) infinite;
+}
+
+.fq-work-hand-tool-rest-right {
+  transform-origin: 20% 85%;
+  transform: rotate(8deg);
+}
+
+.fq-work-hand-tool-rest-left {
+  transform-origin: 80% 85%;
+  transform: rotate(-8deg);
+}
+
+@keyframes fq-work-subscene-enter {
+  from {
+    opacity: 0.65;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.fq-work-subscene-enter {
+  animation: fq-work-subscene-enter 220ms ease-out;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .fq-expansion-overlay {
     display: none !important;
@@ -340,7 +407,12 @@
   .fq-villager-anim-2,
   .fq-villager-anim-4,
   .fq-scene-villager-mover,
-  .fq-tool-strike {
+  .fq-tool-strike,
+  .fq-work-hand-tool-strike-right,
+  .fq-work-hand-tool-strike-left,
+  .fq-fence-ribbon-sway,
+  .fq-fence-ribbon-sway-side,
+  .fq-work-subscene-enter {
     animation: none !important;
     transition: none !important;
     transform: none !important;

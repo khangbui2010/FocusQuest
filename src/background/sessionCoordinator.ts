@@ -27,7 +27,12 @@ import { TranslationKey } from '../i18n/types.ts';
 import { toQuestOutcomeDelta } from '../core/quests/questEngine.ts';
 import { QuestOutcomeDelta } from '../types/quests.ts';
 import { AppError } from '../types/errors.ts';
-import { CivilizationState } from '../core/civilization/civilizationState.ts';
+import {
+  CivilizationState,
+  createInitialCivilizationState,
+  sanitizeCivilizationState,
+} from '../core/civilization/civilizationState.ts';
+import { validateSessionJobAssignment } from '../core/civilization/jobs.ts';
 
 export const ALARM_NAMES = {
   COUNTDOWN_FINISH: 'FQ_ALARM_COUNTDOWN_FINISH',
@@ -406,7 +411,11 @@ export class SessionCoordinator {
     mode: SessionMode,
     targetMinutes: number,
     profileId: string,
-    pomodoroConfig?: PomodoroConfig
+    pomodoroConfig?: PomodoroConfig,
+    jobOptions?: {
+      readonly assignedJobIds?: readonly string[];
+      readonly autoContinueJobs?: boolean;
+    }
   ): Promise<SessionSnapshot> {
     const newSession = await this.storage.runExclusive(async () => {
       const current = await this.storage.getCurrentSession();
@@ -426,6 +435,24 @@ export class SessionCoordinator {
           `Cannot start session: profile with ID '${profileId}' not found.`,
           { profileId }
         );
+      }
+
+      if (jobOptions?.assignedJobIds !== undefined) {
+        const rawCiv = await this.storage.getCivilizationState();
+        const civState = sanitizeCivilizationState(rawCiv) ?? createInitialCivilizationState();
+        const validation = validateSessionJobAssignment({
+          jobs: civState.jobs,
+          villagers: civState.villagers,
+          founderRole: civState.founderRole,
+          assignedJobIds: jobOptions.assignedJobIds,
+        });
+        if (!validation.valid) {
+          throw new AppError(
+            validation.errorCode ?? 'SESSION_INVALID_JOB_ASSIGNMENT',
+            validation.errorMessage ?? 'Invalid session construction job assignment.',
+            validation.errorParams
+          );
+        }
       }
 
       await this.storage.setActiveProfileId(profileId);
@@ -496,6 +523,12 @@ export class SessionCoordinator {
                 accumulatedXp: initialXp,
               }
             : undefined,
+        ...(jobOptions?.assignedJobIds !== undefined
+          ? { assignedJobIds: [...jobOptions.assignedJobIds] }
+          : {}),
+        ...(jobOptions?.autoContinueJobs !== undefined
+          ? { autoContinueJobs: jobOptions.autoContinueJobs }
+          : {}),
       };
 
       await this.storage.setCurrentSession(created);

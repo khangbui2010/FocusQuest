@@ -281,6 +281,11 @@ function buildLowestUpgradeTargetMap(jobs: readonly ConstructionJob[]): Map<stri
   return lowestByBuilding;
 }
 
+export interface JobScheduleOptions {
+  readonly priorityJobIds?: readonly string[];
+  readonly autoContinue?: boolean;
+}
+
 /**
  * Pure FIFO auto-crew scheduler (Section A5):
  * - Maximum MAX_ACTIVE_CONSTRUCTION_JOBS (4) concurrent ACTIVE jobs.
@@ -384,6 +389,327 @@ export function assignJobsFifo(
   };
 }
 
+/**
+ * Schedules construction jobs honoring optional pre-session priority ordering and
+ * `autoContinue` flag:
+ * - When `options?.priorityJobIds === undefined` and `options?.autoContinue !== false`,
+ *   behaves identically to `assignJobsFifo`.
+ * - When `priorityJobIds` is provided, activates valid jobs matching `priorityJobIds`
+ *   in the requested order first (skipping any missing/completed/cancelled IDs safely),
+ *   strictly honoring <= 4 active jobs, totalCrew limit, and same-building sequential upgrades.
+ * - If `autoContinue !== false`, remaining capacity is filled in FIFO order; if `false`,
+ *   unselected PENDING jobs wait until priority/active work finishes or manual next session.
+ */
+export function assignJobsWithSchedule(
+  jobs: readonly ConstructionJob[],
+  totalVillagers: number,
+  options?: JobScheduleOptions
+): AssignJobsFifoResult {
+  if (
+    !options ||
+    (options.priorityJobIds === undefined && options.autoContinue !== false)
+  ) {
+    return assignJobsFifo(jobs, totalVillagers);
+  }
+
+  const totalCrew =
+    typeof totalVillagers === 'number' && Number.isFinite(totalVillagers) && totalVillagers > 0
+      ? Math.floor(totalVillagers)
+      : 0;
+
+  if (!Array.isArray(jobs) || jobs.length === 0) {
+    return {
+      jobs: [],
+      totalCrew,
+      busyCrew: 0,
+      freeCrew: totalCrew,
+      activeCount: 0,
+    };
+  }
+
+  const autoContinue = options.autoContinue !== false;
+  const lowestUpgradeTarget = buildLowestUpgradeTargetMap(jobs);
+  const assignedStatuses: ConstructionJobStatus[] = jobs.map(() => 'PENDING');
+  const activeUpgradeBuildingIds = new Set<string>();
+
+  let activeCount = 0;
+  let busyCrew = 0;
+
+  const tryActivateAt = (idx: number): void => {
+    if (idx < 0 || idx >= jobs.length || assignedStatuses[idx] === 'ACTIVE') {
+      return;
+    }
+    if (activeCount >= MAX_ACTIVE_CONSTRUCTION_JOBS) {
+      return;
+    }
+    const job = jobs[idx];
+    if (busyCrew + job.crewRequired > totalCrew) {
+      return;
+    }
+    if (job.kind === 'upgrade' && job.buildingId) {
+      const lowestTarget = lowestUpgradeTarget.get(job.buildingId);
+      if (
+        lowestTarget !== job.targetLevel ||
+        activeUpgradeBuildingIds.has(job.buildingId)
+      ) {
+        return;
+      }
+      activeUpgradeBuildingIds.add(job.buildingId);
+    }
+    assignedStatuses[idx] = 'ACTIVE';
+    activeCount += 1;
+    busyCrew += job.crewRequired;
+  };
+
+  if (options.priorityJobIds !== undefined) {
+    const indexById = new Map<string, number>();
+    jobs.forEach((job, idx) => indexById.set(job.id, idx));
+
+    for (const rawId of options.priorityJobIds) {
+      if (typeof rawId !== 'string') continue;
+      const idx = indexById.get(rawId);
+      if (idx !== undefined) {
+        tryActivateAt(idx);
+      }
+    }
+
+    if (autoContinue) {
+      for (let i = 0; i < jobs.length; i += 1) {
+        if (activeCount >= MAX_ACTIVE_CONSTRUCTION_JOBS) {
+          break;
+        }
+        tryActivateAt(i);
+      }
+    }
+  } else {
+    // autoContinue === false without explicit priorityJobIds: preserve currently ACTIVE valid jobs only
+    for (let i = 0; i < jobs.length; i += 1) {
+      if (jobs[i].status === 'ACTIVE') {
+        tryActivateAt(i);
+      }
+    }
+  }
+
+  const nextJobs = jobs.map((job, idx) =>
+    job.status === assignedStatuses[idx]
+      ? job
+      : { ...job, status: assignedStatuses[idx] }
+  );
+
+  return {
+    jobs: nextJobs,
+    totalCrew,
+    busyCrew,
+    freeCrew: Math.max(0, totalCrew - busyCrew),
+    activeCount,
+  };
+}
+
+export type SessionJobAssignmentErrorCode =
+  | 'SESSION_INVALID_JOB_ASSIGNMENT'
+  | 'SESSION_JOB_NOT_FOUND'
+  | 'SESSION_JOB_DUPLICATE'
+  | 'SESSION_JOB_TOO_MANY'
+  | 'SESSION_JOB_INSUFFICIENT_CREW'
+  | 'SESSION_JOB_UPGRADE_ORDER';
+
+export interface SessionJobAssignmentValidationResult {
+  readonly valid: boolean;
+  readonly errorCode?: SessionJobAssignmentErrorCode;
+  readonly errorMessage?: string;
+  readonly errorParams?: Record<string, string | number>;
+  readonly totalAssignedCrew: number;
+  readonly totalCrew: number;
+}
+
+/**
+ * Validates explicit pre-session `assignedJobIds` selection against the live CivilizationState.
+ * Used atomically inside `SessionCoordinator.startSession` under mutex lock and in simulator.
+ */
+export function validateSessionJobAssignment(params: {
+  readonly jobs?: readonly ConstructionJob[] | null;
+  readonly villagers?: readonly Pick<Villager, 'role'>[] | null;
+  readonly founderRole?: VillagerRole | null;
+  readonly assignedJobIds?: readonly string[];
+}): SessionJobAssignmentValidationResult {
+  const jobs = Array.isArray(params.jobs) ? params.jobs : [];
+  const totalCrew = getTotalVillagerCount(params.villagers, params.founderRole);
+
+  if (params.assignedJobIds === undefined) {
+    return { valid: true, totalAssignedCrew: 0, totalCrew };
+  }
+
+  if (!Array.isArray(params.assignedJobIds)) {
+    return {
+      valid: false,
+      errorCode: 'SESSION_INVALID_JOB_ASSIGNMENT',
+      errorMessage: 'assignedJobIds must be an array of job IDs.',
+      totalAssignedCrew: 0,
+      totalCrew,
+    };
+  }
+
+  if (params.assignedJobIds.length > MAX_ACTIVE_CONSTRUCTION_JOBS) {
+    return {
+      valid: false,
+      errorCode: 'SESSION_JOB_TOO_MANY',
+      errorMessage: `At most ${MAX_ACTIVE_CONSTRUCTION_JOBS} concurrent jobs can be assigned.`,
+      errorParams: { max: MAX_ACTIVE_CONSTRUCTION_JOBS, selected: params.assignedJobIds.length },
+      totalAssignedCrew: 0,
+      totalCrew,
+    };
+  }
+
+  const jobById = new Map<string, ConstructionJob>();
+  for (const job of jobs) {
+    jobById.set(job.id, job);
+  }
+
+  const lowestUpgradeTarget = buildLowestUpgradeTargetMap(jobs);
+  const seenIds = new Set<string>();
+  const seenUpgradeBuildings = new Set<string>();
+  let totalAssignedCrew = 0;
+
+  for (const rawId of params.assignedJobIds) {
+    if (typeof rawId !== 'string' || rawId.trim().length === 0) {
+      return {
+        valid: false,
+        errorCode: 'SESSION_INVALID_JOB_ASSIGNMENT',
+        errorMessage: 'Job ID must be a non-empty string.',
+        totalAssignedCrew,
+        totalCrew,
+      };
+    }
+
+    if (seenIds.has(rawId)) {
+      return {
+        valid: false,
+        errorCode: 'SESSION_JOB_DUPLICATE',
+        errorMessage: `Duplicate job ID '${rawId}' in session job assignment.`,
+        errorParams: { jobId: rawId },
+        totalAssignedCrew,
+        totalCrew,
+      };
+    }
+    seenIds.add(rawId);
+
+    const job = jobById.get(rawId);
+    if (!job) {
+      return {
+        valid: false,
+        errorCode: 'SESSION_JOB_NOT_FOUND',
+        errorMessage: `Assigned job '${rawId}' no longer exists.`,
+        errorParams: { jobId: rawId },
+        totalAssignedCrew,
+        totalCrew,
+      };
+    }
+
+    if (job.kind === 'upgrade' && job.buildingId) {
+      const lowestTarget = lowestUpgradeTarget.get(job.buildingId);
+      if (
+        seenUpgradeBuildings.has(job.buildingId) ||
+        (lowestTarget !== undefined && job.targetLevel !== lowestTarget)
+      ) {
+        return {
+          valid: false,
+          errorCode: 'SESSION_JOB_UPGRADE_ORDER',
+          errorMessage: `Upgrade job '${rawId}' must wait for lower-level upgrade on the same building.`,
+          errorParams: { jobId: rawId, buildingId: job.buildingId },
+          totalAssignedCrew,
+          totalCrew,
+        };
+      }
+      seenUpgradeBuildings.add(job.buildingId);
+    }
+
+    totalAssignedCrew += Math.max(0, job.crewRequired);
+  }
+
+  if (totalAssignedCrew > totalCrew) {
+    return {
+      valid: false,
+      errorCode: 'SESSION_JOB_INSUFFICIENT_CREW',
+      errorMessage: `Selected jobs require ${totalAssignedCrew} villagers, but only ${totalCrew} available.`,
+      errorParams: { required: totalAssignedCrew, available: totalCrew },
+      totalAssignedCrew,
+      totalCrew,
+    };
+  }
+
+  return {
+    valid: true,
+    totalAssignedCrew,
+    totalCrew,
+  };
+}
+
+export interface ActiveJobCrewAssignment {
+  readonly job: ConstructionJob;
+  readonly villagers: readonly Villager[];
+}
+
+export interface AssignVillagersToJobsResult {
+  readonly assignments: readonly ActiveJobCrewAssignment[];
+  readonly assignedVillagerIds: ReadonlySet<string>;
+  readonly idleVillagers: readonly Villager[];
+}
+
+const FOUNDER_POOL_ID = 'founder_villager';
+
+/**
+ * Deterministically maps real villagers (Founder first if present, then recruited villagers
+ * ordered by `(recruitedAt, id)`) onto currently ACTIVE jobs (`<= 4`), giving each job
+ * `job.crewRequired` distinct villagers without duplicating any villager across scenes.
+ */
+export function assignVillagersToActiveJobs(
+  jobs?: readonly ConstructionJob[] | null,
+  villagers?: readonly Villager[] | null,
+  founderRole?: VillagerRole | null
+): AssignVillagersToJobsResult {
+  const recruited = Array.isArray(villagers)
+    ? [...villagers].sort((a, b) => a.recruitedAt - b.recruitedAt || a.id.localeCompare(b.id))
+    : [];
+
+  const pool: Villager[] = [];
+  if (
+    founderRole &&
+    isVillagerRole(founderRole) &&
+    !recruited.some((v) => v.id === FOUNDER_POOL_ID)
+  ) {
+    pool.push({ id: FOUNDER_POOL_ID, role: founderRole, recruitedAt: 0 });
+  }
+  pool.push(...recruited);
+
+  const activeJobs = Array.isArray(jobs)
+    ? jobs.filter((job) => job.status === 'ACTIVE').slice(0, MAX_ACTIVE_CONSTRUCTION_JOBS)
+    : [];
+
+  const assignments: ActiveJobCrewAssignment[] = [];
+  const assignedVillagerIds = new Set<string>();
+  let cursor = 0;
+
+  for (const job of activeJobs) {
+    const need = Math.max(0, Math.floor(job.crewRequired));
+    const allocated: Villager[] = [];
+    for (let k = 0; k < need && cursor < pool.length; k += 1) {
+      const villager = pool[cursor];
+      cursor += 1;
+      allocated.push(villager);
+      assignedVillagerIds.add(villager.id);
+    }
+    assignments.push({ job, villagers: allocated });
+  }
+
+  const idleVillagers = pool.filter((v) => !assignedVillagerIds.has(v.id));
+
+  return {
+    assignments,
+    assignedVillagerIds,
+    idleVillagers,
+  };
+}
+
 export interface AdvanceableCivilizationState {
   readonly schemaVersion: number;
   readonly era: 'STONE_AGE' | 'BRONZE_AGE' | 'IRON_AGE' | 'MEDIEVAL' | 'EARLY_MODERN' | 'MODERN' | 'FUTURISTIC' | 'INTERPLANETARY';
@@ -396,16 +722,18 @@ export interface AdvanceableCivilizationState {
 }
 
 /**
- * Pure continuous event-step job simulation (Section A5 / A7):
+ * Pure continuous event-step job simulation (Section A5 / A7 + Milestone 5E-2 scheduling):
  * Advances all ACTIVE jobs by `validSeconds` integer Focus seconds.
  * When any job finishes mid-session (`dt < timeLeft`), applies its completion effects
  * (`place` lifts construction state, `upgrade` applies `targetLevel`, `expand` unlocks chunk),
- * immediately runs `assignJobsFifo`, and carries remaining Focus seconds to newly freed/pending jobs.
+ * immediately runs `assignJobsWithSchedule`, and carries remaining Focus seconds to newly
+ * promoted / priority jobs if `autoContinue !== false`.
  * Never reads Date.now() or Math.random() and never mutates input objects.
  */
 export function advanceJobs<T extends AdvanceableCivilizationState>(
   civState: T,
-  validSeconds: number
+  validSeconds: number,
+  options?: JobScheduleOptions
 ): T {
   const initialJobs = Array.isArray(civState.jobs) ? civState.jobs : [];
   if (initialJobs.length === 0) {
@@ -418,7 +746,11 @@ export function advanceJobs<T extends AdvanceableCivilizationState>(
       ? Math.floor(validSeconds)
       : 0;
 
-  let workingJobs: readonly ConstructionJob[] = assignJobsFifo(initialJobs, totalCrew).jobs;
+  let workingJobs: readonly ConstructionJob[] = assignJobsWithSchedule(
+    initialJobs,
+    totalCrew,
+    options
+  ).jobs;
   if (timeLeft <= 0) {
     const unchanged =
       workingJobs.length === initialJobs.length &&
@@ -491,7 +823,7 @@ export function advanceJobs<T extends AdvanceableCivilizationState>(
       // removing the 'place' job activates its effects immediately.
     }
 
-    workingJobs = assignJobsFifo(remainingJobs, totalCrew).jobs;
+    workingJobs = assignJobsWithSchedule(remainingJobs, totalCrew, options).jobs;
   }
 
   return {
@@ -503,13 +835,14 @@ export function advanceJobs<T extends AdvanceableCivilizationState>(
 }
 
 /**
- * Pure non-mutating live UI preview helper (Milestone 5E-1 Section B3):
- * Projects job countdown & FIFO transitions for `elapsedSeconds` of active Focus
+ * Pure non-mutating live UI preview helper (Milestone 5E-1 Section B3 / 5E-2):
+ * Projects job countdown & schedule transitions for `elapsedSeconds` of active Focus
  * without touching persistent storage or timestamps.
  */
 export function projectJobs<T extends AdvanceableCivilizationState>(
   civState: T,
-  elapsedSeconds: number
+  elapsedSeconds: number,
+  options?: JobScheduleOptions
 ): T {
-  return advanceJobs(civState, elapsedSeconds);
+  return advanceJobs(civState, elapsedSeconds, options);
 }
