@@ -4,7 +4,11 @@ import assert from 'node:assert/strict';
 import {
   BUILDING_DEMOLISH_REFUND_RATE,
   BUILDING_UPGRADE_PLAYER_LEVEL_STEP,
+  MAX_CAMPFIRE_BUILDINGS,
   MAX_ECONOMY_EFFECT_BUILDINGS,
+  MAX_ELDER_HUT_BUILDINGS,
+  MAX_TOTEM_BUILDINGS,
+  MAX_VILLAGE_CAVES,
 } from '../../src/core/civilization/constants.ts';
 import {
   STONE_AGE_BUILDING_DEFINITIONS,
@@ -40,10 +44,14 @@ function makeInstance(definitionId: string, level = 1, id = 'bld_test'): Buildin
   };
 }
 
-test('Core 5C-1 (Policy & Constants): category upgradeability, refund rate, and Economy cap invariants', () => {
+test('Core 5C-1 (Policy & Constants): category upgradeability, refund rate, and per-building placement cap invariants', () => {
   assert.equal(BUILDING_UPGRADE_PLAYER_LEVEL_STEP, 1);
   assert.equal(BUILDING_DEMOLISH_REFUND_RATE, 0.5);
   assert.equal(MAX_ECONOMY_EFFECT_BUILDINGS, 4);
+  assert.equal(MAX_CAMPFIRE_BUILDINGS, 3);
+  assert.equal(MAX_TOTEM_BUILDINGS, 3);
+  assert.equal(MAX_ELDER_HUT_BUILDINGS, 2);
+  assert.equal(MAX_VILLAGE_CAVES, 1);
 
   assert.equal(isBuildingCategoryUpgradeable('ECONOMY_EFFECT'), true);
   assert.equal(isBuildingCategoryUpgradeable('DECORATIVE'), false);
@@ -51,8 +59,10 @@ test('Core 5C-1 (Policy & Constants): category upgradeability, refund rate, and 
 
   assert.equal(getBuildingPlacementLimit(getBuildingDefinition('stone_age_foraging_post')!), 4);
   assert.equal(getBuildingPlacementLimit(getBuildingDefinition('stone_age_food_cache')!), 4);
-  assert.equal(getBuildingPlacementLimit(getBuildingDefinition('stone_age_campfire')!), null);
-  assert.equal(getBuildingPlacementLimit(getBuildingDefinition('stone_age_elder_hut')!), null);
+  assert.equal(getBuildingPlacementLimit(getBuildingDefinition('stone_age_campfire')!), 3);
+  assert.equal(getBuildingPlacementLimit(getBuildingDefinition('stone_age_totem')!), 3);
+  assert.equal(getBuildingPlacementLimit(getBuildingDefinition('stone_age_elder_hut')!), 2);
+  assert.equal(getBuildingPlacementLimit(getBuildingDefinition('stone_age_study_cave')!), 1);
 });
 
 test('Core 5C-1 (Catalog & Refunds): exact cumulative Coins spent & IEEE-754 50% demolish refund across all 6 Stone Age buildings', () => {
@@ -273,8 +283,39 @@ test('Core 5C-1 (Per-Building Build Limit & Max Stone Age CoinBonus): caps Forag
   assert.equal(anotherGranaryCheck.limit, 4);
   assert.equal(anotherGranaryCheck.currentCount, 4);
 
-  // Decorative & Focus Support are not capped
-  assert.equal(canPlaceAnotherBuildingOfCategory(campfire, fourMaxGranaries).allowed, true);
+  // Campfire (1/3), Totem (0/3), Elder's Hut (1/2) are capped independently at 3, 3, and 2
+  const totem = getBuildingDefinition('stone_age_totem')!;
+  const elderHut = getBuildingDefinition('stone_age_elder_hut')!;
+  const campfireCheck = canPlaceAnotherBuildingOfCategory(campfire, fourMaxGranaries);
+  assert.equal(campfireCheck.allowed, true);
+  assert.equal(campfireCheck.limit, 3);
+  assert.equal(campfireCheck.currentCount, 1);
+
+  const threeCampfires: BuildingInstance[] = [
+    makeInstance('stone_age_campfire', 1, 'c1'),
+    makeInstance('stone_age_campfire', 1, 'c2'),
+    makeInstance('stone_age_campfire', 1, 'c3'),
+    makeInstance('stone_age_totem', 1, 't1'),
+    makeInstance('stone_age_totem', 1, 't2'),
+    makeInstance('stone_age_totem', 1, 't3'),
+    makeInstance('stone_age_elder_hut', 1, 'h1'),
+    makeInstance('stone_age_elder_hut', 1, 'h2'),
+  ];
+  assert.deepEqual(canPlaceAnotherBuildingOfCategory(campfire, threeCampfires), {
+    allowed: false,
+    limit: 3,
+    currentCount: 3,
+  });
+  assert.deepEqual(canPlaceAnotherBuildingOfCategory(totem, threeCampfires), {
+    allowed: false,
+    limit: 3,
+    currentCount: 3,
+  });
+  assert.deepEqual(canPlaceAnotherBuildingOfCategory(elderHut, threeCampfires), {
+    allowed: false,
+    limit: 2,
+    currentCount: 2,
+  });
 
   // After removing 1 Granary, Granary slot opens again
   const threeGranaries = fourMaxGranaries.slice(1);

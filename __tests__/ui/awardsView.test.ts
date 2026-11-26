@@ -24,7 +24,11 @@ import {
 import { createInitialCivilizationState } from '../../src/core/civilization/civilizationState.ts';
 import { createInitialQuestState } from '../../src/core/quests/questEngine.ts';
 import { AwardViewModel, GetAwardsStateResponseData } from '../../src/types/awards.ts';
-import { sendExtensionMessage } from '../../src/ui/services/extensionClient.ts';
+import { CivilizationState } from '../../src/core/civilization/civilizationState.ts';
+import {
+  seedMockCivilizationForTest,
+  sendExtensionMessage,
+} from '../../src/ui/services/extensionClient.ts';
 
 function buildSampleAwardsData(): GetAwardsStateResponseData {
   const nowMs = 1770000000000;
@@ -38,7 +42,7 @@ function buildSampleAwardsData(): GetAwardsStateResponseData {
   };
   const evalRes = evaluateAwards(createInitialAwardState(), ctx, {
     metricOverrides: {
-      focus_hours: 350, // Lv.2 unlocked (unseen)
+      focus_hours: 650, // Lv.2 unlocked (unseen)
       long_haul: 60, // Lv.3 unlocked (sorts above focus_hours Lv.2)
       tribe_complete: 1, // Single-level achieved
     },
@@ -141,13 +145,13 @@ test('Awards UI: dynamically renders Lv.6 pips & modal, CSS level-band classes (
     ...STONE_AGE_AWARDS_CATALOG[0],
     tiers: [
       ...STONE_AGE_AWARDS_CATALOG[0].tiers,
-      { tier: 6, threshold: 12000, availableFrom: 'BRONZE_AGE' as const },
+      { tier: 6, threshold: 60000, availableFrom: 'BRONZE_AGE' as const },
     ],
   };
-  const models: readonly AwardViewModel[] = buildAwardViewModels(createInitialAwardState(), ctx, {
+  const models: readonly AwardViewModel[] = evaluateAwards(createInitialAwardState(), ctx, {
     catalog: [sixTierDef, STONE_AGE_AWARDS_CATALOG[11]], // focus_hours (Lv.6) + tribe_complete (single-level)
-    metricOverrides: { focus_hours: 12500, tribe_complete: 1 },
-  });
+    metricOverrides: { focus_hours: 65000, tribe_complete: 1 },
+  }).viewModels;
 
   const html = renderToString(
     React.createElement(
@@ -384,4 +388,133 @@ test('Simulator GET_AWARDS_STATE and MARK_AWARDS_SEEN handlers work end-to-end',
   });
   assert.equal(markRes.success, true);
   assert.equal(markRes.data?.unseenCount, 0);
+});
+
+test('Simulator Builder (totalBuildingsBuilt): async place + cancel keeps counter unchanged and Campfire increments immediately', async () => {
+  await sendExtensionMessage({
+    action: 'SELECT_FOUNDER',
+    payload: { role: 'elder' },
+  });
+
+  const beforeAwards = await sendExtensionMessage<GetAwardsStateResponseData>({
+    action: 'GET_AWARDS_STATE',
+  });
+  const baseBuilt = beforeAwards.data?.awardState.counters.totalBuildingsBuilt ?? 0;
+
+  // Initial mock economy has 120 Coins & 50 lifetime focus minutes; stone_age_totem costs 30 Coins
+  const placeAsyncRes = await sendExtensionMessage<{
+    job?: { id: string };
+  }>({
+    action: 'PLACE_BUILDING',
+    payload: {
+      buildingDefinitionId: 'stone_age_totem',
+      position: { x: 0, y: 0 },
+    },
+  });
+  assert.equal(placeAsyncRes.success, true);
+  assert.ok(placeAsyncRes.data?.job);
+
+  const midAwards = await sendExtensionMessage<GetAwardsStateResponseData>({
+    action: 'GET_AWARDS_STATE',
+  });
+  assert.equal(midAwards.data?.awardState.counters.totalBuildingsBuilt, baseBuilt);
+
+  const cancelRes = await sendExtensionMessage({
+    action: 'CANCEL_CONSTRUCTION_JOB',
+    payload: { jobId: placeAsyncRes.data.job.id },
+  });
+  assert.equal(cancelRes.success, true);
+
+  const afterCancelAwards = await sendExtensionMessage<GetAwardsStateResponseData>({
+    action: 'GET_AWARDS_STATE',
+  });
+  assert.equal(afterCancelAwards.data?.awardState.counters.totalBuildingsBuilt, baseBuilt);
+
+  const campfireRes = await sendExtensionMessage<{
+    job?: { id: string };
+  }>({
+    action: 'PLACE_BUILDING',
+    payload: {
+      buildingDefinitionId: 'stone_age_campfire',
+      position: { x: 0, y: 0 },
+    },
+  });
+  assert.equal(campfireRes.success, true);
+  assert.equal(campfireRes.data?.job, undefined);
+
+  const afterCampfireAwards = await sendExtensionMessage<GetAwardsStateResponseData>({
+    action: 'GET_AWARDS_STATE',
+  });
+  assert.equal(afterCampfireAwards.data?.awardState.counters.totalBuildingsBuilt, baseBuilt + 1);
+
+  // Simulator parity: Campfire max 3, Totem max 3, Elder's Hut max 2 -> CIV_BUILDING_PLACEMENT_LIMIT_REACHED
+  const realDateNow = Date.now;
+  let mockNow = 1770000000000;
+  Date.now = () => mockNow;
+  try {
+    // Run 2 x 60m Countdown sessions for Coins, Lv.4+, and >= 120 lifetime focus minutes (Elder's Hut gate)
+    for (let i = 0; i < 2; i += 1) {
+      await sendExtensionMessage({
+        action: 'START_SESSION',
+        payload: { mode: 'COUNTDOWN', targetMinutes: 60, profileId: 'profile-study-research' },
+      });
+      mockNow += 61 * 60 * 1000;
+      await sendExtensionMessage({ action: 'GET_SESSION_STATE' });
+      await sendExtensionMessage({ action: 'RESET_SESSION' });
+    }
+    const civRes = await sendExtensionMessage<CivilizationState>({ action: 'GET_CIVILIZATION_STATE' });
+    assert.ok(civRes.data);
+    seedMockCivilizationForTest({
+      ...civRes.data,
+      villagers: [{ id: 'v_sim_helper', role: 'crafter', recruitedAt: mockNow }],
+    });
+
+    // Place 2 more Campfires (1 already at (0,0) -> total 3), 4th rejected
+    await sendExtensionMessage({
+      action: 'PLACE_BUILDING',
+      payload: { buildingDefinitionId: 'stone_age_campfire', position: { x: 1, y: 0 } },
+    });
+    await sendExtensionMessage({
+      action: 'PLACE_BUILDING',
+      payload: { buildingDefinitionId: 'stone_age_campfire', position: { x: 2, y: 0 } },
+    });
+    const simFourthCampfire = await sendExtensionMessage({
+      action: 'PLACE_BUILDING',
+      payload: { buildingDefinitionId: 'stone_age_campfire', position: { x: 3, y: 0 } },
+    });
+    assert.equal(simFourthCampfire.success, false);
+    assert.equal(simFourthCampfire.errorCode, 'CIV_BUILDING_PLACEMENT_LIMIT_REACHED');
+
+    // Place 3 Totems, 4th rejected
+    for (let i = 0; i < 3; i += 1) {
+      const tRes = await sendExtensionMessage({
+        action: 'PLACE_BUILDING',
+        payload: { buildingDefinitionId: 'stone_age_totem', position: { x: 4 + i, y: 0 } },
+      });
+      assert.equal(tRes.success, true, `Simulator Totem #${i + 1} failed: ${tRes.error}`);
+    }
+    const simFourthTotem = await sendExtensionMessage({
+      action: 'PLACE_BUILDING',
+      payload: { buildingDefinitionId: 'stone_age_totem', position: { x: 7, y: 0 } },
+    });
+    assert.equal(simFourthTotem.success, false);
+    assert.equal(simFourthTotem.errorCode, 'CIV_BUILDING_PLACEMENT_LIMIT_REACHED');
+
+    // Place 2 Elder's Huts, 3rd rejected
+    for (let i = 0; i < 2; i += 1) {
+      const eRes = await sendExtensionMessage({
+        action: 'PLACE_BUILDING',
+        payload: { buildingDefinitionId: 'stone_age_elder_hut', position: { x: i * 2, y: 2 } },
+      });
+      assert.equal(eRes.success, true, `Simulator Elder's Hut #${i + 1} failed: ${eRes.error}`);
+    }
+    const simThirdElder = await sendExtensionMessage({
+      action: 'PLACE_BUILDING',
+      payload: { buildingDefinitionId: 'stone_age_elder_hut', position: { x: 4, y: 2 } },
+    });
+    assert.equal(simThirdElder.success, false);
+    assert.equal(simThirdElder.errorCode, 'CIV_BUILDING_PLACEMENT_LIMIT_REACHED');
+  } finally {
+    Date.now = realDateNow;
+  }
 });

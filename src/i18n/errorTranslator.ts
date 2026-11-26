@@ -106,6 +106,7 @@ export const ALL_KNOWN_ERROR_CODES: readonly ErrorCode[] = [
   'CIV_CANNOT_PLACE_BUILDING',
   'CIV_GRID_PLACEMENT_FAILED',
   'CIV_ECONOMY_BUILDING_LIMIT_REACHED',
+  'CIV_BUILDING_PLACEMENT_LIMIT_REACHED',
   'CIV_INVALID_BUILDING_INSTANCE_ID',
   'CIV_BUILDING_NOT_FOUND',
   'CIV_BUILDING_REMOVAL_FAILED',
@@ -741,6 +742,20 @@ function translateByErrorCode(
       return isVi
         ? `Đã đạt giới hạn xây dựng (${current}/${limit}).`
         : `Build Limit reached (${current}/${limit} placed).`;
+    }
+    case 'CIV_BUILDING_PLACEMENT_LIMIT_REACHED': {
+      const limit = str('limit', '1');
+      const current = str('currentCount', limit);
+      const rawName = str('buildingName');
+      const bName = rawName ? resolveBuildingDisplayByRawName(locale, rawName) : '';
+      if (bName) {
+        return isVi
+          ? `Đã đạt giới hạn đặt "${bName}" trên bản đồ (${current}/${limit}).`
+          : `Placement limit reached for "${bName}" (${current}/${limit} placed).`;
+      }
+      return isVi
+        ? `Đã đạt giới hạn đặt công trình trên bản đồ (${current}/${limit}).`
+        : `Building placement limit reached (${current}/${limit} placed).`;
     }
     case 'CIV_INVALID_BUILDING_INSTANCE_ID':
       return isVi ? 'Thiếu mã công trình cần xóa.' : 'REMOVE_BUILDING requires valid buildingInstanceId.';

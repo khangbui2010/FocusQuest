@@ -47,6 +47,7 @@ const SAMPLE_PARAMS_BY_CODE: Partial<Record<ErrorCode, ErrorParams>> = {
   CIV_CANNOT_PLACE_BUILDING: { reason: 'OCCUPIED' },
   CIV_GRID_PLACEMENT_FAILED: { reason: 'OUT_OF_BOUNDS' },
   CIV_ECONOMY_BUILDING_LIMIT_REACHED: { buildingName: 'Foraging Post', limit: 4, currentCount: 4 },
+  CIV_BUILDING_PLACEMENT_LIMIT_REACHED: { buildingName: 'Campfire', limit: 3, currentCount: 3 },
   CIV_BUILDING_NOT_FOUND: { buildingInstanceId: 'bld_123' },
   CIV_BUILDING_REMOVAL_FAILED: { reason: 'LOCKED' },
   BUILDING_NOT_FOUND: { buildingId: 'bld_404' },

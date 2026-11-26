@@ -78,21 +78,25 @@ test('EconomyBalance Suite 1: V5.2 Stone Age costs (3,907 max total) & 5E-1 arit
     stone_age_food_cache: 30,
   };
 
-  let maxStoneAgeBuildAndUpgradeTotal = 0;
+  let eraChecklistBuildAndUpgradeTotal = 0;
+  let maxStoneAgeCapBuildAndUpgradeTotal = 0;
   for (const def of STONE_AGE_BUILDING_DEFINITIONS) {
     assert.strictEqual(def.baseCost, expectedCosts[def.id], `baseCost mismatch for ${def.id}`);
-    const limit = getBuildingPlacementLimit(def) ?? 1; // decor & elder hut counted at 1 instance
+    const limit = getBuildingPlacementLimit(def) ?? 1;
+    const eraChecklistCount =
+      def.category === 'ECONOMY_EFFECT' || def.id === 'stone_age_study_cave' ? limit : 1;
     const effectiveMax = isBuildingDefinitionUpgradeable(def)
       ? getEffectiveMaxLevel(def, 'STONE_AGE')
       : 1;
     const perInstanceCost = calculateTotalBuildingCoinsSpent(def, effectiveMax);
-    maxStoneAgeBuildAndUpgradeTotal += limit * perInstanceCost;
+    eraChecklistBuildAndUpgradeTotal += eraChecklistCount * perInstanceCost;
+    maxStoneAgeCapBuildAndUpgradeTotal += limit * perInstanceCost;
   }
 
-  // Exact V5.2 Stone Age total:
-  // 4 (Campfire) + 8 (Totem) + 247 (Cave L1..5) + 20 (Elder's Hut)
-  // + 4*236=944 (Foraging Posts L1..5) + 4*671=2,684 (Granaries L1..5) = 3,907
-  assert.strictEqual(maxStoneAgeBuildAndUpgradeTotal, 3907);
+  // Exact V5.2 Stone Age Era floor total (1 Campfire + 1 Totem + 1 Cave L1..5 + 1 Elder's Hut + 4 Foraging + 4 Granary = 3,907)
+  // Full map placement cap total adds 2 extra Campfires (8) + 2 extra Totems (16) + 1 extra Elder's Hut (20) = 3,951
+  assert.strictEqual(eraChecklistBuildAndUpgradeTotal, 3907);
+  assert.strictEqual(maxStoneAgeCapBuildAndUpgradeTotal, 3951);
 
   assert.strictEqual(LAND_EXPANSION_BASE_COST, 30);
   let prev = 0;

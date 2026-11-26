@@ -14,7 +14,10 @@
 import {
   BUILDING_DEMOLISH_REFUND_RATE,
   BUILDING_UPGRADE_PLAYER_LEVEL_STEP,
+  MAX_CAMPFIRE_BUILDINGS,
   MAX_ECONOMY_EFFECT_BUILDINGS,
+  MAX_ELDER_HUT_BUILDINGS,
+  MAX_TOTEM_BUILDINGS,
   MAX_VILLAGE_CAVES,
 } from './constants.ts';
 import {
@@ -94,16 +97,27 @@ export function isBuildingDefinitionUpgradeable(
 /**
  * Returns the maximum number of active instances allowed per building type,
  * or null when unlimited.
+ * - `stone_age_campfire`: capped at MAX_CAMPFIRE_BUILDINGS (3)
+ * - `stone_age_totem`: capped at MAX_TOTEM_BUILDINGS (3)
+ * - `stone_age_elder_hut`: capped at MAX_ELDER_HUT_BUILDINGS (2)
  * - `stone_age_study_cave`: capped at MAX_VILLAGE_CAVES (1)
  * - `ECONOMY_EFFECT`: capped independently at MAX_ECONOMY_EFFECT_BUILDINGS (4)
  */
 export function getBuildingPlacementLimit(
   definition: Pick<BuildingDefinition, 'id' | 'category'>
 ): number | null {
-  if (definition.id === 'stone_age_study_cave') {
-    return MAX_VILLAGE_CAVES;
+  switch (definition.id) {
+    case 'stone_age_campfire':
+      return MAX_CAMPFIRE_BUILDINGS;
+    case 'stone_age_totem':
+      return MAX_TOTEM_BUILDINGS;
+    case 'stone_age_elder_hut':
+      return MAX_ELDER_HUT_BUILDINGS;
+    case 'stone_age_study_cave':
+      return MAX_VILLAGE_CAVES;
+    default:
+      return definition.category === 'ECONOMY_EFFECT' ? MAX_ECONOMY_EFFECT_BUILDINGS : null;
   }
-  return definition.category === 'ECONOMY_EFFECT' ? MAX_ECONOMY_EFFECT_BUILDINGS : null;
 }
 
 /**

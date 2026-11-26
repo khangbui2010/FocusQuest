@@ -405,6 +405,7 @@ test('Stage 6 errorTranslator: table-driven EN/VI check across ALL_KNOWN_ERROR_C
     CIV_CANNOT_PLACE_BUILDING: { reason: 'CELL_OCCUPIED' },
     CIV_GRID_PLACEMENT_FAILED: { reason: 'OUT_OF_BOUNDS' },
     CIV_ECONOMY_BUILDING_LIMIT_REACHED: { buildingName: 'Foraging Post', limit: 4, currentCount: 4 },
+    CIV_BUILDING_PLACEMENT_LIMIT_REACHED: { buildingName: 'Campfire', limit: 3, currentCount: 3 },
     CIV_BUILDING_NOT_FOUND: { buildingInstanceId: 'bld-404' },
     CIV_BUILDING_REMOVAL_FAILED: { reason: 'NOT_FOUND' },
     BUILDING_NOT_FOUND: { buildingId: 'bld-404' },

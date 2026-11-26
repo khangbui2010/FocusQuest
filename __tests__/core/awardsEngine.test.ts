@@ -69,6 +69,30 @@ test('Awards Catalog: defines all 13 Stone Age awards with strict ordering, vali
     }
   }
 
+  assert.deepStrictEqual(
+    getAwardDefinition('focus_hours')?.tiers.map((t) => t.threshold),
+    [60, 600, 3000, 6000, 30000]
+  );
+  assert.deepStrictEqual(
+    getAwardDefinition('focus_sessions')?.tiers.map((t) => t.threshold),
+    [1, 10, 50, 100, 500]
+  );
+  assert.deepStrictEqual(
+    getAwardDefinition('quest_keeper')?.tiers.map((t) => t.threshold),
+    [1, 10, 30, 75, 150]
+  );
+  assert.deepStrictEqual(
+    getAwardDefinition('perfect_day')?.tiers.map((t) => t.threshold),
+    [1, 5, 15, 30, 60]
+  );
+  assert.deepStrictEqual(
+    getAwardDefinition('player_level')?.tiers.map((t) => t.threshold),
+    [3, 5, 10, 15, 20]
+  );
+  assert.deepStrictEqual(
+    getAwardDefinition('builder')?.tiers.map((t) => t.threshold),
+    [1, 3, 6, 10, 15]
+  );
   const masterBuilder = getAwardDefinition('master_builder');
   assert.ok(masterBuilder);
   assert.deepStrictEqual(
@@ -121,19 +145,19 @@ test('Awards Engine: evaluates all 13 awards, preserves one-way permanent unlock
   // Trigger tier unlocks across metrics via metricOverrides + real counters
   const unlockedRes = evaluateAwards(initial, ctx, {
     metricOverrides: {
-      focus_hours: 300, // Tier II
-      focus_sessions: 5, // Tier II
-      long_haul: 60, // Tier III
-      focus_streak: 7, // Tier II
-      quest_keeper: 5, // Tier II
-      perfect_day: 1, // Tier I
-      player_level: 4, // Tier II
-      builder: 3, // Tier II
-      master_builder: 3, // Tier II
-      land_clearer: 1, // Tier I
-      tribe: 3, // Tier II
-      tribe_complete: 1, // Tier I
-      era_ready: 1, // Tier I
+      focus_hours: 600, // Lv.2
+      focus_sessions: 10, // Lv.2
+      long_haul: 60, // Lv.3
+      focus_streak: 7, // Lv.2
+      quest_keeper: 10, // Lv.2
+      perfect_day: 1, // Lv.1
+      player_level: 5, // Lv.2
+      builder: 3, // Lv.2
+      master_builder: 3, // Lv.2
+      land_clearer: 1, // Lv.1
+      tribe: 3, // Lv.2
+      tribe_complete: 1, // Single-level achieved
+      era_ready: 1, // Single-level achieved
     },
   });
 
@@ -163,9 +187,9 @@ test('Awards Engine: evaluates all 13 awards, preserves one-way permanent unlock
 test('Awards Engine: markAwardsAsSeen clears unseen flags cleanly without touching unlockedAt', () => {
   const ctx = makeBaseContext({ nowMs: 1770000001234 });
   const evalRes = evaluateAwards(createInitialAwardState(), ctx, {
-    metricOverrides: { focus_sessions: 5, builder: 1 },
+    metricOverrides: { focus_sessions: 10, builder: 1 },
   });
-  assert.equal(evalRes.unseenCount, 3); // focus_sessions I & II + builder I
+  assert.equal(evalRes.unseenCount, 3); // focus_sessions Lv.1 & Lv.2 + builder Lv.1
 
   const partial = markAwardsAsSeen(evalRes.nextState, ['builder']);
   assert.equal(partial.mutated, true);
@@ -187,20 +211,20 @@ test('Awards Engine: dynamically supports future-era Lv.6, exposes level & nextT
       ...STONE_AGE_AWARDS_CATALOG[0],
       tiers: [
         ...STONE_AGE_AWARDS_CATALOG[0].tiers,
-        { tier: 6, threshold: 12000, availableFrom: 'BRONZE_AGE' },
+        { tier: 6, threshold: 60000, availableFrom: 'BRONZE_AGE' },
       ],
     },
   ];
 
   const stoneCtx = makeBaseContext();
-  const stoneModels = buildAwardViewModels(createInitialAwardState(), stoneCtx, {
+  const stoneEval = evaluateAwards(createInitialAwardState(), stoneCtx, {
     catalog: syntheticCatalog,
-    metricOverrides: { focus_hours: 15000 },
+    metricOverrides: { focus_hours: 65000 },
   });
-  assert.equal(stoneModels[0].totalAvailableTiers, 5);
-  assert.equal(stoneModels[0].tiers.length, 5);
-  assert.equal(stoneModels[0].level, 5);
-  assert.equal(stoneModels[0].nextThreshold, null);
+  assert.equal(stoneEval.viewModels[0].totalAvailableTiers, 5);
+  assert.equal(stoneEval.viewModels[0].tiers.length, 5);
+  assert.equal(stoneEval.viewModels[0].level, 5);
+  assert.equal(stoneEval.viewModels[0].nextThreshold, null);
 
   const bronzeCtx = makeBaseContext({
     civilization: {
@@ -210,7 +234,7 @@ test('Awards Engine: dynamically supports future-era Lv.6, exposes level & nextT
   });
   const bronzeEval = evaluateAwards(createInitialAwardState(), bronzeCtx, {
     catalog: syntheticCatalog,
-    metricOverrides: { focus_hours: 15000 },
+    metricOverrides: { focus_hours: 65000 },
   });
   assert.equal(bronzeEval.viewModels[0].totalAvailableTiers, 6);
   assert.equal(bronzeEval.viewModels[0].tiers.length, 6);
@@ -221,28 +245,54 @@ test('Awards Engine: dynamically supports future-era Lv.6, exposes level & nextT
   assert.deepStrictEqual(bronzeEval.levels.focus_hours, { level: 6, nextThreshold: null });
 });
 
-test('Awards Engine: returns level=0 and nextThreshold below Lv.1 threshold, then unlocks Lv.1 at exact threshold for all 13 awards', () => {
+test('Awards Engine: checks strictly below, exact, and strictly above every tier threshold for all 13 awards', () => {
   const ctx = makeBaseContext();
   for (const def of STONE_AGE_AWARDS_CATALOG) {
-    const firstThreshold = def.tiers[0].threshold;
-    const belowVal = Math.max(0, firstThreshold - 1);
-    const belowRes = evaluateAwards(createInitialAwardState(), ctx, {
-      catalog: [def],
-      metricOverrides: { [def.id]: belowVal },
-    });
-    assert.equal(belowRes.levels[def.id]?.level, 0, `${def.id} must be Lv.0 at ${belowVal}`);
-    assert.equal(belowRes.levels[def.id]?.nextThreshold, firstThreshold);
-    assert.equal(belowRes.viewModels[0].level, 0);
-    assert.equal(belowRes.viewModels[0].nextThreshold, firstThreshold);
+    for (let idx = 0; idx < def.tiers.length; idx += 1) {
+      const tierSpec = def.tiers[idx];
+      const expectedPrevLevel = idx;
+      const belowVal = Math.max(0, tierSpec.threshold - 1);
+      const belowRes = evaluateAwards(createInitialAwardState(), ctx, {
+        catalog: [def],
+        metricOverrides: { [def.id]: belowVal },
+      });
+      assert.equal(
+        belowRes.levels[def.id]?.level,
+        expectedPrevLevel,
+        `${def.id} must be Lv.${expectedPrevLevel} below tier ${tierSpec.tier} at ${belowVal}`
+      );
+      assert.equal(belowRes.levels[def.id]?.nextThreshold, tierSpec.threshold);
+      assert.equal(belowRes.viewModels[0].level, expectedPrevLevel);
+      assert.equal(belowRes.viewModels[0].nextThreshold, tierSpec.threshold);
 
-    const exactRes = evaluateAwards(createInitialAwardState(), ctx, {
-      catalog: [def],
-      metricOverrides: { [def.id]: firstThreshold },
-    });
-    assert.equal(exactRes.levels[def.id]?.level, 1, `${def.id} must be Lv.1 at ${firstThreshold}`);
-    const expectedNext = def.tiers.length > 1 ? def.tiers[1].threshold : null;
-    assert.equal(exactRes.levels[def.id]?.nextThreshold, expectedNext);
-    assert.equal(exactRes.viewModels[0].isSingleLevel, def.tiers.length === 1);
+      const exactRes = evaluateAwards(createInitialAwardState(), ctx, {
+        catalog: [def],
+        metricOverrides: { [def.id]: tierSpec.threshold },
+      });
+      assert.equal(
+        exactRes.levels[def.id]?.level,
+        tierSpec.tier,
+        `${def.id} must be Lv.${tierSpec.tier} at exact ${tierSpec.threshold}`
+      );
+      const expectedNext = idx + 1 < def.tiers.length ? def.tiers[idx + 1].threshold : null;
+      assert.equal(exactRes.levels[def.id]?.nextThreshold, expectedNext);
+      assert.equal(exactRes.viewModels[0].isSingleLevel, def.tiers.length === 1);
+
+      const aboveVal =
+        expectedNext !== null
+          ? Math.min(tierSpec.threshold + 1, expectedNext - 1)
+          : tierSpec.threshold + 1;
+      const aboveRes = evaluateAwards(createInitialAwardState(), ctx, {
+        catalog: [def],
+        metricOverrides: { [def.id]: aboveVal },
+      });
+      assert.equal(
+        aboveRes.levels[def.id]?.level,
+        tierSpec.tier,
+        `${def.id} must stay Lv.${tierSpec.tier} above tier ${tierSpec.tier} at ${aboveVal}`
+      );
+      assert.equal(aboveRes.levels[def.id]?.nextThreshold, expectedNext);
+    }
   }
 });
 
@@ -261,31 +311,37 @@ test('Awards Engine: all 13 Stone Age awards reach max level cleanly under real 
     { id: 'c3', definitionId: 'stone_age_campfire', position: { x: 2, y: 0 }, level: 1, placedAt: 3 },
     { id: 't1', definitionId: 'stone_age_totem', position: { x: 3, y: 0 }, level: 1, placedAt: 4 },
     { id: 't2', definitionId: 'stone_age_totem', position: { x: 4, y: 0 }, level: 1, placedAt: 5 },
-    { id: 'eh1', definitionId: 'stone_age_elder_hut', position: { x: 0, y: 2 }, level: 1, placedAt: 6 },
-    { id: 'cave1', definitionId: 'stone_age_study_cave', position: { x: 2, y: 2 }, level: 5, placedAt: 7 },
-    { id: 'fp1', definitionId: 'stone_age_foraging_post', position: { x: 8, y: 0 }, level: 5, placedAt: 8 },
-    { id: 'fp2', definitionId: 'stone_age_foraging_post', position: { x: 12, y: 0 }, level: 5, placedAt: 9 },
-    { id: 'fp3', definitionId: 'stone_age_foraging_post', position: { x: 16, y: 0 }, level: 5, placedAt: 10 },
-    { id: 'fp4', definitionId: 'stone_age_foraging_post', position: { x: 20, y: 0 }, level: 5, placedAt: 11 },
-    { id: 'fg1', definitionId: 'stone_age_food_cache', position: { x: 24, y: 0 }, level: 5, placedAt: 12 },
-    { id: 'fg2', definitionId: 'stone_age_food_cache', position: { x: 28, y: 0 }, level: 5, placedAt: 13 },
-    { id: 'fg3', definitionId: 'stone_age_food_cache', position: { x: 32, y: 0 }, level: 5, placedAt: 14 },
-    { id: 'fg4', definitionId: 'stone_age_food_cache', position: { x: 36, y: 0 }, level: 5, placedAt: 15 },
+    { id: 't3', definitionId: 'stone_age_totem', position: { x: 5, y: 0 }, level: 1, placedAt: 6 },
+    { id: 'eh1', definitionId: 'stone_age_elder_hut', position: { x: 0, y: 2 }, level: 1, placedAt: 7 },
+    { id: 'eh2', definitionId: 'stone_age_elder_hut', position: { x: 5, y: 2 }, level: 1, placedAt: 8 },
+    { id: 'cave1', definitionId: 'stone_age_study_cave', position: { x: 2, y: 2 }, level: 5, placedAt: 9 },
+    { id: 'fp1', definitionId: 'stone_age_foraging_post', position: { x: 8, y: 0 }, level: 5, placedAt: 10 },
+    { id: 'fp2', definitionId: 'stone_age_foraging_post', position: { x: 12, y: 0 }, level: 5, placedAt: 11 },
+    { id: 'fp3', definitionId: 'stone_age_foraging_post', position: { x: 16, y: 0 }, level: 5, placedAt: 12 },
+    { id: 'fp4', definitionId: 'stone_age_foraging_post', position: { x: 20, y: 0 }, level: 5, placedAt: 13 },
+    { id: 'fg1', definitionId: 'stone_age_food_cache', position: { x: 24, y: 0 }, level: 5, placedAt: 14 },
+    { id: 'fg2', definitionId: 'stone_age_food_cache', position: { x: 28, y: 0 }, level: 5, placedAt: 15 },
+    { id: 'fg3', definitionId: 'stone_age_food_cache', position: { x: 32, y: 0 }, level: 5, placedAt: 16 },
+    { id: 'fg4', definitionId: 'stone_age_food_cache', position: { x: 36, y: 0 }, level: 5, placedAt: 17 },
   ];
+  assert.equal(realStoneAgeBuildings.length, 17);
 
-  // 75 sessions * 80 mins = 6000 mins across 60 consecutive days ending 2026-02-02
+  // 500 sessions * 60 mins = 30,000 mins across 60 consecutive days ending 2026-02-02:
+  // 20 days * 9 sessions/day (540m) + 40 days * 8 sessions/day (480m) = 500 sessions & 30,000 mins
   const dailyStats: AwardEvaluationContext['dailyStats'] = {};
   const endDate = new Date(Date.UTC(2026, 1, 2));
   for (let d = 0; d < 60; d += 1) {
     const dt = new Date(endDate.getTime() - d * 86_400_000);
     const key = dt.toISOString().slice(0, 10);
+    const sessions = d < 20 ? 9 : 8;
+    const mins = sessions * 60;
     dailyStats[key] = {
       date: key,
-      totalFocusMinutes: 100,
-      completedSessions: d < 15 ? 2 : 1, // 15*2 + 45*1 = 75 sessions, 6000 mins
+      totalFocusMinutes: mins,
+      completedSessions: sessions,
       abandonedSessions: 0,
-      coinsEarned: 150,
-      xpEarned: 250,
+      coinsEarned: mins * 2,
+      xpEarned: mins * 5,
     };
   }
 
@@ -294,17 +350,18 @@ test('Awards Engine: all 13 Stone Age awards reach max level cleanly under real 
     counters: {
       longestSessionMinutes: 120,
       maxFocusStreakDays: 60,
-      totalQuestsClaimed: 60,
-      perfectDaysCount: 30,
+      totalQuestsClaimed: 150,
+      perfectDaysCount: 60,
       perfectDayDateKeys: [],
-      totalBuildingsBuilt: 15,
+      totalBuildingsBuilt: realStoneAgeBuildings.length,
     },
   };
 
+  // Level 20 requires 19*20/2 * 100 = 19,000 XP (500 x 60m sessions yield >= 150,000 XP)
   const realCtx = makeBaseContext({
     nowMs,
     todayDateKey: '2026-02-02',
-    economy: { focusCoins: 500, totalXP: 4500, level: 10 },
+    economy: { focusCoins: 500, totalXP: 19000, level: 20 },
     dailyStats,
     civilization: {
       ...baseCiv,

@@ -15,10 +15,10 @@ export const STONE_AGE_AWARDS_CATALOG: readonly AwardDefinition[] = Object.freez
     availableFrom: 'STONE_AGE',
     tiers: [
       { tier: 1, threshold: 60, availableFrom: 'STONE_AGE' },
-      { tier: 2, threshold: 300, availableFrom: 'STONE_AGE' },
-      { tier: 3, threshold: 900, availableFrom: 'STONE_AGE' },
-      { tier: 4, threshold: 2400, availableFrom: 'STONE_AGE' },
-      { tier: 5, threshold: 6000, availableFrom: 'STONE_AGE' },
+      { tier: 2, threshold: 600, availableFrom: 'STONE_AGE' },
+      { tier: 3, threshold: 3000, availableFrom: 'STONE_AGE' },
+      { tier: 4, threshold: 6000, availableFrom: 'STONE_AGE' },
+      { tier: 5, threshold: 30000, availableFrom: 'STONE_AGE' },
     ],
   },
   {
@@ -32,10 +32,10 @@ export const STONE_AGE_AWARDS_CATALOG: readonly AwardDefinition[] = Object.freez
     availableFrom: 'STONE_AGE',
     tiers: [
       { tier: 1, threshold: 1, availableFrom: 'STONE_AGE' },
-      { tier: 2, threshold: 5, availableFrom: 'STONE_AGE' },
-      { tier: 3, threshold: 15, availableFrom: 'STONE_AGE' },
-      { tier: 4, threshold: 35, availableFrom: 'STONE_AGE' },
-      { tier: 5, threshold: 75, availableFrom: 'STONE_AGE' },
+      { tier: 2, threshold: 10, availableFrom: 'STONE_AGE' },
+      { tier: 3, threshold: 50, availableFrom: 'STONE_AGE' },
+      { tier: 4, threshold: 100, availableFrom: 'STONE_AGE' },
+      { tier: 5, threshold: 500, availableFrom: 'STONE_AGE' },
     ],
   },
   {
@@ -83,10 +83,10 @@ export const STONE_AGE_AWARDS_CATALOG: readonly AwardDefinition[] = Object.freez
     availableFrom: 'STONE_AGE',
     tiers: [
       { tier: 1, threshold: 1, availableFrom: 'STONE_AGE' },
-      { tier: 2, threshold: 5, availableFrom: 'STONE_AGE' },
-      { tier: 3, threshold: 15, availableFrom: 'STONE_AGE' },
-      { tier: 4, threshold: 30, availableFrom: 'STONE_AGE' },
-      { tier: 5, threshold: 60, availableFrom: 'STONE_AGE' },
+      { tier: 2, threshold: 10, availableFrom: 'STONE_AGE' },
+      { tier: 3, threshold: 30, availableFrom: 'STONE_AGE' },
+      { tier: 4, threshold: 75, availableFrom: 'STONE_AGE' },
+      { tier: 5, threshold: 150, availableFrom: 'STONE_AGE' },
     ],
   },
   {
@@ -100,10 +100,10 @@ export const STONE_AGE_AWARDS_CATALOG: readonly AwardDefinition[] = Object.freez
     availableFrom: 'STONE_AGE',
     tiers: [
       { tier: 1, threshold: 1, availableFrom: 'STONE_AGE' },
-      { tier: 2, threshold: 3, availableFrom: 'STONE_AGE' },
-      { tier: 3, threshold: 7, availableFrom: 'STONE_AGE' },
-      { tier: 4, threshold: 14, availableFrom: 'STONE_AGE' },
-      { tier: 5, threshold: 30, availableFrom: 'STONE_AGE' },
+      { tier: 2, threshold: 5, availableFrom: 'STONE_AGE' },
+      { tier: 3, threshold: 15, availableFrom: 'STONE_AGE' },
+      { tier: 4, threshold: 30, availableFrom: 'STONE_AGE' },
+      { tier: 5, threshold: 60, availableFrom: 'STONE_AGE' },
     ],
   },
   {
@@ -116,11 +116,11 @@ export const STONE_AGE_AWARDS_CATALOG: readonly AwardDefinition[] = Object.freez
     unit: 'levels',
     availableFrom: 'STONE_AGE',
     tiers: [
-      { tier: 1, threshold: 2, availableFrom: 'STONE_AGE' },
-      { tier: 2, threshold: 4, availableFrom: 'STONE_AGE' },
-      { tier: 3, threshold: 6, availableFrom: 'STONE_AGE' },
-      { tier: 4, threshold: 8, availableFrom: 'STONE_AGE' },
-      { tier: 5, threshold: 10, availableFrom: 'STONE_AGE' },
+      { tier: 1, threshold: 3, availableFrom: 'STONE_AGE' },
+      { tier: 2, threshold: 5, availableFrom: 'STONE_AGE' },
+      { tier: 3, threshold: 10, availableFrom: 'STONE_AGE' },
+      { tier: 4, threshold: 15, availableFrom: 'STONE_AGE' },
+      { tier: 5, threshold: 20, availableFrom: 'STONE_AGE' },
     ],
   },
   {

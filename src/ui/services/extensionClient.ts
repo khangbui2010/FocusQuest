@@ -2051,11 +2051,16 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
 
       const limitCheck = canPlaceAnotherBuildingOfCategory(def, mockCivilizationState.buildings);
       if (!limitCheck.allowed) {
-        const isCave = def.id === VILLAGE_CAVE_DEFINITION_ID;
+        const errorCode =
+          def.id === VILLAGE_CAVE_DEFINITION_ID
+            ? 'CIV_VILLAGE_CAVE_LIMIT_REACHED'
+            : def.category === 'ECONOMY_EFFECT'
+              ? 'CIV_ECONOMY_BUILDING_LIMIT_REACHED'
+              : 'CIV_BUILDING_PLACEMENT_LIMIT_REACHED';
         return {
           success: false,
           error: `Build Limit reached for "${def.name}" (${limitCheck.currentCount}/${limitCheck.limit} placed).`,
-          errorCode: isCave ? 'CIV_VILLAGE_CAVE_LIMIT_REACHED' : 'CIV_ECONOMY_BUILDING_LIMIT_REACHED',
+          errorCode,
           errorParams: {
             buildingName: def.name,
             limit: limitCheck.limit ?? 0,

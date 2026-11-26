@@ -29,11 +29,14 @@ export const BUILDING_UPGRADE_PLAYER_LEVEL_STEP = 1;
 export const BUILDING_DEMOLISH_REFUND_RATE = 0.5;
 export const MAX_ECONOMY_EFFECT_BUILDINGS = 4;
 
-// Milestone Villager V5.2: Villager recruitment, Cave capacity, and 1-Cave cap constants
+// Milestone Villager V5.2 + 5D-2 follow-up: Villager recruitment, Cave capacity, and per-building placement limit constants
 export const VILLAGER_BASE_RECRUIT_COST = 25;
 export const VILLAGER_RECRUIT_COST_RATIO = 1.35;
 export const VILLAGER_CAPACITY_PER_CAVE_LEVEL = 2;
 export const MAX_VILLAGE_CAVES = 1;
+export const MAX_CAMPFIRE_BUILDINGS = 3;
+export const MAX_TOTEM_BUILDINGS = 3;
+export const MAX_ELDER_HUT_BUILDINGS = 2;
 
 // Milestone Villager V5.2: Villager role buff rates, caps & complete tribe synergy
 export const VILLAGER_CRAFTER_COIN_BONUS_RATE = 0.05;

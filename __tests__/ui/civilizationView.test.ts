@@ -254,6 +254,33 @@ test('Civilization UI: BuildingCatalogPanel renders definitions, costs, and unlo
   assert.ok(html.includes('Primitive Granary'), 'must render primitive granary');
   // Granary requires Lv. 2, so at playerLevel 1 it should show Lv. 2 requirement
   assert.ok(html.includes('Lv. 2'), 'must show level unlock requirement');
+  assert.ok(html.includes('Build Limit: 0/3'), 'must show 0/3 limit badge for Campfire/Totem');
+  assert.ok(html.includes('Build Limit: 0/2'), 'must show 0/2 limit badge for Elder Hut');
+
+  const cappedHtml = renderToString(
+    React.createElement(BuildingCatalogPanel, {
+      isOpen: true,
+      onClose: () => {},
+      playerLevel: 5,
+      playerCoins: 500,
+      lifetimeFocusMinutes: 500,
+      placedBuildings: [
+        { id: 'c1', definitionId: 'stone_age_campfire', position: { x: 0, y: 0 }, level: 1, placedAt: 1 },
+        { id: 'c2', definitionId: 'stone_age_campfire', position: { x: 1, y: 0 }, level: 1, placedAt: 2 },
+        { id: 'c3', definitionId: 'stone_age_campfire', position: { x: 2, y: 0 }, level: 1, placedAt: 3 },
+        { id: 't1', definitionId: 'stone_age_totem', position: { x: 3, y: 0 }, level: 1, placedAt: 4 },
+        { id: 't2', definitionId: 'stone_age_totem', position: { x: 4, y: 0 }, level: 1, placedAt: 5 },
+        { id: 't3', definitionId: 'stone_age_totem', position: { x: 5, y: 0 }, level: 1, placedAt: 6 },
+        { id: 'e1', definitionId: 'stone_age_elder_hut', position: { x: 0, y: 2 }, level: 1, placedAt: 7 },
+        { id: 'e2', definitionId: 'stone_age_elder_hut', position: { x: 2, y: 2 }, level: 1, placedAt: 8 },
+      ],
+      onSelectBuilding: () => {},
+    })
+  );
+  assert.ok(cappedHtml.includes('Build Limit: 3/3'));
+  assert.ok(cappedHtml.includes('Build Limit: 2/2'));
+  assert.ok(cappedHtml.includes('Limit 3/3'));
+  assert.ok(cappedHtml.includes('Limit 2/2'));
 });
 
 test('Civilization UI: BuildingCatalogPanel returns null when isOpen is false', () => {

@@ -235,12 +235,17 @@ export class CivilizationCoordinator {
         );
       }
 
-      // 4. Check per-building placement limit (1 for Cave, 4 for Economy buildings)
+      // 4. Check per-building placement limit (1 for Cave, 4 for Economy, 3/3/2 for Campfire/Totem/Elder's Hut)
       const limitCheck = canPlaceAnotherBuildingOfCategory(definition, civilization.buildings);
       if (!limitCheck.allowed) {
-        const isCave = definition.id === VILLAGE_CAVE_DEFINITION_ID;
+        const errorCode =
+          definition.id === VILLAGE_CAVE_DEFINITION_ID
+            ? 'CIV_VILLAGE_CAVE_LIMIT_REACHED'
+            : definition.category === 'ECONOMY_EFFECT'
+              ? 'CIV_ECONOMY_BUILDING_LIMIT_REACHED'
+              : 'CIV_BUILDING_PLACEMENT_LIMIT_REACHED';
         throw new AppError(
-          isCave ? 'CIV_VILLAGE_CAVE_LIMIT_REACHED' : 'CIV_ECONOMY_BUILDING_LIMIT_REACHED',
+          errorCode,
           `Build Limit reached for "${definition.name}" (${limitCheck.currentCount}/${limitCheck.limit} placed).`,
           {
             buildingName: definition.name,

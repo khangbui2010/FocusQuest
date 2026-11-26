@@ -131,6 +131,9 @@ test('i18n Static Key-Usage Guard: every t(...) and translate(...) key in src/ e
     'slotLabelKey', // QuestView SLOT_LABEL_KEYS verified below
     'award.titleKey as TranslationKey', // AwardsView & AwardDetailsModal STONE_AGE_AWARDS_CATALOG verified below
     'award.descriptionKey as TranslationKey', // AwardsView & AwardDetailsModal STONE_AGE_AWARDS_CATALOG verified below
+    'a.titleKey as TranslationKey', // awardFormatting.sortAwardsForDisplay verified across STONE_AGE_AWARDS_CATALOG below
+    'b.titleKey as TranslationKey', // awardFormatting.sortAwardsForDisplay verified across STONE_AGE_AWARDS_CATALOG below
+    'CATEGORY_HEADING_KEYS[group.category]', // AwardsView typed Record<AwardCategory, TranslationKey> verified below
     'awardToast.titleKey as TranslationKey', // App award unlock toast STONE_AGE_AWARDS_CATALOG verified below
   ]);
 

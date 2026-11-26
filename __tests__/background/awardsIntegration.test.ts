@@ -25,6 +25,9 @@ import {
 } from '../../src/types/awards.ts';
 import { getActiveQuestDefinitions } from '../../src/core/quests/questEngine.ts';
 import { createDevBackgroundController } from '../../src/dev/devBackgroundService.ts';
+import { localizeErrorMessage } from '../../src/i18n/errorTranslator.ts';
+import { STONE_TO_BRONZE_ADVANCE_REQUIREMENTS } from '../../src/core/civilization/eraRules.ts';
+import { GridMap } from '../../src/core/civilization/gridMap.ts';
 
 async function withMockedNow<T>(nowProvider: () => number, fn: () => Promise<T>): Promise<T> {
   const originalNow = Date.now;
@@ -248,6 +251,83 @@ test('Awards Integration: Campfire instant place + place job completion + quest 
   });
 });
 
+test('Awards Integration (Builder): unstarted ACTIVE and PENDING place jobs do NOT increment on queue or cancel; Campfire (0s) increments immediately and async place increments once on completion', async () => {
+  let fakeNow = 1770000000000;
+  await withMockedNow(() => fakeNow, async () => {
+    const { storage, sessionCoordinator, civCoordinator } = await createAwardsHarness();
+    const profiles = await storage.getProfiles();
+    const profileId = profiles[0].id;
+
+    await storage.updateEconomy(() => ({ focusCoins: 2000, totalXP: 500, level: 3 }));
+    await civCoordinator.selectFounder({ role: 'elder' }); // totalCrew = 1
+
+    // Earn 60 lifetime focus minutes first (Rock Shelter requires 50 lifetime focus minutes); totalBuildingsBuilt is still 0
+    await sessionCoordinator.startSession('COUNTDOWN', 60, profileId);
+    fakeNow += 60 * 60 * 1000;
+    await sessionCoordinator.completeCountdown();
+
+    // 1. Place async building #1 (ACTIVE, 3600s) -> Builder stays 0; place async building #2 (PENDING, 3600s) -> Builder stays 0
+    const firstPlace = await civCoordinator.placeBuilding({
+      buildingDefinitionId: 'stone_age_study_cave',
+      position: { x: 0, y: 0 },
+    });
+    assert.equal(firstPlace.job?.status, 'ACTIVE');
+
+    const secondPlace = await civCoordinator.placeBuilding({
+      buildingDefinitionId: 'stone_age_foraging_post',
+      position: { x: 4, y: 0 },
+    });
+    assert.equal(secondPlace.job?.status, 'PENDING');
+
+    let awards = await storage.getAwards();
+    assert.equal(awards.counters.totalBuildingsBuilt, 0);
+    assert.equal(awards.unlocked.builder?.[1], undefined);
+
+    // 2. Cancel the unstarted PENDING job -> Builder stays 0 (and badge stays locked)
+    await civCoordinator.cancelConstructionJob({ jobId: secondPlace.job!.id });
+    awards = await storage.getAwards();
+    assert.equal(awards.counters.totalBuildingsBuilt, 0);
+    assert.equal(awards.unlocked.builder?.[1], undefined);
+
+    // 3. Cancel the unstarted ACTIVE job -> Builder stays 0
+    await civCoordinator.cancelConstructionJob({ jobId: firstPlace.job!.id });
+    awards = await storage.getAwards();
+    assert.equal(awards.counters.totalBuildingsBuilt, 0);
+    assert.equal(awards.unlocked.builder?.[1], undefined);
+
+    // 4. Campfire (0s) increments immediately on placement (+1)
+    await civCoordinator.placeBuilding({
+      buildingDefinitionId: 'stone_age_campfire',
+      position: { x: 0, y: 0 },
+    });
+    awards = await storage.getAwards();
+    assert.equal(awards.counters.totalBuildingsBuilt, 1);
+    assert.ok(awards.unlocked.builder?.[1]);
+
+    // 5. Place async building then complete it -> increments exactly once (1 -> 2), and another focus session keeps it at 2
+    await civCoordinator.placeBuilding({
+      buildingDefinitionId: 'stone_age_foraging_post',
+      position: { x: 4, y: 0 },
+    });
+    awards = await storage.getAwards();
+    assert.equal(awards.counters.totalBuildingsBuilt, 1);
+
+    await sessionCoordinator.startSession('COUNTDOWN', 60, profileId);
+    fakeNow += 60 * 60 * 1000;
+    await sessionCoordinator.completeCountdown();
+
+    awards = await storage.getAwards();
+    assert.equal(awards.counters.totalBuildingsBuilt, 2);
+
+    await sessionCoordinator.startSession('COUNTDOWN', 30, profileId);
+    fakeNow += 30 * 60 * 1000;
+    await sessionCoordinator.completeCountdown();
+
+    awards = await storage.getAwards();
+    assert.equal(awards.counters.totalBuildingsBuilt, 2);
+  });
+});
+
 test('Awards Integration: validates MARK_AWARDS_SEEN payload and rolls back Awards on storage failure', async () => {
   const { handler, adapter, storage } = await createAwardsHarness();
 
@@ -302,4 +382,177 @@ test('Dev God Mode: DEV_UNLOCK_ALL_AWARDS and DEV_RESET_AWARDS mutate fq_awards 
   const resetAwards: AwardState = await storage.getAwards();
   assert.deepStrictEqual(resetAwards.unlocked, {});
   assert.deepStrictEqual(await storage.getEconomy(), econBefore);
+});
+
+test('Awards Integration (Builder Cap & Placement Limits): blocks Campfire (>3), Totem (>3), Elder Hut (>2) with structured EN/VI error and hits Builder Lv.5 cleanly within 17-building Stone Age cap', async () => {
+  let fakeNow = 1770000000000;
+  await withMockedNow(() => fakeNow, async () => {
+    const { handler, storage, sessionCoordinator, civCoordinator } = await createAwardsHarness();
+    const profiles = await storage.getProfiles();
+    const profileId = profiles[0].id;
+
+    // Seed level >= 5, plenty of Coins, and extra unlocked chunks so all 17 capped buildings fit easily
+    await storage.updateEconomy(() => ({ focusCoins: 5000, totalXP: 2000, level: 5 }));
+    await civCoordinator.selectFounder({ role: 'elder' });
+    const baseCiv = await storage.getCivilizationState();
+    const gm = GridMap.fromSnapshot(baseCiv.grid);
+    assert.equal(gm.expandChunk({ x: 8, y: 0 }).success, true);
+    assert.equal(gm.expandChunk({ x: 8, y: 4 }).success, true);
+    assert.equal(gm.expandChunk({ x: 12, y: 0 }).success, true);
+    assert.equal(gm.expandChunk({ x: 12, y: 4 }).success, true);
+    await storage.setCivilizationState({
+      ...baseCiv,
+      grid: gm.toSnapshot(),
+    });
+
+    // Complete 1 x 120m Focus session to clear Stone Age focus-minute unlock gates (>= 120m)
+    await sessionCoordinator.startSession('COUNTDOWN', 120, profileId);
+    fakeNow += 120 * 60 * 1000;
+    await sessionCoordinator.completeCountdown();
+
+    // Place and complete Rock Shelter (1 crew = Founder) so we can recruit a 2nd villager for 2-crew buildings
+    const caveRes = await handler.handleMessage({
+      action: 'PLACE_BUILDING',
+      payload: { buildingDefinitionId: 'stone_age_study_cave', position: { x: 4, y: 2 } },
+    });
+    assert.equal(caveRes.success, true, `Cave failed: ${caveRes.error}`);
+    await sessionCoordinator.startSession('COUNTDOWN', 60, profileId);
+    fakeNow += 60 * 60 * 1000;
+    await sessionCoordinator.completeCountdown();
+
+    const recruitRes = await handler.handleMessage({
+      action: 'RECRUIT_VILLAGER',
+      payload: { role: 'crafter' },
+    });
+    assert.equal(recruitRes.success, true, `Recruit failed: ${recruitRes.error}`);
+
+    // Era advance requirements stay untouched at minCount = 1 each for Campfire, Totem, Elder's Hut
+    for (const reqId of ['stone_age_campfire', 'stone_age_totem', 'stone_age_elder_hut'] as const) {
+      const req = STONE_TO_BRONZE_ADVANCE_REQUIREMENTS.buildingRequirements.find(
+        (r) => r.definitionId === reqId
+      );
+      assert.equal(req?.minCount, 1);
+    }
+
+    // 1. Campfire: 3 allowed, 4th rejected with CIV_BUILDING_PLACEMENT_LIMIT_REACHED
+    for (let i = 0; i < 3; i += 1) {
+      const res = await handler.handleMessage({
+        action: 'PLACE_BUILDING',
+        payload: { buildingDefinitionId: 'stone_age_campfire', position: { x: i, y: 0 } },
+      });
+      assert.equal(res.success, true, `Campfire #${i + 1} failed: ${res.error}`);
+    }
+    const fourthCampfire = await handler.handleMessage({
+      action: 'PLACE_BUILDING',
+      payload: { buildingDefinitionId: 'stone_age_campfire', position: { x: 3, y: 0 } },
+    });
+    assert.equal(fourthCampfire.success, false);
+    assert.equal(fourthCampfire.errorCode, 'CIV_BUILDING_PLACEMENT_LIMIT_REACHED');
+    assert.deepStrictEqual(fourthCampfire.errorParams, {
+      buildingName: 'Campfire',
+      limit: 3,
+      currentCount: 3,
+    });
+    assert.equal(
+      localizeErrorMessage('en', fourthCampfire.error, fourthCampfire.errorCode, fourthCampfire.errorParams),
+      'Placement limit reached for "Campfire" (3/3 placed).'
+    );
+    assert.equal(
+      localizeErrorMessage('vi', fourthCampfire.error, fourthCampfire.errorCode, fourthCampfire.errorParams),
+      'Đã đạt giới hạn đặt "Lửa trại" trên bản đồ (3/3).'
+    );
+
+    // 2. Ancient Totem: 3 allowed, 4th rejected
+    for (let i = 0; i < 3; i += 1) {
+      const res = await handler.handleMessage({
+        action: 'PLACE_BUILDING',
+        payload: { buildingDefinitionId: 'stone_age_totem', position: { x: 4 + i, y: 0 } },
+      });
+      assert.equal(res.success, true, `Totem #${i + 1} failed: ${res.error}`);
+    }
+    const fourthTotem = await handler.handleMessage({
+      action: 'PLACE_BUILDING',
+      payload: { buildingDefinitionId: 'stone_age_totem', position: { x: 7, y: 0 } },
+    });
+    assert.equal(fourthTotem.success, false);
+    assert.equal(fourthTotem.errorCode, 'CIV_BUILDING_PLACEMENT_LIMIT_REACHED');
+    assert.deepStrictEqual(fourthTotem.errorParams, {
+      buildingName: 'Ancient Totem',
+      limit: 3,
+      currentCount: 3,
+    });
+    assert.ok(
+      localizeErrorMessage('vi', fourthTotem.error, fourthTotem.errorCode, fourthTotem.errorParams).includes(
+        'Vật tổ Cổ đại'
+      )
+    );
+
+    // 3. Elder's Hut: 2 allowed, 3rd rejected
+    for (let i = 0; i < 2; i += 1) {
+      const res = await handler.handleMessage({
+        action: 'PLACE_BUILDING',
+        payload: { buildingDefinitionId: 'stone_age_elder_hut', position: { x: i * 2, y: 2 } },
+      });
+      assert.equal(res.success, true, `Elder's Hut #${i + 1} failed: ${res.error}`);
+    }
+    const thirdElderHut = await handler.handleMessage({
+      action: 'PLACE_BUILDING',
+      payload: { buildingDefinitionId: 'stone_age_elder_hut', position: { x: 8, y: 2 } },
+    });
+    assert.equal(thirdElderHut.success, false);
+    assert.equal(thirdElderHut.errorCode, 'CIV_BUILDING_PLACEMENT_LIMIT_REACHED');
+    assert.deepStrictEqual(thirdElderHut.errorParams, {
+      buildingName: "Elder's Hut",
+      limit: 2,
+      currentCount: 2,
+    });
+    assert.ok(
+      localizeErrorMessage('vi', thirdElderHut.error, thirdElderHut.errorCode, thirdElderHut.errorParams).includes(
+        'Lều Trưởng lão'
+      )
+    );
+
+    // 4. Place remaining legal Stone Age buildings up to simultaneous map cap (17):
+    // 4 Foraging Posts + 4 Granaries (+ 1 Cave + 3 Campfires + 3 Totems + 2 Elder's Huts)
+    const remainingPlacements = [
+      { id: 'stone_age_foraging_post', pos: { x: 0, y: 4 } },
+      { id: 'stone_age_foraging_post', pos: { x: 2, y: 4 } },
+      { id: 'stone_age_foraging_post', pos: { x: 0, y: 6 } },
+      { id: 'stone_age_foraging_post', pos: { x: 2, y: 6 } },
+      { id: 'stone_age_food_cache', pos: { x: 8, y: 0 } },
+      { id: 'stone_age_food_cache', pos: { x: 10, y: 0 } },
+      { id: 'stone_age_food_cache', pos: { x: 12, y: 0 } },
+      { id: 'stone_age_food_cache', pos: { x: 14, y: 0 } },
+    ];
+    for (const item of remainingPlacements) {
+      const res = await handler.handleMessage({
+        action: 'PLACE_BUILDING',
+        payload: { buildingDefinitionId: item.id, position: item.pos },
+      });
+      assert.equal(res.success, true, `Placing ${item.id} failed: ${res.error}`);
+    }
+
+    // Complete all queued build jobs via real Focus sessions (max 120m each)
+    for (let round = 0; round < 12; round += 1) {
+      const civNow = await storage.getCivilizationState();
+      if ((civNow.jobs?.length ?? 0) === 0) break;
+      await sessionCoordinator.startSession('COUNTDOWN', 120, profileId);
+      fakeNow += 120 * 60 * 1000;
+      await sessionCoordinator.completeCountdown();
+    }
+
+    const finalCiv = await storage.getCivilizationState();
+    assert.equal(finalCiv.jobs?.length ?? 0, 0);
+    assert.equal(finalCiv.buildings.length, 17);
+
+    const finalAwardsRes = await handler.handleMessage({ action: 'GET_AWARDS_STATE' });
+    assert.equal(finalAwardsRes.success, true);
+    const finalAwardsData = finalAwardsRes.data as GetAwardsStateResponseData;
+    assert.equal(finalAwardsData.awardState.counters.totalBuildingsBuilt, 17);
+    const builderVm = finalAwardsData.awards.find((a) => a.id === 'builder');
+    assert.ok(builderVm);
+    assert.equal(builderVm.level, 5);
+    assert.equal(builderVm.isMaxed, true);
+    assert.equal(builderVm.nextThreshold, null);
+  });
 });

@@ -40,7 +40,7 @@ test('v7 Migration: backfills earned tiers as seen:true from v6 history while pr
     '2026-02-01': {
       date: '2026-02-01',
       totalFocusMinutes: 120,
-      completedSessions: 5,
+      completedSessions: 10,
       abandonedSessions: 0,
       coinsEarned: 240,
       xpEarned: 600,
