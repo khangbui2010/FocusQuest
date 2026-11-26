@@ -16,6 +16,7 @@ import {
 import { isBuildingUnderConstruction } from '../../core/civilization/jobs.ts';
 import { VillagerAnimationName, VillagerRole, isVillagerRole } from '../components/civilization/spriteRegistry.ts';
 import { STONE_AGE_SPRITE_DATA } from '../components/civilization/spriteData.ts';
+import type { ToolKind } from '../components/civilization/constructionTools.ts';
 
 export type SceneFocusState = 'working' | 'paused' | 'resting';
 
@@ -41,9 +42,9 @@ export interface SceneBuildingSlot {
  * Fixed non-overlapping visual slots for all 6 Stone Age buildings inside the 336×120 stage.
  * Horizontal bands are strictly disjoint:
  * - Study Cave:     46..94   (48×48)
- * - Elder's Hut:    96..132  (36×36)
- * - Ancient Totem:  133..153 (20×20)
- * - Campfire:       154..186 (32×32)
+ * - Elder's Hut:     96..132 (36×36)
+ * - Standing Stone:  133..153 (20×20)
+ * - Campfire:        154..186 (32×32)
  * - Foraging Post:  190..226 (36×36)
  * - Primitive Granary: 232..264 (32×48)
  */
@@ -137,6 +138,7 @@ export interface SceneVillagerPose {
   readonly facing: 'left' | 'right';
   readonly animation: VillagerAnimationName;
   readonly showTool: boolean;
+  readonly toolKind?: ToolKind;
   readonly toolTileIndex?: number;
   readonly toolSide?: 'left' | 'right';
   readonly showRestZzz: boolean;
@@ -471,6 +473,13 @@ export function getSceneVillagerRoute(
       ? 119
       : undefined;
 
+  const toolKind: ToolKind | undefined =
+    showTool && villager.role === 'crafter'
+      ? 'hammer'
+      : showTool && villager.role === 'woodworker'
+      ? 'axe'
+      : undefined;
+
   const toolSide =
     showTool && villager.role === 'crafter'
       ? 'right'
@@ -489,6 +498,7 @@ export function getSceneVillagerRoute(
     facing,
     animation,
     showTool,
+    toolKind,
     toolTileIndex,
     toolSide,
     showRestZzz,

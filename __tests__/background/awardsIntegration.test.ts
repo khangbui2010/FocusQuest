@@ -462,7 +462,7 @@ test('Awards Integration (Builder Cap & Placement Limits): blocks Campfire (>3),
       'Đã đạt giới hạn đặt "Lửa trại" trên bản đồ (3/3).'
     );
 
-    // 2. Ancient Totem: 3 allowed, 4th rejected
+    // 2. Standing Stone: 3 allowed, 4th rejected
     for (let i = 0; i < 3; i += 1) {
       const res = await handler.handleMessage({
         action: 'PLACE_BUILDING',
@@ -477,13 +477,13 @@ test('Awards Integration (Builder Cap & Placement Limits): blocks Campfire (>3),
     assert.equal(fourthTotem.success, false);
     assert.equal(fourthTotem.errorCode, 'CIV_BUILDING_PLACEMENT_LIMIT_REACHED');
     assert.deepStrictEqual(fourthTotem.errorParams, {
-      buildingName: 'Ancient Totem',
+      buildingName: 'Standing Stone',
       limit: 3,
       currentCount: 3,
     });
     assert.ok(
       localizeErrorMessage('vi', fourthTotem.error, fourthTotem.errorCode, fourthTotem.errorParams).includes(
-        'Vật tổ Cổ đại'
+        'Đá dựng'
       )
     );
 

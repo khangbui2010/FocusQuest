@@ -193,7 +193,7 @@ test('Stage E errorTranslator: preserves EN raw errors and translates exact/para
   const sampleErrors = [
     'Profile name cannot be empty or whitespace.',
     "Pattern '*' is too broad and would disable website blocking protection.",
-    'Building "Ancient Totem" requires Player Level 2 (current: 1)',
+    'Building "Standing Stone" requires Player Level 2 (current: 1)',
     'Insufficient coins: building "Rock Shelter" costs 120 Coins (current balance: 30)',
     'Land expansion #1 requires Player Level 3 (current: 1)',
     'Insufficient coins: chunk expansion #1 costs 75 Coins (current balance: 20)',
@@ -208,7 +208,7 @@ test('Stage E errorTranslator: preserves EN raw errors and translates exact/para
   }
 
   assert.ok(
-    localizeErrorMessage('vi', 'Building "Ancient Totem" requires Player Level 2 (current: 1)').includes('Vật tổ Cổ đại')
+    localizeErrorMessage('vi', 'Building "Standing Stone" requires Player Level 2 (current: 1)').includes('Đá dựng')
   );
   assert.ok(
     localizeErrorMessage(
@@ -398,7 +398,7 @@ test('Stage 6 errorTranslator: table-driven EN/VI check across ALL_KNOWN_ERROR_C
     PROFILE_ADD_INVALID_DOMAIN: { reasonCode: 'DOMAIN_PATTERN_TOO_BROAD', pattern: '*' },
     PROFILE_UPDATE_INVALID_ALLOWLIST: { reasonCode: 'DOMAIN_EMPTY' },
     CIV_UNKNOWN_BUILDING_DEF: { buildingDefinitionId: 'unknown_hut' },
-    CIV_REQUIRES_LEVEL: { buildingName: 'Ancient Totem', requiredLevel: 2, currentLevel: 1 },
+    CIV_REQUIRES_LEVEL: { buildingName: 'Standing Stone', requiredLevel: 2, currentLevel: 1 },
     CIV_REQUIRES_FOCUS_MINUTES: { buildingName: 'Rock Shelter', requiredMinutes: 60, currentMinutes: 10 },
     CIV_REQUIRES_ERA: { buildingName: 'Campfire', requiredEra: 'BRONZE_AGE', currentEra: 'STONE_AGE' },
     CIV_INSUFFICIENT_BUILDING_COINS: { buildingName: 'Rock Shelter', cost: 120, balance: 30 },

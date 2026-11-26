@@ -9,6 +9,7 @@ import { REUSED_TINY_TOWN_TILES, STONE_AGE_SPRITE_DATA } from './civilization/sp
 import {
   CLOCK_TILE_INDEX,
   ClockTileIcon,
+  EraToolTileIcon,
   PixelSprite,
   TileImage,
   VillagerSprite,
@@ -127,6 +128,7 @@ export const FocusSceneArea: React.FC<FocusSceneAreaProps> = ({
   const { locale, t } = useTranslation();
   const palette = getFocusSceneConfig(era);
   const resolvedEra = palette.era;
+  const toolEra = civilizationState?.era ?? era ?? 'STONE_AGE';
 
   const isWorking = sceneState === 'working';
   const isPaused = sceneState === 'paused';
@@ -364,9 +366,9 @@ export const FocusSceneArea: React.FC<FocusSceneAreaProps> = ({
                         : undefined
                     }
                   >
-                    <TileImage
-                      pack={sub.toolSpec.pack}
-                      tileIndex={sub.toolSpec.tileIndex}
+                    <EraToolTileIcon
+                      toolKind={sub.toolKind}
+                      era={toolEra}
                       size={layout.toolSizePx}
                       className="block"
                     />
@@ -806,8 +808,8 @@ export const FocusSceneArea: React.FC<FocusSceneAreaProps> = ({
                           testId={`scene-villager-sprite-${villager.id}`}
                         />
 
-                        {/* Crafter hammer (#117) / Woodworker axe (#119) ONLY when working & standing */}
-                        {pose.showTool && pose.toolTileIndex !== undefined && (
+                        {/* Era-themed Crafter hammer / Woodworker axe ONLY when working & standing */}
+                        {pose.showTool && (pose.toolKind !== undefined || pose.toolTileIndex !== undefined) && (
                           <div
                             data-testid={`scene-tool-${villager.id}`}
                             className={`absolute bottom-[2px] ${
@@ -818,9 +820,11 @@ export const FocusSceneArea: React.FC<FocusSceneAreaProps> = ({
                               height: 16,
                             }}
                           >
-                            <TileImage
-                              pack="tiny-dungeon"
-                              tileIndex={pose.toolTileIndex}
+                            <EraToolTileIcon
+                              toolKind={
+                                pose.toolKind ?? (pose.toolTileIndex === 117 ? 'hammer' : 'axe')
+                              }
+                              era={toolEra}
                               size={16}
                               className="block"
                             />

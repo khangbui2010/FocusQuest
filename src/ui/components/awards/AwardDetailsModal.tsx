@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { CheckCircle2, Lock, X } from 'lucide-react';
+import { CivilizationEra } from '../../../core/civilization/buildingTypes.ts';
 import { AwardViewModel } from '../../../types/awards.ts';
 import { useTranslation } from '../../../i18n/I18nContext.tsx';
 import { TranslationKey } from '../../../i18n/types.ts';
@@ -14,10 +15,15 @@ import {
 
 export interface AwardDetailsModalProps {
   award: AwardViewModel | null;
+  era?: CivilizationEra | string;
   onClose: () => void;
 }
 
-export const AwardDetailsModal: React.FC<AwardDetailsModalProps> = ({ award, onClose }) => {
+export const AwardDetailsModal: React.FC<AwardDetailsModalProps> = ({
+  award,
+  era = 'STONE_AGE',
+  onClose,
+}) => {
   const { t, locale } = useTranslation();
 
   useEffect(() => {
@@ -63,6 +69,7 @@ export const AwardDetailsModal: React.FC<AwardDetailsModalProps> = ({ award, onC
               level={effectiveLevel}
               isSingleLevel={singleLevel}
               showLevelTag={!singleLevel}
+              era={era}
               size={28}
             />
             <div className="min-w-0">

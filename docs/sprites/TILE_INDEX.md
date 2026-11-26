@@ -39,7 +39,7 @@ Used in Phase 4b (`src/ui/components/FocusSceneArea.tsx`): earth-toned character
 
 ## Under-Construction 4-Stage Sprites (`src/ui/components/civilization/constructionSpriteData.ts`)
 - Generated offline from the finished Stone Age sprites in `spriteData.ts` using strictly the Tiny Town palette:
-  - Applies to: `stone_age_totem`, `stone_age_study_cave`, `stone_age_elder_hut`, `stone_age_foraging_post`, `stone_age_food_cache` (`stone_age_campfire` builds instantly in `0s` with no construction stage).
+  - Applies to: `stone_age_totem` (Standing Stone), `stone_age_study_cave`, `stone_age_elder_hut`, `stone_age_foraging_post`, `stone_age_food_cache` (`stone_age_campfire` builds instantly in `0s` with no construction stage).
   - 4 stages (`CONSTRUCTION_STAGE_COUNT = 4`, resolved by `getConstructionStageIndex(progress)` / `getConstructionSprite(definitionId, progress)`):
     - Stage `0` (`0–24%`): Blueprint dashed cyan outline + wooden posts/corner anchors
     - Stage `1` (`25–49%`): Lower `35%` revealed + scaffolding bar
@@ -51,6 +51,19 @@ Used in Phase 4b (`src/ui/components/FocusSceneArea.tsx`): earth-toned character
   - `clock_tiles_16.png`: `#1` Hourglass (`focus_hours`), `#2` Stopwatch (`long_haul`)
   - `kenney-tiny-town/tilemap_packed.png`: `#17` sprout (`player_level`), `#83` wooden sign (`quest_keeper`), `#93` coin (`perfect_day`), `#95` target (`focus_sessions`), `#106` wood log (`focus_streak`), `#115` pickaxe (`master_builder`), `#117` banner/flag (`era_ready`), `#127` woodcutter axe (`land_clearer`)
   - `kenney-tiny-dungeon/tilemap_packed.png`: `#86` bearded villager (`tribe`), `#99` woman (`tribe_complete`), `#117` hammer (`builder`)
+
+## Era Tool Skins (`public/assets/sprites/era/tool_skins_16.png` — Milestone 5G)
+- Dimensions: `64 × 48` px (`4` columns × `3` rows of `16 × 16` px tiles, rendered via `EraToolTileIcon` & `getEraToolSkinSpec`):
+  - **Columns (`ToolKind`):** `0` = `axe`, `1` = `pickaxe`, `2` = `sickle`, `3` = `hammer`.
+  - **Rows (`Era`):** `0` = `STONE_AGE`, `1` = `BRONZE_AGE`, `2` = `IRON_AGE` and later eras (`MEDIEVAL`, `EARLY_MODERN`, `MODERN`, `FUTURISTIC`, `INTERPLANETARY`).
+  - Wired into `FocusSceneArea` (camp & work sub-scenes) and `Awards` (`builder` -> `hammer`, `master_builder` -> `pickaxe`, `land_clearer` -> `axe`).
+
+## Bronze Age Sprites & Villager Sheets (Milestone 5G — Preview Only Until 5C-2)
+- **Bronze Age Buildings (`src/ui/components/civilization/bronzeSpriteData.ts`):** `10` quantized Tiny Town palette matrices (`BRONZE_AGE_SPRITE_DATA`, accessed via isolated `getBronzeBuildingSprite` without altering `STONE_AGE_BUILDING_DEFINITIONS`):
+  - `bronze_forge` (`48×32`, `3×2`), `bronze_market_stall` (`32×32`, `2×2`), `bronze_grain_silo` (`32×48`, `2×3`), `bronze_irrigated_field` (`48×48`, `3×3`), `bronze_apiary` (`32×32`, `2×2`), `bronze_scribe_hall` (`32×48`, `2×3`), `bronze_craft_workshop` (`48×32`, `3×2`), `bronze_watchtower` (`32×48`, `2×3`), `bronze_longhouse` (`64×32`, `4×2`), `bronze_town_hall` (`64×48`, `4×3`).
+- **Bronze Age 4-Stage Construction (`src/ui/components/civilization/bronzeConstructionSpriteData.ts`):** `4` progressive stages per Bronze building (`BRONZE_CONSTRUCTION_SPRITE_STAGES`, `getBronzeConstructionSprite`).
+- **Bronze Age Villagers (`public/assets/sprites/villagers/{smith,merchant,mason}.png`):** `64 × 64` px sheets (`4 × 4` grid of `16 × 16` px cells matching `VILLAGER_ANIMATIONS`), exposed via `BRONZE_VILLAGER_ROLES` / `getBronzeVillagerSheetUrl` in `spriteRegistry.ts` and previewed in `#sprites`.
+- **Reference Previews & Generator (`docs/assets/era/`):** `tool_skins_preview.png`, `bronze_buildings_preview.png`, `bronze_construction_stages_preview.png`, `villagers_bronze_preview.png`, `gen_bronze_construction.py` (kept strictly outside `public/` & `dist/`).
 
 ## Palette used by Tiny Town (hex)
 Outline/dark: #3f2631, #3d212d, #262b44

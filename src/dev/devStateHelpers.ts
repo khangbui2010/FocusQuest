@@ -1266,7 +1266,7 @@ export function buildDevPresetState(
     const buildings = civ.buildings.map((b) => ({ ...b }));
     const jobs: ConstructionJob[] = [];
 
-    // 1) ACTIVE place: Ancient Totem
+    // 1) ACTIVE place: Standing Stone
     const totemDef = getBuildingDefinition('stone_age_totem')!;
     const totemSlot = findFirstFreeFootprintSlot(gridMap, totemDef.footprint);
     if (totemSlot) {

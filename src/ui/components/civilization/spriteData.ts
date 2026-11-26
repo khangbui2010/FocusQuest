@@ -179,7 +179,7 @@ const CAMPFIRE_ROWS: readonly string[] = [
   '....kkkkkkkk....', // 15
 ];
 
-// 1x1 (16x16) — Ancient Totem: carved timber pillar with face, red/gold accents, stone collar
+// 1x1 (16x16) — Standing Stone: carved stone/timber pillar with red/gold accents, stone collar
 const TOTEM_ROWS: readonly string[] = [
   '.....kk..kk.....', // 00
   '....kRykkyRk....', // 01

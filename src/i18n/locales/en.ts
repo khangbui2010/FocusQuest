@@ -587,8 +587,8 @@ export const EN_MESSAGES = {
 
   'buildings.stone_age_campfire.name': 'Campfire',
   'buildings.stone_age_campfire.description': 'A modest communal fire providing warmth, light, and morale to early settlers.',
-  'buildings.stone_age_totem.name': 'Ancient Totem',
-  'buildings.stone_age_totem.description': 'A hand-carved stone monument commemorating early discipline and perseverance.',
+  'buildings.stone_age_totem.name': 'Standing Stone',
+  'buildings.stone_age_totem.description': 'A carved standing stone marking the settlement.',
   'buildings.stone_age_study_cave.name': 'Rock Shelter',
   'buildings.stone_age_study_cave.description': 'A quiet shelter shielded from wind and distractions, fostering uninterrupted study.',
   'buildings.stone_age_elder_hut.name': "Elder's Hut",

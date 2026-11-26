@@ -20,6 +20,8 @@ import { Villager } from '../../core/civilization/villager.ts';
 import { SessionSnapshot } from '../../types/session.ts';
 import {
   ConstructionToolSpec,
+  ToolKind,
+  getConstructionToolKind,
   getConstructionToolSpec,
 } from '../components/civilization/constructionTools.ts';
 import {
@@ -42,6 +44,7 @@ export interface WorkSubSceneModel {
   readonly definitionId?: string;
   readonly subjectFootprint: GridFootprint;
   readonly expandTreeTile: number;
+  readonly toolKind: ToolKind;
   readonly toolSpec: ConstructionToolSpec;
   readonly seed: number;
   readonly sunX: number;
@@ -193,6 +196,7 @@ export function buildWorkSubSceneModels(
         definitionId: buildingDefId,
         subjectFootprint,
         expandTreeTile,
+        toolKind: getConstructionToolKind(job.kind, buildingDefId),
         toolSpec: getConstructionToolSpec(job.kind, buildingDefId),
         seed,
         sunX: 118 + (seed % 34),

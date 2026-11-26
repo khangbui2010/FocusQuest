@@ -1,5 +1,12 @@
 import React from 'react';
+import type { CivilizationEra } from '../../../core/civilization/buildingTypes.ts';
 import { TINY_DUNGEON_SHEET_PATH, TINY_TOWN_SHEET_PATH } from './spriteData.ts';
+import {
+  TOOL_SKINS_COLUMNS,
+  TOOL_SKINS_ROWS,
+  ToolKind,
+  getEraToolSkinSpec,
+} from './constructionTools.ts';
 
 export type SpriteSheetPack = 'tiny-town' | 'tiny-dungeon';
 
@@ -171,6 +178,81 @@ export const ClockTileIcon: React.FC<ClockTileIconProps> = ({
           top: 0,
           width: CLOCK_TILES_COUNT * safeSize,
           height: safeSize,
+          maxWidth: 'none',
+          maxHeight: 'none',
+          imageRendering: 'pixelated',
+          pointerEvents: 'none',
+        }}
+      />
+    </span>
+  );
+};
+
+export interface EraToolTileIconProps {
+  toolKind: ToolKind;
+  era?: CivilizationEra | string;
+  size?: number;
+  className?: string;
+  alt?: string;
+  style?: React.CSSProperties;
+  testId?: string;
+}
+
+/**
+ * Displays one 16x16 era-themed tool sprite from tool_skins_16.png (64x48, 4 cols x 3 rows).
+ * Cols: 0=axe, 1=pickaxe, 2=sickle, 3=hammer. Rows: 0=STONE_AGE, 1=BRONZE_AGE, 2=IRON_AGE+.
+ */
+export const EraToolTileIcon: React.FC<EraToolTileIconProps> = ({
+  toolKind,
+  era = 'STONE_AGE',
+  size = PACKED_TILE_PX,
+  className = '',
+  alt = '',
+  style,
+  testId,
+}) => {
+  const safeSize =
+    typeof size === 'number' && Number.isFinite(size) && size > 0 ? size : PACKED_TILE_PX;
+  const spec = getEraToolSkinSpec(toolKind, era);
+
+  const hasPositionClass = /\b(absolute|fixed|sticky|relative)\b/.test(className);
+  const hasDisplayClass = /\b(block|inline-block|inline|flex|inline-flex|grid|hidden)\b/.test(
+    className
+  );
+  const spanClassName = [
+    hasPositionClass ? '' : 'relative',
+    hasDisplayClass ? '' : 'inline-block',
+    'overflow-hidden select-none shrink-0',
+    className,
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  return (
+    <span
+      data-testid={testId}
+      data-tool-kind={spec.toolKind}
+      data-tool-era={spec.era}
+      data-tool-skin-row={spec.row}
+      data-tool-skin-col={spec.col}
+      className={spanClassName}
+      style={{
+        width: safeSize,
+        height: safeSize,
+        ...style,
+      }}
+    >
+      <img
+        src={spec.sheetPath}
+        alt={alt}
+        draggable={false}
+        aria-hidden={alt ? undefined : true}
+        style={{
+          position: 'absolute',
+          left: -spec.col * safeSize,
+          top: -spec.row * safeSize,
+          width: TOOL_SKINS_COLUMNS * safeSize,
+          height: TOOL_SKINS_ROWS * safeSize,
           maxWidth: 'none',
           maxHeight: 'none',
           imageRendering: 'pixelated',

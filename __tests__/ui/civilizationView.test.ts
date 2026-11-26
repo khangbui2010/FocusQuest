@@ -248,7 +248,7 @@ test('Civilization UI: BuildingCatalogPanel renders definitions, costs, and unlo
 
   assert.ok(html.includes('Building Catalog'), 'must render title');
   assert.ok(html.includes('Campfire'), 'must render campfire');
-  assert.ok(html.includes('Ancient Totem'), 'must render ancient totem');
+  assert.ok(html.includes('Standing Stone'), 'must render standing stone');
   assert.ok(html.includes('Rock Shelter'), 'must render rock shelter');
   assert.ok(html.includes('Foraging Post'), 'must render foraging post');
   assert.ok(html.includes('Primitive Granary'), 'must render primitive granary');

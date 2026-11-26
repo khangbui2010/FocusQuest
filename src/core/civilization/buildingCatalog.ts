@@ -39,8 +39,8 @@ export const STONE_AGE_BUILDING_DEFINITIONS: readonly BuildingDefinition[] = Obj
   },
   {
     id: 'stone_age_totem',
-    name: 'Ancient Totem',
-    description: 'A hand-carved stone monument commemorating early discipline and perseverance.',
+    name: 'Standing Stone',
+    description: 'A carved standing stone marking the settlement.',
     era: 'STONE_AGE',
     category: 'DECORATIVE',
     footprint: { width: 1, height: 1 },

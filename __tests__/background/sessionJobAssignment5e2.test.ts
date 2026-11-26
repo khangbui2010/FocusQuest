@@ -326,7 +326,7 @@ test('5E-2 Simulator Parity: extensionClient.ts validates and settles manual ass
     assert.equal(founderRes.success, true);
   }
 
-  // Queue two non-conflicting jobs in simulator: Ancient Totem (1 crew, 3600s) and Foraging Post (1 crew, 3600s)
+  // Queue two non-conflicting jobs in simulator: Standing Stone (1 crew, 3600s) and Rock Shelter (1 crew, 3600s)
   const p1 = await sendExtensionMessage<PlaceBuildingResponseData>({
     action: 'PLACE_BUILDING',
     payload: { buildingDefinitionId: 'stone_age_totem', position: { x: 0, y: 6 } },

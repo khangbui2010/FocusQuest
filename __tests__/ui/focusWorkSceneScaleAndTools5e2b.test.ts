@@ -305,20 +305,29 @@ test('5E-2b Part A Hand-Held Tools: tool renders inside villager element on hand
   const hammerToolIdx = multiHtml.indexOf('data-testid="focus-work-tool-job_hammer"');
   const hammerSubIdx = multiHtml.indexOf('data-testid="focus-work-subject-job_hammer"');
   assert.ok(hammerToolIdx > 0 && hammerToolIdx < hammerSubIdx);
-  assert.ok(multiHtml.slice(hammerToolIdx, hammerSubIdx).includes('data-tile-pack="tiny-dungeon"'));
-  assert.ok(multiHtml.slice(hammerToolIdx, hammerSubIdx).includes('data-tile-index="117"'));
+  const hammerSlice = multiHtml.slice(hammerToolIdx, hammerSubIdx);
+  assert.ok(hammerSlice.includes('/assets/sprites/era/tool_skins_16.png'));
+  assert.ok(hammerSlice.includes('data-tool-kind="hammer"'));
+  assert.ok(hammerSlice.includes('data-tool-skin-row="0"'));
+  assert.ok(hammerSlice.includes('data-tool-skin-col="3"'));
 
   const pickaxeToolIdx = multiHtml.indexOf('data-testid="focus-work-tool-job_pickaxe"');
   const pickaxeSubIdx = multiHtml.indexOf('data-testid="focus-work-subject-job_pickaxe"');
   assert.ok(pickaxeToolIdx > 0 && pickaxeToolIdx < pickaxeSubIdx);
-  assert.ok(multiHtml.slice(pickaxeToolIdx, pickaxeSubIdx).includes('data-tile-pack="tiny-town"'));
-  assert.ok(multiHtml.slice(pickaxeToolIdx, pickaxeSubIdx).includes('data-tile-index="115"'));
+  const pickaxeSlice = multiHtml.slice(pickaxeToolIdx, pickaxeSubIdx);
+  assert.ok(pickaxeSlice.includes('/assets/sprites/era/tool_skins_16.png'));
+  assert.ok(pickaxeSlice.includes('data-tool-kind="pickaxe"'));
+  assert.ok(pickaxeSlice.includes('data-tool-skin-row="0"'));
+  assert.ok(pickaxeSlice.includes('data-tool-skin-col="1"'));
 
   const axeToolIdx = multiHtml.indexOf('data-testid="focus-work-tool-job_axe"');
   const axeSubIdx = multiHtml.indexOf('data-testid="focus-work-subject-job_axe"');
   assert.ok(axeToolIdx > 0 && axeToolIdx < axeSubIdx);
-  assert.ok(multiHtml.slice(axeToolIdx, axeSubIdx).includes('data-tile-pack="tiny-town"'));
-  assert.ok(multiHtml.slice(axeToolIdx, axeSubIdx).includes('data-tile-index="127"'));
+  const axeSlice = multiHtml.slice(axeToolIdx, axeSubIdx);
+  assert.ok(axeSlice.includes('/assets/sprites/era/tool_skins_16.png'));
+  assert.ok(axeSlice.includes('data-tool-kind="axe"'));
+  assert.ok(axeSlice.includes('data-tool-skin-row="0"'));
+  assert.ok(axeSlice.includes('data-tool-skin-col="0"'));
 
   // Verify hand grip transform-origin & reduced-motion overrides in index.css
   const cssSrc = fs.readFileSync(

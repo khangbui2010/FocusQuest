@@ -259,7 +259,8 @@ test('FocusSceneArea (5b-2 -> V4): renders animated Stone Age SVG + dynamic spri
   assert.ok(html.includes('data-testid="chime-toggle-btn"'));
   assert.ok(html.includes('<svg'));
   assert.ok(html.includes('/assets/sprites/villagers/crafter.png'), 'V4 renders recruited VillagerSprite sheet');
-  assert.ok(html.includes('/assets/sprites/kenney-tiny-dungeon/tilemap_packed.png'), 'V4 uses CC0 Tiny Dungeon tool sprite when working');
+  assert.ok(html.includes('/assets/sprites/era/tool_skins_16.png'), '5G uses Era tool_skins_16.png sprite when working');
+  assert.ok(html.includes('data-tool-kind="hammer"'), 'Crafter uses hammer tool skin when working');
   assert.ok(html.includes('fq-villager-anim-'), 'V4 applies deterministic CSS sprite animation');
 });
 

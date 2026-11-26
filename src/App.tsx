@@ -266,6 +266,7 @@ export const PopupShell: React.FC<PopupShellProps> = ({
             unlocked
             level={awardToast.level}
             isSingleLevel={awardToast.isSingleLevel}
+            era={civEra}
             size={24}
           />
           <div className="min-w-0 flex-1">

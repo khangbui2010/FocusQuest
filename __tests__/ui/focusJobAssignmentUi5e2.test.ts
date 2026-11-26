@@ -340,7 +340,7 @@ test('5E-2 UI FocusSceneArea: 0 jobs keeps single campsite SVG; 1..4 jobs render
   assert.strictEqual(allRenderedVillagerIds.length, 6);
   assert.strictEqual(new Set(allRenderedVillagerIds).size, 6);
 
-  // Working state: animated tools (Pickaxe 115 for cave dig, Axe 127 for expand, Hammer 117 for upgrade & granary)
+  // Working state: animated tools (Pickaxe for cave dig, Axe for expand, Hammer for upgrade & granary via 5G tool_skins_16)
   const workingFourHtml = renderWithLocale(
     'en',
     React.createElement(FocusSceneArea, {
@@ -371,9 +371,10 @@ test('5E-2 UI FocusSceneArea: 0 jobs keeps single campsite SVG; 1..4 jobs render
   assert.ok(workingFourHtml.includes('grid-cols-2 grid-rows-2'));
   assert.ok(workingFourHtml.includes('data-testid="focus-scene-status-chip"'));
   assert.ok(workingFourHtml.includes('data-testid="chime-toggle-btn"'));
-  assert.ok(workingFourHtml.includes('data-tile-index="115"'), 'Rock Shelter uses Pickaxe #115');
-  assert.ok(workingFourHtml.includes('data-tile-index="127"'), 'Land expansion uses Axe #127');
-  assert.ok(workingFourHtml.includes('data-tile-index="117"'), 'Building place/upgrade uses Hammer #117');
+  assert.ok(workingFourHtml.includes('data-tool-kind="pickaxe"'), 'Rock Shelter uses Pickaxe tool skin');
+  assert.ok(workingFourHtml.includes('data-tool-kind="axe"'), 'Land expansion uses Axe tool skin');
+  assert.ok(workingFourHtml.includes('data-tool-kind="hammer"'), 'Building place/upgrade uses Hammer tool skin');
+  assert.ok(workingFourHtml.includes('/assets/sprites/era/tool_skins_16.png'));
   assert.ok(workingFourHtml.includes('data-tool-animated="true"'));
   assert.ok(workingFourHtml.includes('fq-tool-strike'));
   assert.ok(workingFourHtml.includes('fq-construction-scaffold'));

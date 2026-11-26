@@ -243,6 +243,7 @@ export const AwardsView: React.FC<AwardsViewProps> = ({
             level={effectiveLevel}
             isSingleLevel={singleLevel}
             showLevelTag={!singleLevel}
+            era={awardsData?.era}
             size={28}
           />
 
@@ -439,6 +440,7 @@ export const AwardsView: React.FC<AwardsViewProps> = ({
 
       <AwardDetailsModal
         award={selectedAward}
+        era={awardsData?.era}
         onClose={() => setSelectedAwardId(null)}
       />
     </section>

@@ -16,8 +16,8 @@ Focus Quest transforms daily study and focused work into a civilization-building
 - **Civilization Engine (Stone Age & beyond):**
   - **Zero Passive Income:** Coins and XP are exclusively earned through real-world focus sessions.
   - **Expandable Grid Map:** 8×8 starting grid (4 chunks of 4×4 = 64 cells) with adjacent 4×4 chunk expansion using **tiered arithmetic progression** (`cost(1) = 30`, increments `+10` rising `+5` per 5 expansions: `30, 40, 50, 60, 70, 80, 95, 110, ...`, `k = 20` is `355`, gated at `Player Level >= k + 2`) requiring `2` villagers & `60` Focus minutes (`expand` clearing job), pure-UI deterministic forest border, and post-job axe chop reveal.
-  - **Building Categories, Construction Crew & FIFO Queue (`Stage 5C-1` + `Villager V5.2` + `Milestone 5E-1`):**
-    - `DECORATIVE`: Campfire (`4`, builds instantly `0 crew / 0m`, max `3`) and Ancient Totem (`8`, `1 crew / 60m`, max `3`).
+  - **Building Categories, Construction Crew & FIFO Queue (`Stage 5C-1` + `Villager V5.2` + `Milestone 5E-1` + `5G`):**
+    - `DECORATIVE`: Campfire (`4`, builds instantly `0 crew / 0m`, max `3`) and Standing Stone (`stone_age_totem`, `8`, `1 crew / 60m`, max `3`).
     - `FOCUS_SUPPORT`: Unlocks statistics and focus insights (`Elder's Hut` `20`, `2 crew / 120m`, max `2`), and anchors villager housing (**`Rock Shelter`**, `stone_age_study_cave`, `12`, `1 crew / 60m`: 3×3 footprint, max 1 per map, upgradeable Lv. 1–5 for 2–10 recruited villager capacity).
     - `ECONOMY_EFFECT`: Grants additive CoinBonus percentages (`Foraging Post` `15`, `+2%/lv`, `1 crew / 60m`; `Primitive Granary` `30`, `+3%/lv`, `2 crew / 120m`; upgradeable up to Lv. 5 via `UPGRADE_BUILDING`, Build Limit: 4 per type; Era-checklist build+upgrade floor `3,907` Coins / full map-cap `3,951` Coins).
     - **Focus-Only Construction Progress (`jobs.ts` & Schema v6 `v6_constructionJobsSchema.ts`):** All non-instant builds, upgrades (`L→L+1`: `1` crew `L<=2` / `2` crew `L>=3`, `5×L` min), and land clearings enter a queue (max `4` concurrent `ACTIVE` jobs bounded by total villagers) with pre-session priority assignment (`Assign Jobs` / `assignJobsWithSchedule` / `autoContinueJobs` on `TimerView` & `SessionSnapshot`) or automatic FIFO fallback. Persisted progress advances strictly in integer seconds upon eligible `COMPLETED` Focus sessions (`advanceJobs`), with cancellation refunds (`100%` unstarted / `50%` started) and pure-UI `1s` countdown overlays (`ClockTileIcon`, `ConstructionFence` 4-stake perimeter ribbons, upgrade scaffolding, and 4-stage blueprint sprites on Map; `1–4` equal work sub-scenes with distinct villagers and focus-active tools in `FocusSceneArea`). Under-construction buildings grant 0 bonuses/capacity until completed.
@@ -71,7 +71,7 @@ npm install
 # Start local interactive dev preview (Port 3000)
 npm run dev
 
-# Run comprehensive test suite (768/768 PASS — 0 failures)
+# Run comprehensive test suite (775/775 PASS — 0 failures)
 npm test
 
 # Typecheck and lint codebase (0 TypeScript errors)
@@ -85,13 +85,14 @@ npm run build
 - When running `npm run dev` (or an explicit `vite build --mode development`), a collapsed **`GOD MODE (dev)`** chip appears in the bottom-right corner outside the `400×600` popup shell for testing Coins, Player Level, Focus minutes, time speed (`1× / 10× / 60× / 600×`), Focus skip, instant building/land/villager placement, Era readiness (`STONE_AGE` preserved), Quest rollover/completion, Awards unlock/reset (`DEV_UNLOCK_ALL_AWARDS` / `DEV_RESET_AWARDS`), and JSON state export/import/reset.
 - Production builds (`npm run build` / `npm run clean && npm run build`) force `NODE_ENV=production` inside `vite.config.ts` and strip 100% of `/src/dev/` modules, UI, `DEV_*` handlers, and `jsxDEV` runtime code from `dist/`.
 
-> **Verification scope:** Automated tests execute on Node.js (`tsx --test`) using React SSR (`renderToString`), mock 2D canvas context, and mock Chrome adapters for background services. Previously completed milestones (`UX-1`–`UX-6`, `UX-5` terrain canvas, `UX-5.1` persistent camera, `LOFI-1`/`1b`/`2`, and `Milestone 5B.5` stages `1a`–`7` including `2b`, `5c`, `6+7`) have been verified and accepted in unpacked Chrome (`>= 116`). **Stage 5C-1**, **Milestone Villager V2–V5.2**, **CLEANUP-1**, **Milestone 5D-1 (Quest Pool)**, **Milestone 5E-1/1b/1c/2/2b**, and **Milestone 5D-2 + 5E-3 (Stone Age Awards & Villager Cave Entry Animation)** (`768/768 PASS`, `npm run lint` `0` errors, Vite build **PASS**) await visual/runtime verification in unpacked Chrome.
+> **Verification scope:** Automated tests execute on Node.js (`tsx --test`) using React SSR (`renderToString`), mock 2D canvas context, and mock Chrome adapters for background services. Previously completed milestones (`UX-1`–`UX-6`, `UX-5` terrain canvas, `UX-5.1` persistent camera, `LOFI-1`/`1b`/`2`, and `Milestone 5B.5` stages `1a`–`7` including `2b`, `5c`, `6+7`) have been verified and accepted in unpacked Chrome (`>= 116`). **Stage 5C-1**, **Milestone Villager V2–V5.2**, **CLEANUP-1**, **Milestone 5D-1 (Quest Pool)**, **Milestone 5E-1/1b/1c/2/2b**, **Milestone 5D-2 + 5E-3 (Stone Age Awards & Villager Cave Entry Animation)**, and **Milestone 5G (Era Asset Integration & Standing Stone Rename)** (`775/775 PASS`, `npm run lint` `0` errors, Vite build **PASS**) await visual/runtime verification in unpacked Chrome.
 
 ---
 
 ## 🗺️ Roadmap
 
-- **Milestone 5C — Stage 5C-2 Era Progression:** Advance civilization progression from the Stone Age into the **Bronze Age** and subsequent historical eras (currently paused awaiting sprites/assets). *(Implemented milestones: `Quests`, `Stats`, `5D-1`, `5E-1`, `5E-2`, `5E-2b`, and `5D-2 + 5E-3`.)*
+- **Milestone 5G (Asset Integration Only):** Integrated Era-based tool skins (`tool_skins_16.png` 4×3 in `FocusSceneArea`, `Awards`, and `#sprites`), 10 Bronze Age building sprites + 4-stage construction matrices (`bronzeSpriteData.ts`, `bronzeConstructionSpriteData.ts`), and 3 Bronze villager sprite sheets (`smith.png`, `merchant.png`, `mason.png`) under isolated `spriteRegistry.ts` lookups; renamed `stone_age_totem` to **Standing Stone** (`Đá dựng`). Bronze Age gameplay remains locked until `Stage 5C-2` (`era` stays `STONE_AGE`).
+- **Milestone 5C — Stage 5C-2 Era Progression:** Advance civilization progression from the Stone Age into the **Bronze Age** and subsequent historical eras *(ready for gameplay activation now that 5G Bronze Age assets are integrated)*. *(Implemented milestones: `Quests`, `Stats`, `5D-1`, `5E-1`, `5E-2`, `5E-2b`, `5D-2 + 5E-3`, and `5G`.)*
 
 ---
 

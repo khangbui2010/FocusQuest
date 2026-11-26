@@ -589,8 +589,8 @@ export const VI_MESSAGES: Record<TranslationKey, string> = {
 
   'buildings.stone_age_campfire.name': 'Lửa trại',
   'buildings.stone_age_campfire.description': 'Ngọn lửa cộng đồng giản dị mang lại hơi ấm, ánh sáng và tinh thần cho những cư dân đầu tiên.',
-  'buildings.stone_age_totem.name': 'Vật tổ Cổ đại',
-  'buildings.stone_age_totem.description': 'Tượng đá chạm khắc thủ công ghi dấu kỷ luật và sự kiên trì thuở sơ khai.',
+  'buildings.stone_age_totem.name': 'Đá dựng',
+  'buildings.stone_age_totem.description': 'Cột đá dựng khắc dấu, đánh dấu khu định cư.',
   'buildings.stone_age_study_cave.name': 'Hang trú ẩn',
   'buildings.stone_age_study_cave.description': 'Nơi trú ẩn yên tĩnh tránh gió và xao nhãng, giúp học tập và tập trung liên tục.',
   'buildings.stone_age_elder_hut.name': 'Lều Trưởng lão',

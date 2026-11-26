@@ -32,7 +32,11 @@
   - Row 0: `idle` (2 frames, 600ms/frame), Row 1: `walk_down` (4 frames, 150ms/frame), Row 2: `walk_right` (4 frames, 150ms/frame), Row 3: `walk_left` (4 frames, 150ms/frame).
 - **Milestone 5E-1 — Construction Stages & Clock Tiles:**
   - `public/assets/sprites/clock_tiles_16.png`: Project-original 48×16 pixel sheet (three 16×16 tiles: `0` = clock for active jobs, `1` = hourglass for waiting jobs, `2` = stopwatch icon).
-  - `src/ui/components/civilization/constructionSpriteData.ts`: Project-original 4-stage progressive blueprint/scaffolding pixel matrices derived from the Tiny Town Stone Age building palette for `stone_age_totem`, `stone_age_study_cave`, `stone_age_elder_hut`, `stone_age_foraging_post`, and `stone_age_food_cache`.
+  - `src/ui/components/civilization/constructionSpriteData.ts`: Project-original 4-stage progressive blueprint/scaffolding pixel matrices derived from the Tiny Town Stone Age building palette for `stone_age_totem` (Standing Stone), `stone_age_study_cave`, `stone_age_elder_hut`, `stone_age_foraging_post`, and `stone_age_food_cache`.
+- **Milestone 5G — Era Tool Skins, Bronze Age Building/Construction Matrices & Bronze Villagers (Kenney Tiny Town / Tiny Dungeon CC0):**
+  - `public/assets/sprites/era/tool_skins_16.png`: 64×48 pixel sheet (4 cols × 3 rows of 16×16 cells: `axe`, `pickaxe`, `sickle`, `hammer` across Stone Age, Bronze Age, and Iron Age+ tiers) adapted from CC0 Kenney tiles/palette.
+  - `src/ui/components/civilization/bronzeSpriteData.ts` & `src/ui/components/civilization/bronzeConstructionSpriteData.ts`: 10 Bronze Age building pixel matrices and 4-stage construction matrices quantized to the Tiny Town CC0 palette (`bronze_forge`, `bronze_market_stall`, `bronze_grain_silo`, `bronze_irrigated_field`, `bronze_apiary`, `bronze_scribe_hall`, `bronze_craft_workshop`, `bronze_watchtower`, `bronze_longhouse`, `bronze_town_hall`), generated with `docs/assets/era/gen_bronze_construction.py` (previews in `docs/assets/era/`).
+  - `public/assets/sprites/villagers/{smith,merchant,mason}.png`: 64×64 animated villager sprite sheets (4 cols × 4 rows of 16×16 cells) derived/recolored from CC0 Kenney Tiny Dungeon (`smith`, `merchant`, `mason`).
 
 ## Rule for adding new assets
 

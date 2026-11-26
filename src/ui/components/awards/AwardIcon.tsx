@@ -1,6 +1,8 @@
 import React from 'react';
+import { CivilizationEra } from '../../../core/civilization/buildingTypes.ts';
 import { AwardIconSpec } from '../../../types/awards.ts';
-import { ClockTileIcon, TileImage } from '../civilization/TileImage.tsx';
+import { getAwardToolKind } from '../civilization/constructionTools.ts';
+import { ClockTileIcon, EraToolTileIcon, TileImage } from '../civilization/TileImage.tsx';
 import { getAwardLevelBand, getAwardLevelFrameClass } from './awardFormatting.ts';
 
 export interface AwardIconProps {
@@ -9,6 +11,7 @@ export interface AwardIconProps {
   level?: number;
   isSingleLevel?: boolean;
   showLevelTag?: boolean;
+  era?: CivilizationEra | string;
   size?: number;
   alt?: string;
   className?: string;
@@ -20,6 +23,7 @@ export const AwardIcon: React.FC<AwardIconProps> = ({
   level,
   isSingleLevel = false,
   showLevelTag = false,
+  era = 'STONE_AGE',
   size = 28,
   alt = '',
   className = '',
@@ -34,6 +38,7 @@ export const AwardIcon: React.FC<AwardIconProps> = ({
   const band = getAwardLevelBand(effectiveLevel, isSingleLevel);
   const frameClass = getAwardLevelFrameClass(effectiveLevel, isSingleLevel);
   const spriteFilterClass = isActuallyUnlocked ? '' : 'grayscale opacity-55';
+  const toolKind = getAwardToolKind(icon);
 
   return (
     <div
@@ -45,6 +50,14 @@ export const AwardIcon: React.FC<AwardIconProps> = ({
       {icon.kind === 'clock' ? (
         <ClockTileIcon
           tileIndex={icon.clockIndex}
+          size={size}
+          alt={alt}
+          className={spriteFilterClass}
+        />
+      ) : toolKind !== null ? (
+        <EraToolTileIcon
+          toolKind={toolKind}
+          era={era}
           size={size}
           alt={alt}
           className={spriteFilterClass}

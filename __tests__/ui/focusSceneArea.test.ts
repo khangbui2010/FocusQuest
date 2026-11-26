@@ -115,8 +115,12 @@ test('FocusSceneArea (V4): renders ONLY built buildings (1 per definitionId) and
   assert.ok(workingHtml.includes('data-testid="scene-tool-crafter-1"'));
   assert.ok(workingHtml.includes('data-testid="scene-tool-wood-1"'));
   assert.equal(workingHtml.includes('data-testid="scene-tool-elder-1"'), false);
-  assert.ok(workingHtml.includes('data-tile-index="117"'));
-  assert.ok(workingHtml.includes('data-tile-index="119"'));
+  assert.ok(workingHtml.includes('/assets/sprites/era/tool_skins_16.png'));
+  assert.ok(workingHtml.includes('data-tool-kind="hammer"'));
+  assert.ok(workingHtml.includes('data-tool-kind="axe"'));
+  assert.ok(workingHtml.includes('data-tool-skin-row="0"'));
+  assert.ok(workingHtml.includes('data-tool-skin-col="3"'));
+  assert.ok(workingHtml.includes('data-tool-skin-col="0"'));
   assert.ok(workingHtml.includes('fq-scene-tool-swing'));
   assert.ok(workingHtml.includes('fq-scene-flame'));
   assert.ok(workingHtml.includes('fq-scene-spark'));

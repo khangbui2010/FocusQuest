@@ -6,11 +6,18 @@ import {
   TINY_TOWN_SHEET_PATH,
 } from './spriteData.ts';
 import {
+  BRONZE_AGE_SPRITE_DATA,
+} from './bronzeSpriteData.ts';
+import {
   CONSTRUCTION_STAGE_COUNT,
   CONSTRUCTION_SPRITE_STAGES,
   getConstructionSprite,
   getConstructionStageIndex,
 } from './constructionSpriteData.ts';
+import {
+  BRONZE_CONSTRUCTION_STAGE_COUNT,
+  BRONZE_CONSTRUCTION_SPRITE_STAGES,
+} from './bronzeConstructionSpriteData.ts';
 import { PixelSprite } from './PixelSprite.tsx';
 import {
   TileImage,
@@ -20,7 +27,22 @@ import {
   ClockTileIndex,
   CLOCK_TILE_INDEX,
   CLOCK_TILES_SHEET_PATH,
+  EraToolTileIcon,
+  EraToolTileIconProps,
 } from './TileImage.tsx';
+import {
+  ToolKind,
+  TOOL_SKINS_SHEET_PATH,
+  TOOL_SKINS_COLUMNS,
+  TOOL_SKINS_ROWS,
+  TOOL_SKIN_CELL_PX,
+  TOOL_SKIN_COLS,
+  EraToolSkinSpec,
+  getEraToolSkinRow,
+  getEraToolSkinSpec,
+  getConstructionToolKind,
+  getAwardToolKind,
+} from './constructionTools.ts';
 import { CellDecor, TERRAIN_DECOR_SEED, getCellDecor } from './terrainDecor.ts';
 import { VillagerSprite, VillagerSpriteProps } from './VillagerSprite.tsx';
 
@@ -30,10 +52,23 @@ export {
   ClockTileIcon,
   CLOCK_TILE_INDEX,
   CLOCK_TILES_SHEET_PATH,
+  EraToolTileIcon,
+  TOOL_SKINS_SHEET_PATH,
+  TOOL_SKINS_COLUMNS,
+  TOOL_SKINS_ROWS,
+  TOOL_SKIN_CELL_PX,
+  TOOL_SKIN_COLS,
+  getEraToolSkinRow,
+  getEraToolSkinSpec,
+  getConstructionToolKind,
+  getAwardToolKind,
   CONSTRUCTION_STAGE_COUNT,
   CONSTRUCTION_SPRITE_STAGES,
   getConstructionSprite,
   getConstructionStageIndex,
+  BRONZE_AGE_SPRITE_DATA,
+  BRONZE_CONSTRUCTION_STAGE_COUNT,
+  BRONZE_CONSTRUCTION_SPRITE_STAGES,
   getCellDecor,
   TERRAIN_DECOR_SEED,
   VillagerSprite,
@@ -43,6 +78,9 @@ export type {
   SpriteSheetPack,
   ClockTileIconProps,
   ClockTileIndex,
+  EraToolTileIconProps,
+  ToolKind,
+  EraToolSkinSpec,
   CellDecor,
   VillagerSpriteProps,
 };
@@ -78,6 +116,29 @@ export function getVillagerSheetUrl(role: string): string | null {
     return null;
   }
   return `/assets/sprites/villagers/${role}.png`;
+}
+
+export const BRONZE_VILLAGER_ROLES = ['smith', 'merchant', 'mason'] as const;
+export type BronzeVillagerRole = (typeof BRONZE_VILLAGER_ROLES)[number];
+
+export const BRONZE_VILLAGER_SHEETS: Readonly<Record<BronzeVillagerRole, string>> = Object.freeze({
+  smith: '/assets/sprites/villagers/smith.png',
+  merchant: '/assets/sprites/villagers/merchant.png',
+  mason: '/assets/sprites/villagers/mason.png',
+});
+
+export function isBronzeVillagerRole(role: unknown): role is BronzeVillagerRole {
+  return (
+    typeof role === 'string' &&
+    (BRONZE_VILLAGER_ROLES as readonly string[]).includes(role)
+  );
+}
+
+export function getBronzeVillagerSheetUrl(role: string): string | null {
+  if (!isBronzeVillagerRole(role)) {
+    return null;
+  }
+  return BRONZE_VILLAGER_SHEETS[role];
 }
 
 export function getVillagerAnimation(name: VillagerAnimationName): VillagerAnimationConfig {
@@ -134,6 +195,45 @@ export function getBuildingSprite(buildingId: string): PixelSpriteMatrix | null 
     return null;
   }
   return STONE_AGE_SPRITE_DATA[buildingId] ?? null;
+}
+
+export const BRONZE_AGE_BUILDING_IDS: readonly string[] = Object.freeze(
+  Object.keys(BRONZE_AGE_SPRITE_DATA)
+);
+
+/**
+ * Isolated asset lookup for Milestone 5G Bronze Age building sprites (preview-only until 5C-2).
+ */
+export function getBronzeBuildingSprite(buildingId: string): PixelSpriteMatrix | null {
+  if (typeof buildingId !== 'string' || buildingId.length === 0) {
+    return null;
+  }
+  return BRONZE_AGE_SPRITE_DATA[buildingId] ?? null;
+}
+
+/**
+ * Isolated asset lookup for Milestone 5G Bronze Age 4-stage construction sprites (preview-only until 5C-2).
+ */
+export function getBronzeConstructionSprite(
+  buildingId: string,
+  stageIndexOrRemaining: number,
+  totalSeconds?: number
+): PixelSpriteMatrix | null {
+  if (typeof buildingId !== 'string' || buildingId.length === 0) {
+    return null;
+  }
+  const stages = BRONZE_CONSTRUCTION_SPRITE_STAGES[buildingId];
+  if (!stages || stages.length === 0) {
+    return null;
+  }
+  let stageIndex: number;
+  if (typeof totalSeconds === 'number' && Number.isFinite(totalSeconds) && totalSeconds > 0) {
+    stageIndex = getConstructionStageIndex(stageIndexOrRemaining, totalSeconds);
+  } else {
+    const rawIdx = Number.isFinite(stageIndexOrRemaining) ? Math.floor(stageIndexOrRemaining) : 0;
+    stageIndex = Math.max(0, Math.min(stages.length - 1, rawIdx));
+  }
+  return stages[stageIndex] ?? stages[0] ?? null;
 }
 
 /**

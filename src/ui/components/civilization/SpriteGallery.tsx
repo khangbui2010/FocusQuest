@@ -3,16 +3,27 @@ import { ArrowLeft } from 'lucide-react';
 import { STONE_AGE_BUILDING_DEFINITIONS } from '../../../core/civilization/buildingCatalog.ts';
 import { REUSED_TINY_TOWN_TILES } from './spriteData.ts';
 import {
+  BRONZE_AGE_BUILDING_IDS,
+  BRONZE_CONSTRUCTION_SPRITE_STAGES,
+  BRONZE_VILLAGER_ROLES,
   CLOCK_TILE_INDEX,
   CONSTRUCTION_SPRITE_STAGES,
   ClockTileIcon,
+  EraToolTileIcon,
   PixelSprite,
   TileImage,
+  VILLAGER_ANIMATIONS,
+  VILLAGER_CELL_PX,
+  VILLAGER_ROLES,
+  VILLAGER_SHEET_COLUMNS,
+  VillagerAnimationName,
+  VillagerSprite,
+  getBronzeBuildingSprite,
+  getBronzeVillagerSheetUrl,
   getBuildingSprite,
   getTerrainTile,
-  VillagerSprite,
-  VILLAGER_ROLES,
 } from './spriteRegistry.ts';
+import type { ToolKind } from './constructionTools.ts';
 import {
   TERRAIN_DECOR_SEED,
   CANOPY_GROVE_2X2_GREEN,
@@ -844,6 +855,290 @@ export const SpriteGallery: React.FC<SpriteGalleryProps> = ({ onBack }) => {
                 </div>
               );
             })}
+          </div>
+        </section>
+
+        {/* Section 7: Milestone 5G Era Assets Preview (Pre-5C-2 Asset Gallery) */}
+        <section
+          data-testid="gallery-era-assets-5g"
+          className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 space-y-6"
+        >
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-bold">
+                Era-Based Assets Preview (Milestone 5G — Asset Only, Stone Age Gameplay Active)
+              </h2>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                tool_skins_16.png (64×48, 4×3), 10 Bronze Age building sprites, 4-stage Bronze construction matrices, and 3 Bronze villager sprite sheets (smith, merchant, mason).
+              </p>
+            </div>
+            <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
+              Preview Only · Bronze Age Locked Until 5C-2
+            </span>
+          </div>
+
+          {/* 7a. Tool Skins Matrix (4 cols x 3 rows) */}
+          <div
+            data-testid="gallery-tool-skins-section"
+            className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-3 bg-slate-50/50 dark:bg-slate-800/30"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                Era Tool Skins (`tool_skins_16.png` · 4×3 Grid)
+              </h3>
+              <span className="text-[10px] font-mono text-slate-500">
+                Col 0=Axe · 1=Pickaxe · 2=Sickle · 3=Hammer
+              </span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-[11px]">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-slate-700 text-slate-500 font-mono">
+                    <th className="py-1.5 pr-3">Era Row</th>
+                    <th className="py-1.5 px-2">Axe (0)</th>
+                    <th className="py-1.5 px-2">Pickaxe (1)</th>
+                    <th className="py-1.5 px-2">Sickle (2)</th>
+                    <th className="py-1.5 px-2">Hammer (3)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(
+                    [
+                      { era: 'STONE_AGE', label: 'Row 0 · Stone Age' },
+                      { era: 'BRONZE_AGE', label: 'Row 1 · Bronze Age' },
+                      { era: 'IRON_AGE', label: 'Row 2 · Iron Age+' },
+                    ] as const
+                  ).map((rowSpec) => (
+                    <tr
+                      key={rowSpec.era}
+                      className="border-b border-slate-100 dark:border-slate-800/80 last:border-b-0"
+                    >
+                      <td className="py-2 pr-3 font-mono font-semibold text-slate-700 dark:text-slate-200 whitespace-nowrap">
+                        {rowSpec.label}
+                      </td>
+                      {(['axe', 'pickaxe', 'sickle', 'hammer'] as readonly ToolKind[]).map(
+                        (kind) => (
+                          <td key={kind} className="py-2 px-2">
+                            <div className="inline-flex items-center gap-2">
+                              <div className="p-1 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                                <EraToolTileIcon
+                                  toolKind={kind}
+                                  era={rowSpec.era}
+                                  size={32}
+                                  testId={`gallery-tool-skin-${rowSpec.era}-${kind}`}
+                                />
+                              </div>
+                              <div className="p-1 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                                <EraToolTileIcon toolKind={kind} era={rowSpec.era} size={48} />
+                              </div>
+                            </div>
+                          </td>
+                        )
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* 7b. 10 Bronze Age Building Sprites */}
+          <div
+            data-testid="gallery-bronze-buildings-section"
+            className="space-y-3"
+          >
+            <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100">
+              Bronze Age Buildings ({BRONZE_AGE_BUILDING_IDS.length} Sprites · 1× &amp; 2×)
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {BRONZE_AGE_BUILDING_IDS.map((id) => {
+                const sprite = getBronzeBuildingSprite(id);
+                if (!sprite) return null;
+                return (
+                  <div
+                    key={id}
+                    data-testid={`gallery-bronze-building-${id}`}
+                    className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-2.5 bg-slate-50/50 dark:bg-slate-800/30"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold font-mono text-slate-900 dark:text-slate-100">
+                        {id}
+                      </span>
+                      <span className="text-[10px] font-mono text-slate-500">
+                        {`${sprite.width / 16}×${sprite.height / 16} cells (${sprite.width}×${sprite.height}px)`}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-end gap-4">
+                      {[1, 2].map((scale) => {
+                        const w = sprite.width * scale;
+                        const h = sprite.height * scale;
+                        return (
+                          <div key={scale} className="space-y-1">
+                            <div className="text-[10px] font-mono text-slate-500">
+                              {`${scale}× (${w}×${h})`}
+                            </div>
+                            <div
+                              style={{ width: w, height: h, backgroundColor: '#84c669' }}
+                              className="rounded border border-slate-300 dark:border-slate-700 flex items-center justify-center overflow-hidden"
+                            >
+                              <PixelSprite
+                                sprite={sprite}
+                                width={w}
+                                height={h}
+                                ariaLabel={`${id} ${scale}x`}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 7c. Bronze Construction 4 Stages */}
+          <div
+            data-testid="gallery-bronze-construction-section"
+            className="space-y-3"
+          >
+            <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100">
+              Bronze Age Construction Stages (4 Stages × 10 Buildings)
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {BRONZE_AGE_BUILDING_IDS.map((id) => {
+                const stages = BRONZE_CONSTRUCTION_SPRITE_STAGES[id];
+                if (!stages) return null;
+                return (
+                  <div
+                    key={id}
+                    data-testid={`gallery-bronze-construction-${id}`}
+                    className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-2 bg-slate-50/50 dark:bg-slate-800/30"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold font-mono text-slate-900 dark:text-slate-100">
+                        {id}
+                      </span>
+                      <span className="text-[10px] font-mono text-slate-500">
+                        {`${stages[0].width}×${stages[0].height}px · 4 stages`}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-end gap-2.5">
+                      {stages.map((stageMatrix, idx) => (
+                        <div key={idx} className="flex flex-col items-center gap-1">
+                          <span className="text-[9px] font-mono text-slate-500">{`Stage ${idx}`}</span>
+                          <div
+                            style={{ backgroundColor: '#84c669' }}
+                            className="rounded border border-slate-300 dark:border-slate-700 flex items-center justify-center overflow-hidden p-0.5"
+                          >
+                            <PixelSprite
+                              sprite={stageMatrix}
+                              width={stageMatrix.width}
+                              height={stageMatrix.height}
+                              ariaLabel={`${id} stage ${idx}`}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 7d. 3 Bronze Age Villager Sprite Sheets */}
+          <div
+            data-testid="gallery-bronze-villagers-section"
+            className="space-y-3"
+          >
+            <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100">
+              Bronze Age Villager Sheets (Smith, Merchant, Mason · 64×64 PNG · CSS steps())
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {BRONZE_VILLAGER_ROLES.map((role) => {
+                const sheetUrl = getBronzeVillagerSheetUrl(role);
+                return (
+                  <div
+                    key={role}
+                    data-testid={`gallery-bronze-villager-${role}`}
+                    className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-3 bg-slate-50/50 dark:bg-slate-800/30"
+                  >
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold capitalize text-slate-900 dark:text-slate-100">
+                        {role}
+                      </h4>
+                      <span className="text-[10px] font-mono text-slate-500">
+                        {`${role}.png`}
+                      </span>
+                    </div>
+
+                    <div className="space-y-2">
+                      {(['idle', 'walk_down', 'walk_right', 'walk_left'] as readonly VillagerAnimationName[]).map(
+                        (animName) => {
+                          const anim = VILLAGER_ANIMATIONS[animName];
+                          const animClass =
+                            anim.frames === 2 ? 'fq-villager-anim-2' : 'fq-villager-anim-4';
+                          return (
+                            <div
+                              key={animName}
+                              className="flex items-center justify-between p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800"
+                            >
+                              <div>
+                                <span className="text-[11px] font-mono font-medium text-slate-700 dark:text-slate-300">
+                                  {animName}
+                                </span>
+                                <div className="text-[9px] text-slate-400 font-mono">
+                                  {animName === 'idle' ? '2 frames · 1200ms' : '4 frames · 600ms'}
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-3">
+                                {[2, 4].map((scale) => {
+                                  const sizePx = VILLAGER_CELL_PX * scale;
+                                  const sheetSizePx =
+                                    VILLAGER_CELL_PX * VILLAGER_SHEET_COLUMNS * scale;
+                                  return (
+                                    <div key={scale} className="flex flex-col items-center">
+                                      <span className="text-[8px] font-mono text-slate-400">
+                                        {`${scale}× (${sizePx}px)`}
+                                      </span>
+                                      <div className="rounded bg-[#84c669] flex items-center justify-center overflow-hidden border border-slate-300 dark:border-slate-700">
+                                        <div
+                                          data-testid={`bronze-villager-sprite-${role}-${animName}-${scale}x`}
+                                          className={`block select-none ${animClass}`}
+                                          style={{
+                                            width: `${sizePx}px`,
+                                            height: `${sizePx}px`,
+                                            backgroundImage: sheetUrl
+                                              ? `url('${sheetUrl}')`
+                                              : undefined,
+                                            backgroundRepeat: 'no-repeat',
+                                            backgroundSize: `${sheetSizePx}px ${sheetSizePx}px`,
+                                            backgroundPosition: `0px -${anim.row * sizePx}px`,
+                                            imageRendering: 'pixelated',
+                                            pointerEvents: 'none',
+                                            animation: `fq-villager-steps-${anim.frames} ${anim.durationMs}ms steps(${anim.frames}) infinite`,
+                                            ['--villager-end-x' as string]: `-${anim.frames * sizePx}px`,
+                                            ['--villager-duration' as string]: `${anim.durationMs}ms`,
+                                          }}
+                                        />
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        }
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </section>
       </div>
