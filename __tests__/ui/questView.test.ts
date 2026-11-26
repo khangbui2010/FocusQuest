@@ -234,10 +234,10 @@ test('Stage 5c Navbar Unclaimed Badge: hidden at 0, shows 1..9, caps >=10 to 9+ 
   assert.ok(ninePlusVi.includes('12 phần thưởng nhiệm vụ chưa nhận'));
 });
 
-test('Stage 5c App Wiring: Quests tab renders QuestView (no Coming soon), Awards placeholder remains untouched, and EN/VI keys match 100%', () => {
+test('Stage 5c App Wiring: Quests tab renders QuestView (no Coming soon), Awards tab renders AwardsView (no Coming soon), and EN/VI keys match 100%', () => {
   assert.deepStrictEqual(Object.keys(EN_MESSAGES).sort(), Object.keys(VI_MESSAGES).sort());
   assert.equal('quest.placeholder.comingSoon' in EN_MESSAGES, false);
-  assert.equal('awards.placeholder.comingSoon' in EN_MESSAGES, true);
+  assert.equal('awards.placeholder.comingSoon' in EN_MESSAGES, false);
 
   const questsAppHtml = renderToString(
     React.createElement(App, { initialTab: 'quests' })
@@ -249,8 +249,9 @@ test('Stage 5c App Wiring: Quests tab renders QuestView (no Coming soon), Awards
   const awardsAppHtml = renderToString(
     React.createElement(App, { initialTab: 'awards' })
   );
-  assert.ok(awardsAppHtml.includes('data-testid="awards-placeholder-view"'));
-  assert.ok(awardsAppHtml.includes('Coming soon'));
+  assert.ok(!awardsAppHtml.includes('awards-placeholder-view'));
+  assert.ok(!awardsAppHtml.includes('Coming soon'));
+  assert.ok(awardsAppHtml.includes('data-testid="awards-loading"') || awardsAppHtml.includes('data-testid="awards-view"'));
 
   // PopupShell keeps Awards intact & supports optional unclaimedQuestCount=0
   const popupQuests = renderToString(

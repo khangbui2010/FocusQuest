@@ -387,7 +387,7 @@ test('Villager Wander Engine (V3): pure static checks — zero Date.now(), zero 
   const path = await import('node:path');
   const { CURRENT_SCHEMA_VERSION } = await import('../../src/storage/migrations/migrationRunner.ts');
 
-  assert.equal(CURRENT_SCHEMA_VERSION, 6);
+  assert.equal(CURRENT_SCHEMA_VERSION, 7);
 
   const stripComments = (src: string) =>
     src.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');

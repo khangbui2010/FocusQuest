@@ -1,53 +1,66 @@
-# BÁO CÁO NGHIỆM THU — MILESTONE 5E-2b: CẢNH FOCUS ĐÚNG TỈ LỆ MAP + DỤNG CỤ CẦM TAY & GOD MODE CHỈ CÓ TRONG DEV SERVER
+# BÁO CÁO NGHIỆM THU — MILESTONE 5D-2 + 5E-3 (GỘP): AWARDS THẬT & HOẠT ẢNH DÂN LÀNG VÀO HANG
 
-> **Lưu trữ báo cáo cũ:** Bản báo cáo **Milestone 5E-2** trước đó đã được giữ nguyên vẹn tại `respond_5e2b_prev.md`; mọi file `respond_*_prev.md` khác (`respond_5e2_prev.md`, `respond_5e1c_prev.md`, `respond_5e1b_prev.md`, `respond_5e1_prev.md`, `respond_5d1_prev.md`, `respond_v5_2_prev.md`, `respond_cleanup1_prev.md`, `respond_villager_*_prev.md`, `respond_5c1_prev.md`, `respond_5c_prev.md`, v.v.) đều được giữ nguyên vẹn.
+> **Lưu trữ báo cáo cũ:** Bản báo cáo **Milestone 5E-2b** trước đó đã được sao lưu nguyên vẹn tại `respond_5d2_5e3_prev.md`; mọi file `respond_*_prev.md` khác trong repo đều được giữ nguyên vẹn.
 >
-> **Trạng thái nghiệm thu:** Đã hoàn tất trọn vẹn **Phần A** (khóa tỉ lệ `1` ô lưới dân làng so với `footprint` công trình của `MapGridView` vào `FocusSceneArea` `1–4` ô làm việc và gắn dụng cụ `#117`/`#115`/`#127` trực tiếp vào tay dân làng), **Phần B** (bảng **`GOD MODE (dev)`** chỉ hoạt động ở dev server / dev mode, cô lập `100%` khỏi bản build `dist/`, đi qua `StorageManager`/`SessionCoordinator`/`CivilizationCoordinator`/`QuestCoordinator` thật và simulator tương đương, giữ nguyên mọi luật giá/thưởng/Era/Schema v6), và kiểm định toàn repo (**`npm run lint` = `0` lỗi**, **`npm run clean && npm run build` = PASS** với **`30` tệp, `1,259,394 B`, `0` tệp audio, `0` dấu vết God Mode trong `dist/`**, **`npm test` = `738 / 738 PASS`**, **`689 / 689` khóa EN/VI**, **`128` ErrorCodes**). **Kiểm thử trực quan & tương tác trên trình duyệt Chrome thật (`>= 116`) chưa được thực hiện trong môi trường headless và cần bạn kiểm chứng theo checklist mục 5.**
+> **Trạng thái nghiệm thu:** Đã hoàn tất trọn vẹn **Phần A — 5D-2** (hệ thống **13** thành tựu Stone Age có bậc `I–V`, Schema v7 `fq_awards` backfill kèm `seen: true`, mở khóa vĩnh viễn một chiều từ hành vi thật, `AwardsCoordinator`, tab `Awards` thật thay `"Coming soon"`, badge & toast mở khóa, simulator parity, God Mode `DEV_UNLOCK_ALL_AWARDS` / `DEV_RESET_AWARDS`, `vite.config.ts` triệt tiêu `jsxDEV` khỏi `dist/`, `0` Coins / `0` XP / `0` thu nhập thụ động), **Phần B — 5E-3** (hoạt ảnh thuần UI đưa dân làng mới tuyển từ `RECRUIT_VILLAGER` đi từ rìa rừng/đất mở vào cửa Hang trú ẩn `(cave.x+1, cave.y+2)`, tối đa `3` luồng đồng thời, `<= 3000ms`, không chạy với `SELECT_FOUNDER`, tắt khi `prefers-reduced-motion`, `0` ghi storage), đồng bộ 5 tài liệu, và kiểm định toàn repo (**`npm run lint` = `0` lỗi**, **`npm run clean && npm run build` = PASS** với **`30` tệp, `1,216,618 B`, `0` tệp audio, `0` dấu vết God Mode / `jsxDEV` trong `dist/`**, **`npm test` = `762 / 762 PASS`**, **`753 / 753` khóa EN/VI**, **`130` ErrorCodes**). **Luồng thực tế trên trình duyệt Chrome thật (`>= 116`) chưa kiểm chứng trên Chrome thật** vì môi trường headless không chạy trình duyệt Chrome; chi tiết cần kiểm tra ghi tại mục 5.
 
 ---
 
-## 1. Phần A — Cảnh Focus Đúng Tỉ Lệ Map & Dụng Cụ Cầm Trên Tay
+## 1. Phần A (5D-2) — Hệ Thống Thành Tựu (`Awards`) Thật
 
-- **Một nguồn tỉ lệ dùng chung với Map (`src/ui/components/civilization/civilizationScale.ts`):**
-  - Định nghĩa `NATIVE_TILE_PX = 16`, `MAP_RENDER_MULTIPLIER = 2`, `MAP_CELL_PX = 32`, `VILLAGER_HEIGHT_CELLS = 1`, `WORK_SUBJECT_EXPAND_FOOTPRINT` (`1×1`), `getWorkSubjectFootprint(kind, definitionId)` và `computeWorkSubSceneLayout({ jobCount, subjectFootprint })`.
-  - Dù ở lưới `1`, `2`, `3` hay `4` khung làm việc, cùng một `uniformScale` được nhân đồng thời cho cả dân làng (`1` ô) lẫn công trình/rừng (`footprint.width × footprint.height` ô) — đảm bảo dân làng luôn có đúng chiều cao `1` ô so với *Rock Shelter* (`3×3`), *Elder's Hut* (`2×3`), *Primitive Granary* (`2×2`) hay cây rừng (`1×1`).
-- **Dụng cụ gắn trực tiếp trên tay dân làng (`src/ui/components/FocusSceneArea.tsx`, `src/index.css`, `src/ui/components/civilization/TileImage.tsx`):**
-  - Mỗi công cụ (`#117` búa cho `place`/`upgrade`, `#115` cuốc chim khi đặt `stone_age_study_cave`, `#127` rìu cho `expand`) được render bên trong phần tử dân làng `focus-work-villager-${job.id}-${villager.id}` **trước** `focus-work-subject-*`, không còn tách rời lơ lửng trên không.
-  - Ở công việc `2` thợ (`crewRequired === 2`), thợ thứ hai tự quay tay cầm dụng cụ vào trong về phía công trình.
-  - Chỉ gắn lớp vung tay `.fq-work-hand-tool-strike-right` (`transform-origin: 20% 85%`) / `.fq-work-hand-tool-strike-left` (`transform-origin: 80% 85%`) khi `sceneState === 'working' && !reducedMotion`; giữ tĩnh ở `.fq-work-hand-tool-rest-*` khi `paused`, `resting` (Pomodoro break) hoặc `prefers-reduced-motion: reduce`.
-  - Bổ sung rào `Number.isFinite` trong `TileImage.tsx` tránh giá trị `NaNpx` khi chỉ số tile hoặc kích thước không hợp lệ.
-- **Kiểm thử Phần A (`__tests__/ui/focusWorkSceneScaleAndTools5e2b.test.ts` — `3` tests mới):**
-  - Kiểm tra `TileImage` NaN guard, tỉ lệ đồng nhất `1 : footprint` giữa `MapGridView` và `FocusSceneArea`, vị trí tool nằm trong `focus-work-villager-*` trước `focus-work-subject-*` với đúng `#117`/`#115`/`#127`, xoay hướng thợ thứ `2`, giữ tĩnh khi `paused`/`resting`/`reducedMotion`, và kiểm tra CSS keyframes/reduced-motion trong `src/index.css`.
+### 1.1. Đối chiếu Chặng 0 & Ràng buộc Kinh tế / Schema
+- **Không thưởng kinh tế & không thu nhập thụ động:** Toàn bộ `13` thành tựu Stone Age trao **`0` Coins, `0` XP, `0` passive income** (`rewardPlaceholder` giữ thuần metadata chưa kích hoạt); hoàn toàn không có lore/chữ kể chuyện hay yếu tố ma thuật/siêu nhiên.
+- **Không thêm asset ảnh nhị phân mới & không thêm quyền:** Toàn bộ biểu tượng thành tựu tái sử dụng sprite sheet sẵn có (`clock_tiles_16.png` `#1, #2`; `kenney-tiny-town` `#17, #83, #93, #95, #106, #115, #117, #127`; `kenney-tiny-dungeon` `#86, #99, #117`) thông qua `AwardIcon.tsx`. `manifest.json` giữ nguyên quyền cũ.
+- **Schema v7 & Backfill an toàn (`src/storage/migrations/v7_awardsSchema.ts`, `migrationRunner.ts`):** Nâng `CURRENT_SCHEMA_VERSION = 7` và thêm `STORAGE_KEYS.AWARDS = 'fq_awards'` (`CURRENT_AWARDS_STATE_VERSION = 1`). Khi nâng cấp từ bản cũ, `v7_awardsSchema.up` gọi `backfillAwardsFromHistory` đánh giá đồng bộ `Economy`, `DailyStats`, `Quests`, `Civilization` hiện có và đánh dấu mọi bậc đã đạt **`seen: true`** để người chơi cũ không bị ngập toast/badge khi vừa nâng cấp, đồng thời không sửa các khóa dữ liệu gốc khác và giữ nguyên idempotency khi chạy lại.
 
----
+### 1.2. Domain thuần & 13 Thành tựu Stone Age (`src/types/awards.ts`, `src/core/awards/`)
+- **`STONE_AGE_AWARDS_CATALOG` (`awardsCatalog.ts` — `13` mục, 3 nhóm):**
+  - **Focus (`4`):** `focus_hours` (60 / 300 / 900 / 2400 / 6000 phút), `focus_sessions` (1 / 5 / 15 / 35 / 75 phiên), `long_haul` (25 / 45 / 60 / 90 / 120 phút/phiên), `focus_streak` (3 / 7 / 14 / 30 / 60 ngày liên tiếp).
+  - **Quests (`2`):** `quest_keeper` (1 / 5 / 15 / 30 / 60 nhiệm vụ đã claim), `perfect_day` (1 / 3 / 7 / 14 / 30 ngày claim đủ cả 3 Daily Quests, chống trùng bằng `perfectDayDateKeys` tối đa 90 ngày gần nhất).
+  - **Civilization (`7`):** `player_level` (Lv. 2 / 4 / 6 / 8 / 10), `builder` (1 / 3 / 6 / 10 / 15 công trình đã xây), `master_builder` (1 / 3 / 5 / 7 / 9 công trình nâng cấp tối đa `maxLevel`), `land_clearer` (1 / 3 / 6 / 10 / 15 chunk mở rộng), `tribe` (1 / 3 / 5 / 8 / 10 tổng dân làng kể cả Founder), `tribe_complete` (1 bậc — đủ cả 3 vai trò `elder` + `crafter` + `woodworker`), `era_ready` (1 bậc — `evaluateEraAdvance.eligible === true`, giữ nguyên `era === 'STONE_AGE'`).
+- **Động cơ thuần & Mở khóa một chiều (`awardsEngine.ts`, `awardsState.ts`):** `evaluateAwards` luôn giữ nguyên các bậc đã mở (`unlockedAt`, `seen`) — tuyệt đối không khóa lại nếu người chơi phá hủy công trình hay giảm số công trình max cấp; `sanitizeAwardState` & `normalizeAwardCounters` lọc sạch dữ liệu hỏng.
 
-## 2. Phần B — GOD MODE Chỉ Có Trong Dev Server (`dist/` 0 Dấu Vết)
-
-- **Kiến trúc cô lập tuyệt đối (`src/ui/services/devRuntimeBridge.ts`, `src/dev/*`, `vite.config.ts`):**
-  - Các entrypoint production (`src/App.tsx`, `src/ui/services/extensionClient.ts`, `src/ui/components/TimerView.tsx`, `src/background/index.ts`) chỉ gọi cầu nối trung tính `devRuntimeBridge.ts` và dynamic `import(...)` nằm trong rào `import.meta.env.DEV === true`; `messageHandler.ts` và `src/types/messages.ts` giữ sạch 100% (từ chối mọi `DEV_*` với `UNKNOWN_ACTION`).
-  - Trong `vite.config.ts`, mọi lệnh production build (`command === 'build' && mode !== 'development'`) ép `'import.meta.env.DEV': 'false'`, `'import.meta.env.PROD': 'true'`, `'process.env.NODE_ENV': '"production"'` (ngăn trường hợp `NODE_ENV=development` từ môi trường shell lọt vào `dist/`). Khi `npm run clean && npm run build` hoàn tất, Vite loại bỏ hoàn toàn toàn bộ chunk và chuỗi `src/dev/*` khỏi `dist/`.
-- **Bộ công cụ 8 nhóm trong `src/dev/DevGodModePanel.tsx` & `DevGodModeMount.tsx` (thu gọn mặc định):**
-  - Chip nổi góc phải dưới **`GOD MODE (dev)`** (`data-testid="dev-god-mode-toggle"`), nằm ngoài khung `400×600` của `PopupShell`, mặc định đóng để không che giao diện thường.
-  - **1. Economy & Stats:** Set Coins, `+1,000`, `+10k`, Max Coins; Set Level (`Lv.9`, `Lv.20`, `Max Lv`); Set Today Focus Minutes (`+60m`, `+500m`).
-  - **2. Focus Session & Time Speed:** Chọn tốc độ `1×`, `10×`, `60×`, `600×` (tăng tốc vòng tick qua `devRuntimeBridge` và `DEV_ADVANCE_ACTIVE_SESSION_MS`, vẫn chạy quyết toán thật ở background/simulator; `Give Up` vẫn `0` Coins / `0` XP), `Skip focus wait` (hỗ trợ cả Countdown, Pomodoro Countdown, Pomodoro Stopwatch, Stopwatch `>= 5m`), và `Complete all jobs`.
-  - **3. Buildings & Land:** Đặt miễn phí bất kỳ công trình hợp giới hạn, `Max buildings` (nâng tối đa và dọn job xây/nâng tương ứng, giữ bất biến), `Unlock +1 chunk` / `+3 chunks`.
-  - **4. Villagers:** Tuyển miễn phí `crafter` / `elder` / `woodworker` (tự tạo/nâng *Rock Shelter* tới trần sức chứa `10`), `Fill all roles`.
-  - **5. Era Readiness (`STONE_AGE` giữ nguyên):** Hiển thị trạng thái `Bronze Ready: YES/NO` qua `evaluateEraAdvance` thật và nút `Meet Stone → Bronze Requirements (stays Stone Age)` — chuẩn bị đủ đất/công trình Lv.5/3 vai trò/Lv.9/500p/500 Coins nhưng **tuyệt đối giữ `era === 'STONE_AGE'`**.
-  - **6. Quests & Calendar:** `Complete All Quests` (giữ `claimed: false` để test bấm Claim thật), `+1 Day Rollover` (dịch mốc lịch và gọi `rolloverQuestState` thật), `New Daily Quests`, `New Weekly Quests`.
-  - **7. Awards (trung thực trạng thái hiện tại):** Nút `Unlock all awards (disabled — Awards tab is Coming soon)` bị khóa (`disabled`) đúng thực tế tab Awards hiện vẫn là `"Coming soon"`.
-  - **8. Data Tools:** `Seed Demo`, `Export JSON` / `Import JSON` (schema `v6`, chuẩn hóa qua `sanitizeCivilizationState`/`sanitizeQuestState`), và `Reset all data...` có bước xác nhận 2 lần.
-- **Kiểm thử Phần B (`+10` tests mới, `0` xóa test cũ):**
-  - `__tests__/background/devGodMode5e2b.test.ts` (`4` tests): `MessageHandler` production từ chối `DEV_*` bằng `UNKNOWN_ACTION`, tốc độ mặc định `1×`, kiểm chứng toàn bộ `21` action `DEV_*` với `StorageManager`/`SessionCoordinator`/`CivilizationCoordinator`/`QuestCoordinator` thật (bảo toàn `Give Up = 0` thưởng, `validateCivilizationState`, `evaluateEraAdvance.eligible === true` nhưng `era === 'STONE_AGE'`, `claimed === false` trước Claim, Export/Import/Reset schema `v6`).
-  - `__tests__/ui/devGodModeBuildIsolation5e2b.test.ts` (`2` tests): quét toàn bộ tệp `.js/.mjs/.html/.css/.json` trong `dist/` khẳng định `0` chứa bất kỳ chuỗi nào trong `28` định danh God Mode (`GOD MODE`, `GOD_MODE`, `DEV_*`, `DevGodMode*`, `devBackgroundService`, `devSimulatorPlugin`, `devStateHelpers`); kiểm tra các file entry production không rò mã dev; và render SSR `DevGodModePanel` ở trạng thái thu gọn mặc định.
-  - Cập nhật `__tests__/ui/i18nStaticGuard.test.ts` miễn trừ hợp lệ riêng `src/dev/` trong guard i18n.
+### 1.3. Background, Storage Atomic, ErrorCodes & UI (`src/background/`, `src/storage/`, `src/ui/`, `src/dev/`)
+- **Cập nhật bộ đếm nguyên tử trong cùng `StorageMutex`:**
+  - `StorageManager.commitSessionOutcomeInternal`: chỉ cập nhật `longestSessionMinutes` khi phiên `COMPLETED`.
+  - `QuestCoordinator.claimQuestReward`: cập nhật `totalQuestsClaimed` và `perfectDaysCount` (khi cả 3 Daily Quest trong ngày đều `claimed`).
+  - `CivilizationCoordinator.placeBuilding`: cập nhật `totalBuildingsBuilt` qua `awardCountersDelta: { buildingsBuilt: 1 }`.
+- **`AwardsCoordinator` & Message Protocol (`src/background/awardsCoordinator.ts`, `messageHandler.ts`, `messages.ts`, `errors.ts`):** Phục vụ `GET_AWARDS_STATE` (evaluate + persist nếu phát sinh mở khóa mới) và `MARK_AWARDS_SEEN` (kiểm tra payload qua `INVALID_AWARDS_PAYLOAD`), nâng tổng `ALL_KNOWN_ERROR_CODES` trong `src/i18n/errorTranslator.ts` lên **`130`** mã (thêm `INVALID_AWARDS_PAYLOAD`, `AWARDS_STATE_CORRUPTED`).
+- **UI Tab `Awards`, Badge & Toast (`src/ui/components/awards/*`, `Navbar.tsx`, `App.tsx`, `locales/{en,vi}.ts`):**
+  - `AwardsView.tsx` + `AwardDetailsModal.tsx` + `AwardIcon.tsx` + `awardFormatting.ts`: thay hoàn toàn `"Coming soon"`, vừa khung popup `400×600px`, lọc 4 tab (`Tất cả / Tập trung / Nhiệm vụ / Văn minh`), hiển thị tổng số bậc đã mở, nhãn `MỚI` / `NEW` cho thành tựu mới mở, các pip bậc `I–V`, thanh tiến độ `role="progressbar"`, modal chi tiết từng bậc + ngày mở khóa, và nút `Thử lại` khi lỗi tải.
+  - `Navbar.tsx` hiển thị `awards-unseen-badge` (ẩn ở `0`, `1..9`, `9+` ở `>= 10`) và `App.tsx` hiện toast mở khóa `award-unlock-toast` nhẹ ở góc trên (không chặn thao tác, tôn trọng `prefers-reduced-motion`).
+- **Simulator, God Mode & Build Guard (`extensionClient.ts`, `src/dev/*`, `vite.config.ts`):** Đồng bộ `GET_AWARDS_STATE` / `MARK_AWARDS_SEEN` + counters trên `extensionClient.ts`; kích hoạt `DEV_UNLOCK_ALL_AWARDS` & `DEV_RESET_AWARDS` trong `DevGodModePanel.tsx` / `devBackgroundService.ts` / `devSimulatorPlugin.ts`; đồng thời bổ sung `if (!isDevRuntime) { process.env.NODE_ENV = 'production'; }` trước khi khởi tạo `react()` trong `vite.config.ts` để triệt tiêu hoàn toàn `jsxDEV` khỏi `dist/` ngay cả khi biến môi trường shell bên ngoài là `NODE_ENV=development`. Mở rộng từ điển `en.ts` / `vi.ts` lên **`753 / 753` khóa parity (100%)**.
 
 ---
 
-## 3. Tài Liệu Đã Đồng Bộ
+## 2. Phần B (5E-3) — Hoạt Ảnh Dân Làng Mới Tuyển Đi Vào Hang Trú Ẩn (Thuần UI)
 
-- `ARCHITECTURE.md` (`1.16.0`): bổ sung `civilizationScale.ts`, gắn dụng cụ trong `focus-work-villager-*` và Mục 8 kiến trúc cô lập `src/dev/` + `vite.config.ts`.
-- `PROJECT_STATUS.md`: cập nhật trạng thái nghiệm thu Milestone 5E-2b với số liệu build/lint/test đo được thực tế.
-- `README.md`: cập nhật mục `Development Tools (GOD MODE (dev))`, số liệu test `738/738` và phạm vi nghiệm thu.
+- **Phạm vi kích hoạt nghiêm ngặt (`src/ui/components/civilization/CivilizationScreen.tsx`):**
+  - Chỉ gọi `enqueueVillagerCaveEntry(res.data.recruitedVillager, res.data.civilization)` duy nhất bên trong `handleRecruitVillager` sau khi `RECRUIT_VILLAGER` thành công — **tuyệt đối không chạy khi `SELECT_FOUNDER`**.
+  - Giới hạn tối đa `MAX_CONCURRENT_VILLAGER_ENTRIES = 3` luồng đồng thời, tự động dọn timer khi unmount hoặc khi `document.hidden` chuyển sang ẩn, và bỏ qua ngay nếu `prefersReducedMotion()` bật.
+  - **0 ghi storage, 0 message background, 0 thay đổi kinh tế/schema.**
+- **Thuật toán đường đi 3 tình huống (`src/ui/components/civilization/villagerEntryAnimation.ts`):**
+  - `computeVillagerCaveEntryPlan({ cave, buildings, gridMap })` tính toán đích vào là cửa *Rock Shelter* (`doorwayCell = (cave.x + 1, cave.y + 2)`) qua ô trước cửa (`entranceCell = (cave.x + 1, cave.y + 3)`):
+    1. **`walk-from-edge`:** BFS tối đa `10` bước trên các ô đi được (`collectWalkableCells`), xuất phát từ rìa tiếp giáp rừng khóa, đi dọc ô trống tới `entranceCell` rồi bước lên `doorwayCell` và mờ dần vào hang (`<= 3000ms`).
+    2. **`fade-in-settlement`:** Khi sân quanh hang bị vây kín không tới được rìa rừng, dân làng hiện mờ (`200ms` fade-in) từ ô đi được xa nhất trong sân kín rồi đi vào `doorwayCell`.
+    3. **`doorway-settle`:** Khi ngay cả `entranceCell` cũng bị bịt kín, thực hiện settle ngắn tại cửa hang (`< 500ms`, `VILLAGER_ENTRY_DOORWAY_SETTLE_MS = 440`).
+  - **Hướng sprite & chống nhân đôi (`useVillagerWander.ts`, `MapGridView.tsx`, `src/index.css`):**
+    - Bước cuối đi lên Bắc vào hang luôn qua `getVillagerAnimationForDirection('up', true) === 'idle'`, tuyệt đối không dùng `walk_down`.
+    - `useVillagerWander` nhận `suppressedVillagerIds` từ `activeVillagerEntries` nên dân đang đi vào hang không bị render trùng lặp trong lớp đi dạo; khi `prefers-reduced-motion: reduce`, lớp `.fq-villager-entry-sprite` tắt transition và `MapGridView` bỏ qua hoạt ảnh, hiện dân làng đứng `idle` ngay lập tức.
+
+---
+
+## 3. Tài Liệu & Sửa Test Kế Thừa Đã Thực Hiện
+
+- **Cập nhật assertion `CURRENT_SCHEMA_VERSION` tại các test cũ:**
+  - `__tests__/storage/v3Migration.test.ts` (dòng 157–200): đổi 4 assertion `6` cũ sang `CURRENT_SCHEMA_VERSION` (`7`), giữ nguyên assertion kiểm tra gọi trực tiếp `v3_questsSchema.up` trả về `3`.
+  - `__tests__/storage/v5Migration.test.ts` (dòng 176–178): đổi 2 assertion `6` cũ sang `CURRENT_SCHEMA_VERSION` (`7`).
+- **Đồng bộ 5 tài liệu repo:**
+  - `PROJECT_STATUS.md`: cập nhật trạng thái hiện tại, timeline **Milestone 5D-2 + 5E-3**, Schema v7, `753/753` khóa EN/VI, `130` ErrorCodes, `762/762 PASS`, gỡ mô tả `"Awards còn giữ chỗ Coming soon"` ở mục kiểm soát hiện hành.
+  - `PRODUCT_SPEC.md` (`1.13.0-synced`): cập nhật §7 (hoạt ảnh vào hang 5E-3), §12–§13 (Schema v7, `753` khóa, `130` ErrorCodes) và bổ sung **§14 Hệ thống Thành tựu (`Awards`)**.
+  - `README.md`: cập nhật Highlights, lệnh dev/test (`762/762`), mục `GOD MODE (dev)` (gồm `DEV_UNLOCK_ALL_AWARDS`/`DEV_RESET_AWARDS`), bỏ mục roadmap Awards placeholder.
+  - `ARCHITECTURE.md` (`1.17.0`): cập nhật Schema v7 (`v7_awardsSchema.ts`, `fq_awards`, `AwardsCoordinator`), `GET_AWARDS_STATE` / `MARK_AWARDS_SEEN`, `AwardsView`, `villagerEntryAnimation.ts` 5E-3, `vite.config.ts` `process.env.NODE_ENV = 'production'`, `753` khóa & `130` ErrorCodes.
+  - `docs/sprites/TILE_INDEX.md`: ghi nhận bảng tái sử dụng `13` tile icon từ `clock_tiles_16.png`, `tiny-town` và `tiny-dungeon` cho `AwardIcon.tsx` (`0` asset nhị phân mới).
 
 ---
 
@@ -56,18 +69,25 @@
 | Hạng mục kiểm định | Lệnh / Công cụ | Kết quả đo được thực tế | Ghi chú |
 |---|---|---|---|
 | **Typecheck & Lint** | `npm run lint` (`tsc --noEmit`) & `lint_applet` | **PASS (Exit 0 — `0` lỗi)** | Toàn bộ `src/`, `src/dev/` và `__tests__/` sạch lỗi TypeScript |
-| **Production Build** | `npm run clean && npm run build` & `compile_applet` | **PASS (`30` tệp, `1,259,394 B`, `881ms`)** | `1,779` modules; **`0` tệp audio** trong `public/` & `dist/`; **`0` chunk/chuỗi God Mode trong `dist/`**; `manifest.json` giữ nguyên `5` quyền cũ |
-| **Artifacts chính trong `dist/`** | Vite 8.3.8 MV3 build | `popup-BRomz-8T.js`: `742.88 kB` · `questEngine-DEjBzXmb.js`: `158.92 kB` · `background.js`: `121.64 kB` · `popup-DflKziXU.css`: `108.40 kB` · `translator-BTFEKZ2F.js`: `86.38 kB` · `offscreen.js`: `3.87 kB` · `blocked.js`: `1.32 kB` | MV3 CSP-safe; không có `DevGodModeMount`, `devBackground` hay `devSimulatorPlugin` |
-| **Test Suite (`npm test`)** | `npm test` (chạy 1 lượt sau build) | **`738 / 738 PASS` (`0` fail, `0` skipped)** | Thời gian chạy `34,006.10 ms` (~34.0s); `+13` tests mới (`725 → 738`) |
-| **Parity EN/VI & ErrorCodes** | `locales/{en,vi}.ts` & `errorTranslator.ts` | **`689 / 689` khóa (`100%`) · `128` ErrorCodes** | `i18nStaticGuard` xanh (`6/6` kiểm tra) |
-| **Chrome thật (`>= 116`)** | Kiểm thử trực quan & tương tác trên Chrome thật | **CHƯA THỰC HIỆN** | Môi trường headless không chạy trình duyệt Chrome thật; cần bạn kiểm chứng theo checklist mục 5 |
+| **Production Build** | `npm run clean && npm run build` & `compile_applet` | **PASS (`30` tệp, `1,216,618 B`, `918ms`)** | `1,792` modules; **`0` tệp audio** trong `public/` & `dist/`; **`0` dấu vết God Mode / `jsxDEV` / `validateDOMNesting` trong `dist/`**; `manifest.json` giữ nguyên `5` quyền |
+| **Artifacts chính trong `dist/`** | Vite 8.3.8 MV3 build | `popup-iTqPoHey.js`: `669.31 kB` · `dateUtils-DWsP360f.js`: `172.87 kB` · `background.js`: `127.18 kB` · `popup-mGY207Ch.css`: `112.26 kB` · `translator-DuvZb1wH.js`: `93.81 kB` · `offscreen.js`: `3.87 kB` · `blocked.js`: `1.32 kB` | MV3 CSP-safe; `process.env.NODE_ENV = 'production'` khóa chặt build ngay cả khi shell đặt `NODE_ENV=development` |
+| **Test Suite toàn repo** | `npm test` (chạy sau khi sửa toàn bộ code & test) | **`762 / 762 PASS` (`0` fail, `0` skipped)** | `29,286.41 ms` (~29.3s); `+24` tests mới (`738 → 762`): `awardsEngine.test.ts` (`7`), `v7Migration.test.ts` (`2`), `awardsIntegration.test.ts` (`4`), `awardsView.test.ts` (`5`), `villagerCaveEntryAnimation5e3.test.ts` (`5`), `devGodModeBuildIsolation5e2b.test.ts` (`3`) |
+| **Parity EN/VI & ErrorCodes** | `locales/{en,vi}.ts` & `errorTranslator.ts` | **`753 / 753` khóa (`100%`) · `130` ErrorCodes** | `i18nStaticGuard` xanh toàn repo (`0` chuỗi thiếu khóa) |
+| **Chrome thật (`>= 116`)** | Kiểm thử trực quan & tương tác trên Chrome thật | **CHƯA KIỂM CHỨNG TRÊN CHROME THẬT** | Môi trường headless không chạy trình duyệt Chrome thật; vui lòng kiểm chứng theo checklist mục 5 |
 
 ---
 
 ## 5. Checklist Kiểm Chứng Trên Chrome Thật & Dev Server
 
-1. **Phần A — Tỉ lệ & dụng cụ cầm tay (`npm run dev` hoặc dev build):** Tạo job đặt *Rock Shelter* (`3×3`) và *Foraging Post* (`2×2`) hoặc *Dọn rừng* (`1×1`), bắt đầu phiên Focus và mở `FocusSceneArea` → kiểm tra chiều cao dân làng đúng bằng `1` ô lưới so với kích thước công trình như ngoài Map; búa/cuốc chim/rìu nằm trên tay dân làng, thợ thứ `2` quay vào trong, dụng cụ chỉ vung khi đang Focus và đứng yên khi Pause / Pomodoro Break / `prefers-reduced-motion`.
-2. **Phần B — `GOD MODE (dev)` trong `npm run dev`:** Kiểm tra góc dưới phải có chip `"GOD MODE (dev)"` thu gọn mặc định; mở drawer thử chỉnh Coins, Level `9`, tăng tốc `60×` hoặc `Skip focus wait` (và kiểm tra `Give Up` vẫn `0` thưởng), `Complete All Quests` rồi tự bấm `Claim` trên tab `Quests`, `Meet Stone → Bronze Requirements` (xác nhận `Bronze Ready: YES` nhưng Era vẫn là `STONE_AGE`), và xác nhận nút `Unlock all awards` đang khóa kèm lý do `Coming soon`.
-3. **Cô lập Production trong Chrome thật (`dist/`):** Chạy `npm run clean && npm run build`, load thư mục `dist/` vào `chrome://extensions/` → xác nhận **không hề** có nút/drawer `"GOD MODE (dev)"` và `dist/assets/` không có bất kỳ file `dev*` nào.
+1. **Phần A (5D-2) — Tab `Awards` & Backfill / Unlock thật:**
+   - Mở popup (`npm run dev` hoặc unpacked Chrome `dist/`) → chuyển sang tab `Awards` (thanh tab đáy thứ 4): kiểm tra hiển thị đủ `13` thành tựu Stone Age, lọc qua 4 tab `All / Focus / Quests / Civilization`, bấm mở modal chi tiết từng bậc `I–V`, xác nhận không cộng Coins/XP/thu nhập thụ động và không có lore/ma thuật.
+   - Trên `npm run dev`, mở `GOD MODE (dev)` → thử `Unlock all awards` và `Reset awards` để kiểm tra badge `awards-unseen-badge` trên `Navbar`, toast mở khóa ở đầu popup, và hành vi tự xóa badge + mất nhãn `NEW` sau khi ghé tab `Awards` (`MARK_AWARDS_SEEN`).
+   - Kiểm tra profile cũ có sẵn dữ liệu trước khi nâng lên Schema v7: các thành tựu đạt sẵn từ lịch sử phải mở khóa và đánh dấu `seen: true` (không nổ toast hàng loạt).
+2. **Phần B (5E-3) — Hoạt ảnh dân làng mới tuyển đi vào Hang trú ẩn:**
+   - Đã chọn Founder (xác nhận chọn `SELECT_FOUNDER` **không** phát hoạt ảnh đi từ rừng vào hang).
+   - Mở *Rock Shelter* → bấm tuyển 1–3 dân làng mới (`RECRUIT_VILLAGER`): quan sát dân làng mới đi từ rìa rừng qua ô trống vào cửa hang `(cave.x+1, cave.y+2)` (`<= 3s`), không nhân đôi sprite trong `useVillagerWander`, bước đi lên cửa hang không bị quay đầu sai (`walk_down`).
+   - Bật `Reduce motion` trong hệ điều hành/DevTools → tuyển dân mới: hoạt ảnh được bỏ qua sạch sẽ, dân đứng `idle` ngay lập tức.
+3. **Cô lập Production trong Chrome thật (`dist/`):**
+   - Chạy `npm run clean && npm run build` → load `dist/` tại `chrome://extensions/` → xác nhận **0** có nút `"GOD MODE (dev)"`, **0** lỗi CSP/console khi mở đủ 5 tab popup và trang `blocked.html`.
 
-**DỪNG — CHỜ DUYỆT MILESTONE 5E-2b.**
+**DỪNG — CHỜ DUYỆT MILESTONE 5D-2 + 5E-3.**

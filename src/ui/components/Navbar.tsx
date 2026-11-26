@@ -11,6 +11,7 @@ export interface NavbarProps {
   isSessionActive: boolean;
   session?: SessionSnapshot | null;
   unclaimedQuestCount?: number;
+  unseenAwardCount?: number;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -19,6 +20,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   isSessionActive,
   session,
   unclaimedQuestCount = 0,
+  unseenAwardCount = 0,
 }) => {
   const { t } = useTranslation();
 
@@ -27,6 +29,12 @@ export const Navbar: React.FC<NavbarProps> = ({
       ? Math.max(0, Math.floor(unclaimedQuestCount))
       : 0;
   const unclaimedBadgeText = safeUnclaimedCount > 9 ? '9+' : String(safeUnclaimedCount);
+
+  const safeUnseenAwardCount =
+    typeof unseenAwardCount === 'number' && Number.isFinite(unseenAwardCount)
+      ? Math.max(0, Math.floor(unseenAwardCount))
+      : 0;
+  const unseenAwardBadgeText = safeUnseenAwardCount > 9 ? '9+' : String(safeUnseenAwardCount);
 
   const isPaused = session?.status === 'PAUSED';
   const isBreakPhase = Boolean(
@@ -158,10 +166,25 @@ export const Navbar: React.FC<NavbarProps> = ({
           data-testid="nav-tab-awards"
           data-active={activeTab === 'awards' ? 'true' : 'false'}
           aria-current={activeTab === 'awards' ? 'page' : undefined}
+          aria-label={
+            safeUnseenAwardCount > 0
+              ? `${t('nav.awards')} · ${t('nav.awardsBadgeAria', { count: safeUnseenAwardCount })}`
+              : t('nav.awards')
+          }
           onClick={() => handleSelectTab('awards')}
           className={tabClassName(activeTab === 'awards')}
         >
-          <Trophy className="w-5 h-5 shrink-0" />
+          <span className="relative inline-flex items-center justify-center">
+            <Trophy className="w-5 h-5 shrink-0" />
+            {safeUnseenAwardCount > 0 && (
+              <span
+                data-testid="awards-unseen-badge"
+                className="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold leading-4 text-center tabular-nums shadow-sm"
+              >
+                {unseenAwardBadgeText}
+              </span>
+            )}
+          </span>
           <span className="text-[10px] font-medium leading-none whitespace-nowrap">
             {t('nav.awards')}
           </span>

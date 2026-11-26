@@ -5,6 +5,9 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(({command, mode}) => {
   const isDevRuntime = command === 'serve' || mode === 'development';
+  if (!isDevRuntime) {
+    process.env.NODE_ENV = 'production';
+  }
   return {
     plugins: [react(), tailwindcss()],
     define: isDevRuntime

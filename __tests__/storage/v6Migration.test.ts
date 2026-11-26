@@ -56,7 +56,7 @@ test('v6 Migration: upgrades v5 -> v6 preserving all buildings, villagers, grid,
   const firstRun = await runner.runMigrations();
   assert.equal(firstRun.previousVersion, 5);
   assert.equal(firstRun.currentVersion, CURRENT_SCHEMA_VERSION);
-  assert.equal(CURRENT_SCHEMA_VERSION, 6);
+  assert.equal(CURRENT_SCHEMA_VERSION, 7);
 
   const migratedCiv = await adapter.get<Record<string, unknown>>(STORAGE_KEYS.CIVILIZATION);
   assert.ok(migratedCiv);
@@ -74,8 +74,8 @@ test('v6 Migration: upgrades v5 -> v6 preserving all buildings, villagers, grid,
 
   // Idempotent on subsequent run
   const secondRun = await runner.runMigrations();
-  assert.equal(secondRun.previousVersion, 6);
-  assert.equal(secondRun.currentVersion, 6);
+  assert.equal(secondRun.previousVersion, 7);
+  assert.equal(secondRun.currentVersion, 7);
 });
 
 test('v6 Migration: heals corrupt civilization object to clean v6 state', async () => {
@@ -87,7 +87,7 @@ test('v6 Migration: heals corrupt civilization object to clean v6 state', async 
 
   const runner = new MigrationRunner(adapter);
   const result = await runner.runMigrations();
-  assert.equal(result.currentVersion, 6);
+  assert.equal(result.currentVersion, 7);
 
   const healed = await adapter.get<Record<string, unknown>>(STORAGE_KEYS.CIVILIZATION);
   assert.ok(healed);

@@ -386,6 +386,11 @@
   animation: fq-work-subscene-enter 220ms ease-out;
 }
 
+/* Milestone 5E-3: Villager recruitment cave-entry visual sprite */
+.fq-villager-entry-sprite {
+  will-change: transform, opacity;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .fq-expansion-overlay {
     display: none !important;
@@ -412,7 +417,8 @@
   .fq-work-hand-tool-strike-left,
   .fq-fence-ribbon-sway,
   .fq-fence-ribbon-sway-side,
-  .fq-work-subscene-enter {
+  .fq-work-subscene-enter,
+  .fq-villager-entry-sprite {
     animation: none !important;
     transition: none !important;
     transform: none !important;

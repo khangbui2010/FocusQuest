@@ -350,6 +350,9 @@ export class CivilizationCoordinator {
         },
         nextCivilization,
         deductCoins: definition.baseCost,
+        ...(placeSpec.durationSeconds === 0
+          ? { awardCountersDelta: { buildingsBuilt: 1 } }
+          : {}),
         onCommitted: () => {
           this.cachedBonuses = nextBonuses;
         },

@@ -17,11 +17,23 @@ import { calculatePlayerLevel } from '../core/economy/levelSystem.ts';
 import { CachedMusicCatalog, MusicPlayerState } from '../types/music.ts';
 import { QuestOutcomeDelta, QuestState } from '../types/quests.ts';
 import { isValidDateKey } from '../core/stats/statsAggregator.ts';
+import { getLocalDateKey } from '../core/utils/dateUtils.ts';
 import {
   applyCompletedSession,
   rolloverQuestState,
   sanitizeQuestState,
 } from '../core/quests/questEngine.ts';
+import {
+  AwardCounters,
+  AwardState,
+  AwardUnlockEvent,
+} from '../types/awards.ts';
+import {
+  areAllActiveDailyQuestsClaimed,
+  evaluateAwards,
+  recordPerfectDayInCounters,
+  sanitizeAwardState,
+} from '../core/awards/index.ts';
 
 export class StorageManager {
   private mutex = new StorageMutex();
@@ -190,12 +202,15 @@ export class StorageManager {
     };
     questOutcomeDelta?: QuestOutcomeDelta;
     advanceCivilizationJobsSeconds?: number;
+    longestSessionCandidateMinutes?: number;
   }): Promise<{
     session: SessionSnapshot;
     economy: PlayerEconomy;
     dailyStats: Record<string, DailyStatRecord>;
     questState?: QuestState;
     civilizationState?: CivilizationState;
+    awardState?: AwardState;
+    newlyUnlockedAwards?: readonly AwardUnlockEvent[];
   }> {
     const items: Record<string, unknown> = {
       [STORAGE_KEYS.CURRENT_SESSION]: params.session,
@@ -274,6 +289,7 @@ export class StorageManager {
     }
 
     let finalCivilizationState: CivilizationState | undefined;
+    let completedPlaceBuilds = 0;
     const validJobSeconds =
       typeof params.advanceCivilizationJobsSeconds === 'number' &&
       Number.isFinite(params.advanceCivilizationJobsSeconds) &&
@@ -285,6 +301,9 @@ export class StorageManager {
       const rawCiv = await this.getCivilizationStateInternal();
       const sanitizedCiv = sanitizeCivilizationState(rawCiv);
       if (sanitizedCiv && Array.isArray(sanitizedCiv.jobs) && sanitizedCiv.jobs.length > 0) {
+        const prePlaceIds = new Set(
+          sanitizedCiv.jobs.filter((j) => j.kind === 'place').map((j) => j.id)
+        );
         const scheduleOptions =
           params.session.assignedJobIds !== undefined ||
           params.session.autoContinueJobs !== undefined
@@ -296,6 +315,14 @@ export class StorageManager {
         const advancedCiv = advanceJobs(sanitizedCiv, validJobSeconds, scheduleOptions);
         const validation = validateCivilizationState(advancedCiv);
         if (validation.isValid) {
+          const postPlaceIds = new Set(
+            (advancedCiv.jobs ?? []).filter((j) => j.kind === 'place').map((j) => j.id)
+          );
+          for (const id of prePlaceIds) {
+            if (!postPlaceIds.has(id)) {
+              completedPlaceBuilds += 1;
+            }
+          }
           finalCivilizationState = {
             ...advancedCiv,
             lastUpdated:
@@ -307,6 +334,70 @@ export class StorageManager {
           items[STORAGE_KEYS.CIVILIZATION] = finalCivilizationState;
         }
       }
+    }
+
+    let finalAwardState: AwardState | undefined;
+    let newlyUnlockedAwards: readonly AwardUnlockEvent[] = [];
+    try {
+      const awardNowMs =
+        typeof params.session.completedAt === 'number' &&
+        Number.isFinite(params.session.completedAt)
+          ? params.session.completedAt
+          : Date.now();
+      const rawAwards = await this.adapter.get<unknown>(STORAGE_KEYS.AWARDS);
+      const baseAwards = sanitizeAwardState(rawAwards);
+      let counters: AwardCounters = baseAwards.counters;
+      let countersChanged = false;
+
+      if (
+        typeof params.longestSessionCandidateMinutes === 'number' &&
+        Number.isFinite(params.longestSessionCandidateMinutes) &&
+        params.longestSessionCandidateMinutes > 0
+      ) {
+        const candidateMins = Math.floor(params.longestSessionCandidateMinutes);
+        if (candidateMins > counters.longestSessionMinutes) {
+          counters = {
+            ...counters,
+            longestSessionMinutes: candidateMins,
+          };
+          countersChanged = true;
+        }
+      }
+
+      if (completedPlaceBuilds > 0) {
+        counters = {
+          ...counters,
+          totalBuildingsBuilt: counters.totalBuildingsBuilt + completedPlaceBuilds,
+        };
+        countersChanged = true;
+      }
+
+      const questsForAwards = finalQuestState ?? (await this.getQuests(awardNowMs));
+      const civForAwards =
+        finalCivilizationState ??
+        sanitizeCivilizationState(await this.getCivilizationStateInternal()) ??
+        createInitialCivilizationState();
+      const evalRes = evaluateAwards(
+        countersChanged ? { ...baseAwards, counters } : baseAwards,
+        {
+          economy: finalEconomy,
+          dailyStats: finalDailyStats,
+          quests: questsForAwards,
+          civilization: civForAwards,
+          todayDateKey: getLocalDateKey(awardNowMs),
+          nowMs: awardNowMs,
+        }
+      );
+      finalAwardState = evalRes.nextState;
+      newlyUnlockedAwards = evalRes.newlyUnlocked;
+      if (evalRes.mutated || countersChanged || rawAwards === undefined) {
+        items[STORAGE_KEYS.AWARDS] = evalRes.nextState;
+      }
+    } catch (awardError) {
+      console.warn(
+        '[StorageManager] Isolated awards evaluation failure; committing session without awards update:',
+        awardError
+      );
     }
 
     const keysToWrite = Object.keys(items);
@@ -356,6 +447,8 @@ export class StorageManager {
       dailyStats: finalDailyStats,
       questState: finalQuestState,
       civilizationState: finalCivilizationState,
+      awardState: finalAwardState,
+      newlyUnlockedAwards,
     };
   }
 
@@ -371,6 +464,8 @@ export class StorageManager {
     dailyStats: Record<string, DailyStatRecord>;
     questState?: QuestState;
     civilizationState?: CivilizationState;
+    awardState?: AwardState;
+    newlyUnlockedAwards?: readonly AwardUnlockEvent[];
   }> {
     return this.mutex.runExclusive(() => this.commitSessionOutcomeInternal(params));
   }
@@ -471,10 +566,11 @@ export class StorageManager {
   ): Promise<{ result: T; civilization: CivilizationState; economy: PlayerEconomy }> {
     return this.mutex.runExclusive(async () => {
       // 1. Read fresh states INSIDE the critical section via internal accessors (no mutex re-acquisition)
-      const [currentEconomy, rawCiv, dailyStats] = await Promise.all([
+      const [currentEconomy, rawCiv, dailyStats, rawAwards] = await Promise.all([
         this.getEconomyInternal(),
         this.getCivilizationStateInternal(),
         this.getDailyStatsInternal(),
+        this.adapter.get<unknown>(STORAGE_KEYS.AWARDS),
       ]);
 
       // 1.1 Invariant: Validate economy loaded from storage
@@ -588,6 +684,47 @@ export class StorageManager {
         hasChanges = true;
       }
 
+      try {
+        const awardNowMs = Date.now();
+        const baseAwards = sanitizeAwardState(rawAwards);
+        let counters = baseAwards.counters;
+        let countersChanged = false;
+        const buildingsBuiltDelta = outcome.awardCountersDelta?.buildingsBuilt;
+        if (
+          typeof buildingsBuiltDelta === 'number' &&
+          Number.isFinite(buildingsBuiltDelta) &&
+          buildingsBuiltDelta > 0
+        ) {
+          counters = {
+            ...counters,
+            totalBuildingsBuilt: counters.totalBuildingsBuilt + Math.floor(buildingsBuiltDelta),
+          };
+          countersChanged = true;
+        }
+        const rawQuests = await this.adapter.get<unknown>(STORAGE_KEYS.QUESTS);
+        const questsForAwards = sanitizeQuestState(rawQuests, awardNowMs);
+        const evalRes = evaluateAwards(
+          countersChanged ? { ...baseAwards, counters } : baseAwards,
+          {
+            economy: finalEconomy,
+            dailyStats,
+            quests: questsForAwards,
+            civilization: finalCivilization,
+            todayDateKey: getLocalDateKey(awardNowMs),
+            nowMs: awardNowMs,
+          }
+        );
+        if (evalRes.mutated || countersChanged || rawAwards === undefined) {
+          itemsToSet[STORAGE_KEYS.AWARDS] = evalRes.nextState;
+          hasChanges = true;
+        }
+      } catch (awardError) {
+        console.warn(
+          '[StorageManager] Isolated awards evaluation failure in civilization transaction:',
+          awardError
+        );
+      }
+
       if (hasChanges) {
         try {
           await this.adapter.setMultiple(itemsToSet);
@@ -595,10 +732,20 @@ export class StorageManager {
           // Rollback compensation: attempt to restore previous exact state on adapter write failure
           let rollbackError: unknown = null;
           try {
-            await this.adapter.setMultiple({
+            const restoreItems: Record<string, unknown> = {
               [STORAGE_KEYS.ECONOMY]: currentEconomy,
               [STORAGE_KEYS.CIVILIZATION]: currentCivilization,
-            });
+            };
+            if (rawAwards !== undefined) {
+              restoreItems[STORAGE_KEYS.AWARDS] = rawAwards;
+            }
+            await this.adapter.setMultiple(restoreItems);
+            if (
+              rawAwards === undefined &&
+              Object.prototype.hasOwnProperty.call(itemsToSet, STORAGE_KEYS.AWARDS)
+            ) {
+              await this.adapter.remove(STORAGE_KEYS.AWARDS);
+            }
           } catch (rbErr) {
             rollbackError = rbErr;
           }
@@ -696,15 +843,59 @@ export class StorageManager {
       [STORAGE_KEYS.QUESTS]: params.nextQuests,
     };
 
+    const rawAwards = await this.adapter.get<unknown>(STORAGE_KEYS.AWARDS);
+    try {
+      const awardNowMs = Date.now();
+      const baseAwards = sanitizeAwardState(rawAwards);
+      let counters: AwardCounters = {
+        ...baseAwards.counters,
+        totalQuestsClaimed: baseAwards.counters.totalQuestsClaimed + 1,
+      };
+      if (areAllActiveDailyQuestsClaimed(params.nextQuests)) {
+        counters = recordPerfectDayInCounters(counters, params.nextQuests.dailyDateKey);
+      }
+      const [dailyStats, rawCiv] = await Promise.all([
+        this.getDailyStatsInternal(),
+        this.getCivilizationStateInternal(),
+      ]);
+      const evalRes = evaluateAwards(
+        { ...baseAwards, counters },
+        {
+          economy: params.nextEconomy,
+          dailyStats,
+          quests: params.nextQuests,
+          civilization: sanitizeCivilizationState(rawCiv) ?? createInitialCivilizationState(),
+          todayDateKey: getLocalDateKey(awardNowMs),
+          nowMs: awardNowMs,
+        }
+      );
+      items[STORAGE_KEYS.AWARDS] = evalRes.nextState;
+    } catch (awardError) {
+      console.warn(
+        '[StorageManager] Isolated awards evaluation failure in quest claim:',
+        awardError
+      );
+    }
+
     try {
       await this.adapter.setMultiple(items);
     } catch (writeError) {
       let rollbackError: unknown = null;
       try {
-        await this.adapter.setMultiple({
+        const restoreItems: Record<string, unknown> = {
           [STORAGE_KEYS.ECONOMY]: params.previousEconomy,
           [STORAGE_KEYS.QUESTS]: params.previousQuests,
-        });
+        };
+        if (rawAwards !== undefined) {
+          restoreItems[STORAGE_KEYS.AWARDS] = rawAwards;
+        }
+        await this.adapter.setMultiple(restoreItems);
+        if (
+          rawAwards === undefined &&
+          Object.prototype.hasOwnProperty.call(items, STORAGE_KEYS.AWARDS)
+        ) {
+          await this.adapter.remove(STORAGE_KEYS.AWARDS);
+        }
       } catch (rbErr) {
         rollbackError = rbErr;
       }
@@ -720,6 +911,30 @@ export class StorageManager {
       throw writeError;
     }
   }
+
+  // --- Awards Storage (Schema v7) ---
+
+  async getRawAwardsInternal(): Promise<unknown> {
+    return this.adapter.get<unknown>(STORAGE_KEYS.AWARDS);
+  }
+
+  async getAwards(): Promise<AwardState> {
+    const raw = await this.adapter.get<unknown>(STORAGE_KEYS.AWARDS);
+    return sanitizeAwardState(raw);
+  }
+
+  async setAwards(state: AwardState): Promise<void> {
+    await this.adapter.set(STORAGE_KEYS.AWARDS, sanitizeAwardState(state));
+  }
+
+  async updateAwards(updater: (current: AwardState) => AwardState): Promise<AwardState> {
+    return this.mutex.runExclusive(async () => {
+      const current = await this.getAwards();
+      const updated = sanitizeAwardState(updater(current));
+      await this.setAwards(updated);
+      return updated;
+    });
+  }
 }
 
 export interface CivilizationTransactionContext {
@@ -734,5 +949,8 @@ export interface CivilizationTransactionOutcome<T> {
   readonly nextCivilization?: CivilizationState;
   readonly deductCoins?: number;
   readonly refundCoins?: number;
+  readonly awardCountersDelta?: {
+    readonly buildingsBuilt?: number;
+  };
   readonly onCommitted?: (committedCivilization: CivilizationState, committedEconomy: PlayerEconomy) => void;
 }

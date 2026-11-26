@@ -13,11 +13,13 @@ import {
   QuestCoordinatorError,
   validateClaimQuestPayload,
 } from './questCoordinator.ts';
+import { AwardsCoordinator } from './awardsCoordinator.ts';
 import { AppError, ErrorCode, extractCodedError } from '../types/errors.ts';
 
 export class MessageHandler {
   private civilizationCoordinator: CivilizationCoordinator;
   private questCoordinator: QuestCoordinator;
+  private awardsCoordinator: AwardsCoordinator;
 
   constructor(
     private sessionCoordinator: SessionCoordinator,
@@ -25,10 +27,12 @@ export class MessageHandler {
     private storage: StorageManager,
     civilizationCoordinator?: CivilizationCoordinator,
     private musicCoordinator?: MusicCoordinator,
-    questCoordinator?: QuestCoordinator
+    questCoordinator?: QuestCoordinator,
+    awardsCoordinator?: AwardsCoordinator
   ) {
     this.civilizationCoordinator = civilizationCoordinator ?? new CivilizationCoordinator(storage);
     this.questCoordinator = questCoordinator ?? new QuestCoordinator(storage);
+    this.awardsCoordinator = awardsCoordinator ?? new AwardsCoordinator(storage);
   }
 
   private getMusicCoordinator(): MusicCoordinator {
@@ -540,6 +544,17 @@ export class MessageHandler {
           const validPayload = validateClaimQuestPayload(msg.payload);
           const claimData = await this.questCoordinator.claimQuestReward(validPayload);
           return { success: true, data: claimData };
+        }
+
+        // --- Awards Actions ---
+        case 'GET_AWARDS_STATE': {
+          const awardsData = await this.awardsCoordinator.getAwardsState();
+          return { success: true, data: awardsData };
+        }
+
+        case 'MARK_AWARDS_SEEN': {
+          const markedData = await this.awardsCoordinator.markAwardsSeen(msg.payload);
+          return { success: true, data: markedData };
         }
 
         // --- Settings Actions ---

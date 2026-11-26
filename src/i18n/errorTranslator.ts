@@ -164,6 +164,8 @@ export const ALL_KNOWN_ERROR_CODES: readonly ErrorCode[] = [
   'QUEST_ALREADY_CLAIMED',
   'QUEST_EXPIRED',
   'QUEST_NOT_COMPLETED',
+  'INVALID_AWARDS_PAYLOAD',
+  'AWARDS_LOAD_FAILED',
 ] as const;
 
 function resolveBuildingDisplayByRawName(locale: SupportedLocale, rawName: string): string {
@@ -1080,6 +1082,14 @@ function translateByErrorCode(
           ? `Quest "${questId}" is not completed yet (${progress}/${target}).`
           : 'Quest is not completed yet.';
     }
+    case 'INVALID_AWARDS_PAYLOAD':
+      return isVi
+        ? 'Yêu cầu cập nhật trạng thái thành tựu không hợp lệ.'
+        : 'Invalid awards update request.';
+    case 'AWARDS_LOAD_FAILED':
+      return isVi
+        ? 'Không thể tải dữ liệu thành tựu.'
+        : 'Failed to load awards state.';
     case 'ACTION_FAILED': {
       if (rawFallback && !isTechnicalErrorString(rawFallback)) {
         if (!isVi) return rawFallback;

@@ -18,6 +18,8 @@ import {
   createInitialCivilizationState,
 } from '../core/civilization/civilizationState.ts';
 import { createInitialQuestState } from '../core/quests/questEngine.ts';
+import { backfillAwardsFromHistory } from '../core/awards/awardsEngine.ts';
+import { createInitialAwardState } from '../core/awards/awardsState.ts';
 import { isVillagerRole } from '../ui/components/civilization/spriteRegistry.ts';
 import {
   DevExportBundle,
@@ -37,6 +39,7 @@ import {
   applyDevSetCoins,
   applyDevSetLevel,
   applyDevSetTodayFocusMinutes,
+  applyDevUnlockAllAwards,
   applyDevUnlockLand,
   buildDevPresetState,
   buildDevSeedDemoState,
@@ -106,6 +109,7 @@ export function createDevBackgroundController(
     const dailyStats = await deps.storageManager.getDailyStats();
     const session = await deps.storageManager.getCurrentSession();
     const questState = await deps.storageManager.getQuests(nowMs);
+    const awards = await deps.storageManager.getAwards();
     const todayKey = getLocalDateKey(nowMs);
 
     return {
@@ -114,6 +118,7 @@ export function createDevBackgroundController(
       eraEvaluation: buildEraEvaluationSummary(civ, economy, dailyStats),
       session,
       questState,
+      awards,
       lifetimeFocusMinutes: calculateLifetimeFocusMinutes(dailyStats),
       todayFocusMinutes: dailyStats[todayKey]?.totalFocusMinutes ?? 0,
       timeSpeed,
@@ -311,7 +316,7 @@ export function createDevBackgroundController(
   async function clearSessionBeforeFullReplace(): Promise<void> {
     const existing = await deps.storageManager.getCurrentSession();
     if (existing && TimerStateMachine.isActive(existing.status)) {
-      await deps.sessionCoordinator.giveUpSession();
+      await deps.sessionCoordinator.giveUpCountdown();
     }
     await deps.sessionCoordinator.resetSession();
   }
@@ -476,6 +481,19 @@ export function createDevBackgroundController(
           return { success: true, data: await readSnapshot(nowMs) };
         }
 
+        case 'DEV_UNLOCK_ALL_AWARDS': {
+          const civ = await deps.civilizationCoordinator.getCivilizationState();
+          await deps.storageManager.updateAwards((cur) =>
+            applyDevUnlockAllAwards(cur, nowMs, civ.era)
+          );
+          return { success: true, data: await readSnapshot(nowMs) };
+        }
+
+        case 'DEV_RESET_AWARDS': {
+          await deps.storageManager.setAwards(createInitialAwardState());
+          return { success: true, data: await readSnapshot(nowMs) };
+        }
+
         case 'DEV_FAST_FORWARD_DAY': {
           const rawDays = (payload as { days?: unknown } | undefined)?.days;
           if (rawDays !== undefined && (!isStrictFiniteNumber(rawDays) || rawDays < 1)) {
@@ -504,6 +522,15 @@ export function createDevBackgroundController(
             await deps.storageManager.setCivilizationState(seeded.civ);
             await deps.storageManager.setQuests(seeded.questState);
             await deps.storageManager.setDailyStats(seeded.dailyStats);
+            const awardsEval = backfillAwardsFromHistory(createInitialAwardState(), {
+              economy: seeded.economy,
+              dailyStats: seeded.dailyStats,
+              quests: seeded.questState,
+              civilization: seeded.civ,
+              todayDateKey: getLocalDateKey(nowMs),
+              nowMs,
+            });
+            await deps.storageManager.setAwards(awardsEval.nextState);
             deps.civilizationCoordinator.refreshCachedBonuses(seeded.civ);
           });
           return { success: true, data: await readSnapshot(nowMs) };
@@ -525,17 +552,27 @@ export function createDevBackgroundController(
             await deps.storageManager.setCivilizationState(presetState.civ);
             await deps.storageManager.setQuests(presetState.questState);
             await deps.storageManager.setDailyStats(presetState.dailyStats);
+            const awardsEval = backfillAwardsFromHistory(createInitialAwardState(), {
+              economy: presetState.economy,
+              dailyStats: presetState.dailyStats,
+              quests: presetState.questState,
+              civilization: presetState.civ,
+              todayDateKey: getLocalDateKey(nowMs),
+              nowMs,
+            });
+            await deps.storageManager.setAwards(awardsEval.nextState);
             deps.civilizationCoordinator.refreshCachedBonuses(presetState.civ);
           });
           return { success: true, data: await readSnapshot(nowMs) };
         }
 
         case 'DEV_EXPORT_STATE': {
-          const [economy, civilization, quests, dailyStats, profiles, activeProfileId, settings] =
+          const [economy, civilization, quests, awards, dailyStats, profiles, activeProfileId, settings] =
             await Promise.all([
               deps.storageManager.getEconomy(),
               deps.civilizationCoordinator.getCivilizationState(),
               deps.storageManager.getQuests(nowMs),
+              deps.storageManager.getAwards(),
               deps.storageManager.getDailyStats(),
               deps.storageManager.getProfiles(),
               deps.storageManager.getActiveProfileId(),
@@ -547,6 +584,7 @@ export function createDevBackgroundController(
             economy,
             civilization,
             quests,
+            awards,
             dailyStats,
             profiles,
             activeProfileId,
@@ -566,6 +604,17 @@ export function createDevBackgroundController(
             await deps.storageManager.setCivilizationState(sanitized.civ);
             await deps.storageManager.setQuests(sanitized.quests);
             await deps.storageManager.setDailyStats(sanitized.dailyStats);
+            const nextAwards =
+              sanitized.awards ??
+              backfillAwardsFromHistory(createInitialAwardState(), {
+                economy: sanitized.economy,
+                dailyStats: sanitized.dailyStats,
+                quests: sanitized.quests,
+                civilization: sanitized.civ,
+                todayDateKey: getLocalDateKey(nowMs),
+                nowMs,
+              }).nextState;
+            await deps.storageManager.setAwards(nextAwards);
             if (sanitized.profiles && sanitized.profiles.length > 0) {
               await deps.storageManager.setProfiles(sanitized.profiles);
             }
@@ -600,6 +649,7 @@ export function createDevBackgroundController(
             await deps.storageManager.setEconomy(emptyEconomy);
             await deps.storageManager.setCivilizationState(emptyCiv);
             await deps.storageManager.setQuests(emptyQuests);
+            await deps.storageManager.setAwards(createInitialAwardState());
             await deps.storageManager.setDailyStats({});
             await deps.storageManager.setSettings(defaultSettings);
             deps.civilizationCoordinator.refreshCachedBonuses(emptyCiv);

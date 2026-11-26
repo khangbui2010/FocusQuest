@@ -13,6 +13,7 @@ import {
   getCrewSummary,
   projectJobs,
 } from '../../../core/civilization/jobs.ts';
+import { Villager, findVillageCave } from '../../../core/civilization/villager.ts';
 import { aggregateCoinBonus } from '../../../core/economy/coinBonus.ts';
 import { calculatePlayerLevel } from '../../../core/economy/levelSystem.ts';
 import { PlayerEconomy } from '../../../types/economy.ts';
@@ -58,6 +59,13 @@ import {
   isManualCameraLocked,
   transitionExpansionFlow,
 } from './expansionCamera.ts';
+import {
+  ActiveVillagerEntry,
+  MAX_CONCURRENT_VILLAGER_ENTRIES,
+  MapCameraViewportState,
+  computeVillagerCaveEntryPlan,
+  isCaveVisibleInViewport,
+} from './villagerEntryAnimation.ts';
 import { useTranslation } from '../../../i18n/I18nContext.tsx';
 import {
   localizeErrorMessage,
@@ -114,6 +122,9 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
     useState<ActiveExpansionReveal | null>(null);
   const [unrevealedChunkOrigin, setUnrevealedChunkOrigin] = useState<GridCoordinate | null>(null);
   const [expansionAnnouncement, setExpansionAnnouncement] = useState<string>('');
+  const [activeVillagerEntries, setActiveVillagerEntries] = useState<
+    readonly ActiveVillagerEntry[]
+  >([]);
 
   const isMountedRef = useRef<boolean>(true);
   const flowStateRef = useRef<ExpansionFlowState>('NORMAL');
@@ -124,6 +135,8 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
   const revealSequenceIdRef = useRef<number>(0);
   const impactTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const completeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const villagerEntryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const mapCameraStateRef = useRef<MapCameraViewportState | null>(null);
 
   const updateFlowState = useCallback((next: ExpansionFlowState) => {
     const validated = transitionExpansionFlow(flowStateRef.current, next);
@@ -143,13 +156,107 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
     }
   }, []);
 
+  const clearVillagerEntryTimers = useCallback(() => {
+    for (const timer of villagerEntryTimersRef.current.values()) {
+      clearTimeout(timer);
+    }
+    villagerEntryTimersRef.current.clear();
+  }, []);
+
+  const handleVillagerEntryComplete = useCallback((villagerId: string) => {
+    const existingTimer = villagerEntryTimersRef.current.get(villagerId);
+    if (existingTimer !== undefined) {
+      clearTimeout(existingTimer);
+      villagerEntryTimersRef.current.delete(villagerId);
+    }
+    if (!isMountedRef.current) return;
+    setActiveVillagerEntries((prev) => prev.filter((e) => e.villager.id !== villagerId));
+  }, []);
+
+  const enqueueVillagerCaveEntry = useCallback(
+    (villager: Villager, nextCivState: CivilizationState) => {
+      if (prefersReducedMotion()) return;
+      if (typeof document !== 'undefined' && document.hidden) return;
+
+      const cave = findVillageCave(nextCivState.buildings, nextCivState.jobs);
+      if (!cave) return;
+
+      const cam = mapCameraStateRef.current;
+      if (cam && !isCaveVisibleInViewport({ cave, ...cam })) {
+        return;
+      }
+
+      const gridMap = GridMap.fromSnapshot(nextCivState.grid);
+      const plan = computeVillagerCaveEntryPlan({
+        cave,
+        buildings: nextCivState.buildings,
+        gridMap,
+      });
+      if (!plan) return;
+
+      const prevTimer = villagerEntryTimersRef.current.get(villager.id);
+      if (prevTimer !== undefined) {
+        clearTimeout(prevTimer);
+        villagerEntryTimersRef.current.delete(villager.id);
+      }
+
+      const entry: ActiveVillagerEntry = {
+        villager,
+        plan,
+        startedAt: Date.now(),
+      };
+
+      setActiveVillagerEntries((prev) => {
+        const filtered = prev.filter((e) => e.villager.id !== villager.id);
+        const appended = [...filtered, entry];
+        if (appended.length <= MAX_CONCURRENT_VILLAGER_ENTRIES) {
+          return appended;
+        }
+        const overflow = appended.length - MAX_CONCURRENT_VILLAGER_ENTRIES;
+        const dropped = appended.slice(0, overflow);
+        for (const item of dropped) {
+          const tId = villagerEntryTimersRef.current.get(item.villager.id);
+          if (tId !== undefined) {
+            clearTimeout(tId);
+            villagerEntryTimersRef.current.delete(item.villager.id);
+          }
+        }
+        return appended.slice(overflow);
+      });
+
+      const timer = setTimeout(() => {
+        villagerEntryTimersRef.current.delete(villager.id);
+        if (!isMountedRef.current) return;
+        setActiveVillagerEntries((prev) => prev.filter((e) => e.villager.id !== villager.id));
+      }, plan.totalDurationMs + 32);
+
+      villagerEntryTimersRef.current.set(villager.id, timer);
+    },
+    []
+  );
+
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
       clearRevealTimers();
+      clearVillagerEntryTimers();
     };
-  }, [clearRevealTimers]);
+  }, [clearRevealTimers, clearVillagerEntryTimers]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const handleVisibility = () => {
+      if (document.hidden) {
+        clearVillagerEntryTimers();
+        setActiveVillagerEntries([]);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [clearVillagerEntryTimers]);
 
   // Post-commit chunk-set diff detector: never fires on initial hydrate, drives CHOPPING -> TERRAIN_UPDATING -> CAMERA_RETURNING
   useEffect(() => {
@@ -623,6 +730,7 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
         setCivState(res.data.civilizationState);
         setEconomy(res.data.economy);
         setRecruitSuccessRole(res.data.villager.role);
+        enqueueVillagerCaveEntry(res.data.villager, res.data.civilizationState);
         await onStateMutated?.();
       } else {
         setRecruitModalError({
@@ -868,6 +976,9 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
           unrevealedChunkOrigin={unrevealedChunkOrigin}
           onCinematicArrived={handleCinematicArrived}
           onCameraReturnArrived={handleCameraReturnArrived}
+          activeVillagerEntries={activeVillagerEntries}
+          onVillagerEntryComplete={handleVillagerEntryComplete}
+          cameraViewportRef={mapCameraStateRef}
         />
       )}
 

@@ -4,3 +4,4 @@ export * from './profiles.ts';
 export * from './storageSchema.ts';
 export * from './messages.ts';
 export * from './quests.ts';
+export * from './awards.ts';

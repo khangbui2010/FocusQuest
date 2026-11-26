@@ -4,6 +4,7 @@ import { FocusProfile } from './profiles.ts';
 import { CivilizationState } from '../core/civilization/civilizationState.ts';
 import { SupportedLocale } from '../i18n/types.ts';
 import { QuestState } from './quests.ts';
+import { AwardState } from './awards.ts';
 
 export interface DailyStatRecord {
   date: string;               // ISO date string 'YYYY-MM-DD'
@@ -34,4 +35,5 @@ export interface StorageSchema {
   settings: UserSettings;
   civilization?: CivilizationState;
   quests?: QuestState;
+  awards?: AwardState;
 }

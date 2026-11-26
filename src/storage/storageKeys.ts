@@ -15,6 +15,7 @@ export const STORAGE_KEYS = {
   MUSIC_STATE: 'fq_music_state',
   MUSIC_CATALOG_CACHE: 'fq_music_catalog_cache',
   QUESTS: 'fq_quests',
+  AWARDS: 'fq_awards',
 } as const;
 
 export type StorageKey = typeof STORAGE_KEYS[keyof typeof STORAGE_KEYS];

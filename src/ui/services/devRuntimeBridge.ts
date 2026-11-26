@@ -4,6 +4,7 @@ import type { DailyStatRecord } from '../../types/storageSchema.ts';
 import type { CivilizationState } from '../../core/civilization/civilizationState.ts';
 import type { QuestState } from '../../types/quests.ts';
 import type { MusicPlayerState } from '../../types/music.ts';
+import type { AwardState } from '../../types/awards.ts';
 
 export type SimPluginMessageHandler = (message: {
   readonly action: string;
@@ -19,6 +20,8 @@ export interface SimStateAdapter {
   setCivState: (next: CivilizationState) => void;
   getQuestState: () => QuestState;
   setQuestState: (next: QuestState) => void;
+  getAwardState: () => AwardState;
+  setAwardState: (next: AwardState) => void;
   getMusicState: () => MusicPlayerState;
   setMusicState: (next: MusicPlayerState) => void;
   getCustomDailyStats: () => Record<string, DailyStatRecord> | null;

@@ -135,7 +135,10 @@ export type ErrorCode =
   | 'QUEST_PERIOD_MISMATCH'
   | 'QUEST_ALREADY_CLAIMED'
   | 'QUEST_EXPIRED'
-  | 'QUEST_NOT_COMPLETED';
+  | 'QUEST_NOT_COMPLETED'
+  // Awards
+  | 'INVALID_AWARDS_PAYLOAD'
+  | 'AWARDS_LOAD_FAILED';
 
 export class AppError extends Error {
   readonly code: ErrorCode;

@@ -120,7 +120,7 @@ test('i18n Static Key-Usage Guard: every t(...) and translate(...) key in src/ e
 
   // Explicit allowlist of typed / domain-verified non-literal expressions passed to t(...)
   const ALLOWED_DYNAMIC_T_EXPRESSIONS = new Set([
-    'tab.labelKey', // BuildingCatalogPanel typed filter tab key
+    'tab.labelKey', // BuildingCatalogPanel & AwardsView typed filter tab key
     'CATEGORY_LABEL_KEYS[def.category]', // BuildingCatalogPanel Record<BuildingCategory, TranslationKey>
     'MONTH_SHORT_KEYS[monthNumber - 1]', // statsPeriod stats.monthShort.1..12 verified below
     'eraKey', // Header eras.<CivilizationEra> verified across ERA_ORDER below
@@ -129,6 +129,9 @@ test('i18n Static Key-Usage Guard: every t(...) and translate(...) key in src/ e
     'def.titleKey as TranslationKey', // QuestView QUEST_CATALOG verified below
     'def.descriptionKey as TranslationKey', // QuestView QUEST_CATALOG verified below
     'slotLabelKey', // QuestView SLOT_LABEL_KEYS verified below
+    'award.titleKey as TranslationKey', // AwardsView & AwardDetailsModal STONE_AGE_AWARDS_CATALOG verified below
+    'award.descriptionKey as TranslationKey', // AwardsView & AwardDetailsModal STONE_AGE_AWARDS_CATALOG verified below
+    'awardToast.titleKey as TranslationKey', // App award unlock toast STONE_AGE_AWARDS_CATALOG verified below
   ]);
 
   const staticCallRe = /(?:^|[^.\w$])(?:t\(|translate\(\s*[^,]+,)\s*(['"])([a-zA-Z0-9_.-]+)\1/gm;
@@ -214,6 +217,14 @@ test('i18n Static Key-Usage Guard: every t(...) and translate(...) key in src/ e
       const key = `quests.slot.${period}.${slot}`;
       if (!enSet.has(key) || !viSet.has(key)) {
         missingKeys.push(`QuestSlot(${period}:${slot}) -> '${key}'`);
+      }
+    }
+  }
+  const { STONE_AGE_AWARDS_CATALOG } = await import('../../src/core/awards/awardsCatalog.ts');
+  for (const award of STONE_AGE_AWARDS_CATALOG) {
+    for (const key of [award.titleKey, award.descriptionKey]) {
+      if (!enSet.has(key) || !viSet.has(key)) {
+        missingKeys.push(`STONE_AGE_AWARDS_CATALOG(${award.id}) -> '${key}'`);
       }
     }
   }

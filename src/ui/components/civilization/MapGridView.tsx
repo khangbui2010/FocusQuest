@@ -37,6 +37,11 @@ export type { ConstructionToolSpec } from './constructionTools.ts';
 export { CONSTRUCTION_TOOL_TILES, getConstructionToolSpec };
 import { formatJobCountdown } from './jobProjection.ts';
 import { useVillagerWander } from './useVillagerWander.ts';
+import {
+  ActiveVillagerEntry,
+  MapCameraViewportState,
+  sampleVillagerEntryFrame,
+} from './villagerEntryAnimation.ts';
 import { TERRAIN_DECOR_SEED } from './terrainDecor.ts';
 import { TerrainBitmapCanvas } from './TerrainBitmapCanvas.tsx';
 import { ConstructionFence } from './ConstructionFence.tsx';
@@ -93,6 +98,9 @@ export interface MapGridViewProps {
   unrevealedChunkOrigin?: GridCoordinate | null;
   onCinematicArrived?: () => void;
   onCameraReturnArrived?: () => void;
+  activeVillagerEntries?: readonly ActiveVillagerEntry[];
+  onVillagerEntryComplete?: (villagerId: string) => void;
+  cameraViewportRef?: React.MutableRefObject<MapCameraViewportState | null>;
 }
 
 export const CELL_SIZE = MAP_CELL_PX;
@@ -108,6 +116,8 @@ const WHEEL_ZOOM_STEP = 0.125;
 const DRAG_THRESHOLD_PX = 4;
 const EMPTY_VILLAGERS: readonly Villager[] = [];
 const EMPTY_JOBS: readonly ConstructionJob[] = [];
+const EMPTY_VILLAGER_ENTRIES: readonly ActiveVillagerEntry[] = [];
+const EMPTY_STRING_SET: ReadonlySet<string> = new Set<string>();
 
 const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 
@@ -232,6 +242,9 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
   unrevealedChunkOrigin = null,
   onCinematicArrived,
   onCameraReturnArrived,
+  activeVillagerEntries = EMPTY_VILLAGER_ENTRIES,
+  onVillagerEntryComplete,
+  cameraViewportRef,
 }) => {
   const { locale, t } = useTranslation();
   const effectiveJobs = projectedJobs ?? civilizationState.jobs ?? EMPTY_JOBS;
@@ -250,6 +263,82 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
 
   const reducedMotion = prefersReducedMotion();
 
+  const activeEntryIds = useMemo(() => {
+    if (reducedMotion || activeVillagerEntries.length === 0) {
+      return EMPTY_STRING_SET;
+    }
+    return new Set(activeVillagerEntries.map((entry) => entry.villager.id));
+  }, [reducedMotion, activeVillagerEntries]);
+
+  const [entryNowMs, setEntryNowMs] = useState<number>(() => Date.now());
+  const onVillagerEntryCompleteRef = useRef(onVillagerEntryComplete);
+  onVillagerEntryCompleteRef.current = onVillagerEntryComplete;
+
+  useEffect(() => {
+    if (activeVillagerEntries.length === 0) return;
+    if (reducedMotion) {
+      for (const entry of activeVillagerEntries) {
+        onVillagerEntryCompleteRef.current?.(entry.villager.id);
+      }
+      return;
+    }
+
+    let rafId: number | null = null;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+
+    const tick = () => {
+      if (cancelled) return;
+      const now = Date.now();
+      setEntryNowMs(now);
+      let anyRemaining = false;
+      for (const entry of activeVillagerEntries) {
+        const elapsed = entry.previewElapsedMs ?? Math.max(0, now - entry.startedAt);
+        if (elapsed >= entry.plan.totalDurationMs) {
+          onVillagerEntryCompleteRef.current?.(entry.villager.id);
+        } else {
+          anyRemaining = true;
+        }
+      }
+      if (!anyRemaining) return;
+      if (typeof requestAnimationFrame === 'function') {
+        rafId = requestAnimationFrame(tick);
+      } else {
+        timerId = setTimeout(tick, 50);
+      }
+    };
+
+    if (typeof requestAnimationFrame === 'function') {
+      rafId = requestAnimationFrame(tick);
+    } else {
+      timerId = setTimeout(tick, 50);
+    }
+
+    return () => {
+      cancelled = true;
+      if (rafId !== null && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(rafId);
+      }
+      if (timerId !== null) {
+        clearTimeout(timerId);
+      }
+    };
+  }, [activeVillagerEntries, reducedMotion]);
+
+  const visibleEntryFrames = useMemo(() => {
+    if (reducedMotion || activeVillagerEntries.length === 0) {
+      return [];
+    }
+    return activeVillagerEntries.map((entry) => {
+      const elapsed =
+        entry.previewElapsedMs ?? Math.max(0, entryNowMs - entry.startedAt);
+      return {
+        entry,
+        frame: sampleVillagerEntryFrame(entry.plan, elapsed),
+      };
+    });
+  }, [reducedMotion, activeVillagerEntries, entryNowMs]);
+
   const displayVillagers = useMemo(
     () =>
       getEffectiveVillagersForDisplay(
@@ -265,6 +354,7 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
     gridMap,
     isPaused: isExpansionActive || cameraLocked,
     reducedMotion,
+    suppressedVillagerIds: activeEntryIds,
   });
 
   const boundingBox = useMemo(() => gridMap.getBoundingBox(), [gridMap]);
@@ -347,6 +437,21 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
     };
   }, [clearZoomTransitionTimer, cancelCinematicMotion]);
 
+  const syncCameraViewportRef = useCallback(() => {
+    if (!cameraViewportRef) return;
+    cameraViewportRef.current = {
+      pan: panRef.current,
+      zoom: zoomRef.current,
+      viewport: viewportSizeRef.current,
+      renderBox: renderBoxRef.current,
+      cellSize: CELL_SIZE,
+    };
+  }, [cameraViewportRef]);
+
+  useEffect(() => {
+    syncCameraViewportRef();
+  }, [pan, zoom, renderBox, syncCameraViewportRef]);
+
   // Track viewport size safely for snapshot completeness and resize resilience
   useEffect(() => {
     const el = containerRef.current;
@@ -357,6 +462,7 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
         width: Math.max(0, Math.round(width)),
         height: Math.max(0, Math.round(height)),
       };
+      syncCameraViewportRef();
     };
 
     const rect = el.getBoundingClientRect();
@@ -376,7 +482,7 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
     return () => {
       observer.disconnect();
     };
-  }, []);
+  }, [syncCameraViewportRef]);
 
   const hasMovedRef = useRef<boolean>(false);
   const dragStartRef = useRef<{
@@ -1166,8 +1272,8 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
           );
         })}
 
-        {/* Wandering Villagers Layer (UI-only memory positions, zero storage writes) */}
-        {villagerWanderStates.length > 0 && (
+        {/* Wandering & Arriving Villagers Layer (UI-only memory positions, zero storage writes) */}
+        {(villagerWanderStates.length > 0 || visibleEntryFrames.length > 0) && (
           <div
             data-testid="map-villagers-layer"
             className="absolute inset-0 z-[11] pointer-events-none"
@@ -1202,6 +1308,47 @@ export const MapGridView: React.FC<MapGridViewProps> = ({
                   <VillagerSprite
                     role={v.role}
                     animation={v.animation}
+                    scale={MAP_RENDER_MULTIPLIER}
+                    reducedMotion={reducedMotion}
+                  />
+                </div>
+              );
+            })}
+            {visibleEntryFrames.map(({ entry, frame }) => {
+              const xPx = (frame.x - renderBox.minX) * CELL_SIZE;
+              const yPx = (frame.y - renderBox.minY) * CELL_SIZE;
+              const roleLabel =
+                entry.villager.role === 'elder'
+                  ? t('civ.villager.role.elder')
+                  : entry.villager.role === 'crafter'
+                  ? t('civ.villager.role.crafter')
+                  : t('civ.villager.role.woodworker');
+              const rowZIndex = Math.max(1, Math.round(frame.y) - renderBox.minY + 1);
+              return (
+                <div
+                  key={`entry-${entry.villager.id}`}
+                  data-testid={`map-villager-entry-${entry.villager.id}`}
+                  data-villager-id={entry.villager.id}
+                  data-villager-role={entry.villager.role}
+                  data-entry-mode={entry.plan.mode}
+                  data-animation={frame.animation}
+                  data-direction={frame.direction}
+                  data-cell={`${frame.cell.x},${frame.cell.y}`}
+                  title={t('civ.map.villagerTooltip', { role: roleLabel })}
+                  style={{
+                    left: 0,
+                    top: 0,
+                    width: CELL_SIZE,
+                    height: CELL_SIZE,
+                    transform: `translate(${xPx}px, ${yPx}px)`,
+                    opacity: frame.opacity,
+                    zIndex: rowZIndex,
+                  }}
+                  className="fq-villager-entry-sprite absolute pointer-events-none flex items-end justify-center"
+                >
+                  <VillagerSprite
+                    role={entry.villager.role}
+                    animation={frame.animation}
                     scale={MAP_RENDER_MULTIPLIER}
                     reducedMotion={reducedMotion}
                   />

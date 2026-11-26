@@ -14,6 +14,8 @@ import { calculateLifetimeFocusMinutes, isValidDateKey } from '../core/stats/sta
 import { getLocalDateKey } from '../core/utils/dateUtils.ts';
 import { createInitialCivilizationState } from '../core/civilization/civilizationState.ts';
 import { createInitialQuestState } from '../core/quests/questEngine.ts';
+import { backfillAwardsFromHistory } from '../core/awards/awardsEngine.ts';
+import { createInitialAwardState } from '../core/awards/awardsState.ts';
 import { isVillagerRole } from '../ui/components/civilization/spriteRegistry.ts';
 import { DevExportBundle, DevSnapshotData, DevTimeSpeed } from './devTypes.ts';
 import {
@@ -29,6 +31,7 @@ import {
   applyDevSetCoins,
   applyDevSetLevel,
   applyDevSetTodayFocusMinutes,
+  applyDevUnlockAllAwards,
   applyDevUnlockLand,
   buildDevPresetState,
   buildDevSeedDemoState,
@@ -74,6 +77,7 @@ function buildSimSnapshot(adapter: SimStateAdapter, nowMs: number = Date.now()):
   const state = adapter.getFullState();
   const civ = adapter.getCivState();
   const questState = adapter.getQuestState();
+  const awards = adapter.getAwardState();
   const dailyStats = resolveEffectiveDailyStats(adapter, nowMs);
   const todayKey = getLocalDateKey(nowMs);
 
@@ -83,6 +87,7 @@ function buildSimSnapshot(adapter: SimStateAdapter, nowMs: number = Date.now()):
     eraEvaluation: buildEraEvaluationSummary(civ, state.economy, dailyStats),
     session: state.currentSession,
     questState,
+    awards,
     lifetimeFocusMinutes: calculateLifetimeFocusMinutes(dailyStats),
     todayFocusMinutes: state.todayStats?.totalFocusMinutes ?? dailyStats[todayKey]?.totalFocusMinutes ?? 0,
     timeSpeed: simulatorTimeSpeed,
@@ -384,6 +389,17 @@ export function handleSimDevMessage(message: {
         return { success: true, data: buildSimSnapshot(adapter, nowMs) };
       }
 
+      case 'DEV_UNLOCK_ALL_AWARDS': {
+        const civ = adapter.getCivState();
+        adapter.setAwardState(applyDevUnlockAllAwards(adapter.getAwardState(), nowMs, civ.era));
+        return { success: true, data: buildSimSnapshot(adapter, nowMs) };
+      }
+
+      case 'DEV_RESET_AWARDS': {
+        adapter.setAwardState(createInitialAwardState());
+        return { success: true, data: buildSimSnapshot(adapter, nowMs) };
+      }
+
       case 'DEV_FAST_FORWARD_DAY': {
         const rawDays = (payload as { days?: unknown } | undefined)?.days;
         if (rawDays !== undefined && (!isStrictFiniteNumber(rawDays) || rawDays < 1)) {
@@ -422,6 +438,16 @@ export function handleSimDevMessage(message: {
         adapter.setCivState(seeded.civ);
         adapter.setQuestState(seeded.questState);
         adapter.setCustomDailyStats(seeded.dailyStats);
+        adapter.setAwardState(
+          backfillAwardsFromHistory(createInitialAwardState(), {
+            economy: seeded.economy,
+            dailyStats: seeded.dailyStats,
+            quests: seeded.questState,
+            civilization: seeded.civ,
+            todayDateKey: todayKey,
+            nowMs,
+          }).nextState
+        );
         const st = adapter.getFullState();
         adapter.setFullState({
           ...st,
@@ -445,6 +471,16 @@ export function handleSimDevMessage(message: {
         adapter.setCivState(preset.civ);
         adapter.setQuestState(preset.questState);
         adapter.setCustomDailyStats(preset.dailyStats);
+        adapter.setAwardState(
+          backfillAwardsFromHistory(createInitialAwardState(), {
+            economy: preset.economy,
+            dailyStats: preset.dailyStats,
+            quests: preset.questState,
+            civilization: preset.civ,
+            todayDateKey: todayKey,
+            nowMs,
+          }).nextState
+        );
         const st = adapter.getFullState();
         adapter.setFullState({
           ...st,
@@ -473,6 +509,7 @@ export function handleSimDevMessage(message: {
           economy: st.economy,
           civilization: adapter.getCivState(),
           quests: adapter.getQuestState(),
+          awards: adapter.getAwardState(),
           dailyStats: resolveEffectiveDailyStats(adapter, nowMs),
           profiles: adapter.getProfiles(),
           activeProfileId: st.activeProfile?.id ?? '',
@@ -488,6 +525,17 @@ export function handleSimDevMessage(message: {
         adapter.setCivState(sanitized.civ);
         adapter.setQuestState(sanitized.quests);
         adapter.setCustomDailyStats(sanitized.dailyStats);
+        adapter.setAwardState(
+          sanitized.awards ??
+            backfillAwardsFromHistory(createInitialAwardState(), {
+              economy: sanitized.economy,
+              dailyStats: sanitized.dailyStats,
+              quests: sanitized.quests,
+              civilization: sanitized.civ,
+              todayDateKey: todayKey,
+              nowMs,
+            }).nextState
+        );
         if (sanitized.profiles && sanitized.profiles.length > 0) {
           adapter.setProfiles(sanitized.profiles);
         }
@@ -523,6 +571,7 @@ export function handleSimDevMessage(message: {
         const emptyStats: Record<string, DailyStatRecord> = {};
         adapter.setCivState(createInitialCivilizationState());
         adapter.setQuestState(createInitialQuestState(nowMs));
+        adapter.setAwardState(createInitialAwardState());
         adapter.setCustomDailyStats(emptyStats);
         adapter.setFullState({
           ...st,

@@ -47,6 +47,8 @@ const UNDOABLE_ACTIONS = new Set<DevActionName>([
   'DEV_MEET_ERA_REQUIREMENTS',
   'DEV_COMPLETE_ALL_QUESTS',
   'DEV_ROLLOVER_QUESTS',
+  'DEV_UNLOCK_ALL_AWARDS',
+  'DEV_RESET_AWARDS',
   'DEV_FAST_FORWARD_DAY',
   'DEV_SEED_DEMO_DATA',
   'DEV_APPLY_PRESET',
@@ -792,19 +794,40 @@ const DevGodModePanelInner: React.FC<DevGodModePanelProps> = ({
             </div>
           </section>
 
-          {/* 7. Awards (Honest Placeholder Notice) */}
-          <section className="space-y-1 rounded-xl bg-slate-900/70 border border-slate-800 p-2 opacity-75">
-            <div className="font-semibold text-[11px] text-slate-400 uppercase tracking-wider">
-              Awards
+          {/* 7. Awards */}
+          <section className="space-y-1.5 rounded-xl bg-slate-900/70 border border-slate-800 p-2">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-[11px] text-slate-300 uppercase tracking-wider">
+                Awards
+              </span>
+              <span className="text-[10px] font-mono text-slate-400">
+                {Object.values(snapshot?.awards?.unlocked ?? {}).reduce(
+                  (acc, m) => acc + Object.keys(m).length,
+                  0
+                )}{' '}
+                tiers
+              </span>
             </div>
-            <button
-              type="button"
-              disabled
-              data-testid="dev-unlock-awards-disabled"
-              className="w-full rounded bg-slate-800 py-1 text-[10px] text-slate-400 cursor-not-allowed"
-            >
-              Unlock all awards (disabled — Awards tab is Coming soon)
-            </button>
+            <div className="grid grid-cols-2 gap-1">
+              <button
+                type="button"
+                data-testid="dev-unlock-all-awards"
+                disabled={busyAction !== null}
+                onClick={() => void runAction('Unlock all awards', 'DEV_UNLOCK_ALL_AWARDS')}
+                className="rounded bg-amber-700 hover:bg-amber-600 py-1 text-[10px] font-semibold text-white cursor-pointer"
+              >
+                Unlock All Awards
+              </button>
+              <button
+                type="button"
+                data-testid="dev-reset-awards"
+                disabled={busyAction !== null}
+                onClick={() => void runAction('Reset awards', 'DEV_RESET_AWARDS')}
+                className="rounded bg-slate-800 hover:bg-slate-700 py-1 text-[10px] font-medium cursor-pointer"
+              >
+                Reset Awards
+              </button>
+            </div>
           </section>
 
           {/* 8. Data Tools */}

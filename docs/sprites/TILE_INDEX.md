@@ -46,6 +46,12 @@ Used in Phase 4b (`src/ui/components/FocusSceneArea.tsx`): earth-toned character
     - Stage `2` (`50–74%`): Lower `65%` revealed + scaffolding frame
     - Stage `3` (`75–99%`): Lower `90%` revealed before full sprite swap upon job completion
 
+## Stone Age Awards Icons (`src/ui/components/awards/AwardIcon.tsx` & `src/core/awards/awardsCatalog.ts`)
+- **Zero new binary sprite assets** — all 13 Stone Age awards reuse existing CC0/origin tile sheets via `TileImage` & `ClockTileIcon`:
+  - `clock_tiles_16.png`: `#1` Hourglass (`focus_hours`), `#2` Stopwatch (`long_haul`)
+  - `kenney-tiny-town/tilemap_packed.png`: `#17` sprout (`player_level`), `#83` wooden sign (`quest_keeper`), `#93` coin (`perfect_day`), `#95` target (`focus_sessions`), `#106` wood log (`focus_streak`), `#115` pickaxe (`master_builder`), `#117` banner/flag (`era_ready`), `#127` woodcutter axe (`land_clearer`)
+  - `kenney-tiny-dungeon/tilemap_packed.png`: `#86` bearded villager (`tribe`), `#99` woman (`tribe_complete`), `#117` hammer (`builder`)
+
 ## Palette used by Tiny Town (hex)
 Outline/dark: #3f2631, #3d212d, #262b44
 Greens: #84c669, #479f4a, #65a556, #8bd87d

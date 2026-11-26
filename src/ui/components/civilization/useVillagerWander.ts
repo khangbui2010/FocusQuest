@@ -18,6 +18,7 @@ export interface UseVillagerWanderOptions {
   readonly gridMap: GridMap;
   readonly isPaused: boolean;
   readonly reducedMotion: boolean;
+  readonly suppressedVillagerIds?: ReadonlySet<string>;
 }
 
 /**
@@ -32,11 +33,19 @@ export function useVillagerWander({
   gridMap,
   isPaused,
   reducedMotion,
+  suppressedVillagerIds,
 }: UseVillagerWanderOptions): readonly VillagerWanderState[] {
   const world = useMemo(() => buildWanderWorld(gridMap, buildings), [gridMap, buildings]);
 
+  const activeVillagers = useMemo(() => {
+    if (reducedMotion || !suppressedVillagerIds || suppressedVillagerIds.size === 0) {
+      return villagers;
+    }
+    return villagers.filter((v) => !suppressedVillagerIds.has(v.id));
+  }, [villagers, reducedMotion, suppressedVillagerIds]);
+
   const [wanderStates, setWanderStates] = useState<readonly VillagerWanderState[]>(() =>
-    createInitialWanderStates(villagers, world)
+    createInitialWanderStates(activeVillagers, world)
   );
 
   const [isDocumentHidden, setIsDocumentHidden] = useState<boolean>(() =>
@@ -62,11 +71,11 @@ export function useVillagerWander({
       isFirstSyncRef.current = false;
       return;
     }
-    setWanderStates((prev) => syncWanderStates(prev, villagers, world, false));
-  }, [villagers, world]);
+    setWanderStates((prev) => syncWanderStates(prev, activeVillagers, world, false));
+  }, [activeVillagers, world]);
 
   useEffect(() => {
-    if (reducedMotion || isPaused || isDocumentHidden || villagers.length === 0) {
+    if (reducedMotion || isPaused || isDocumentHidden || activeVillagers.length === 0) {
       setWanderStates((prev) => pauseWanderStates(prev));
       return;
     }
@@ -79,7 +88,7 @@ export function useVillagerWander({
     return () => {
       clearInterval(timerId);
     };
-  }, [reducedMotion, isPaused, isDocumentHidden, villagers.length, world]);
+  }, [reducedMotion, isPaused, isDocumentHidden, activeVillagers.length, world]);
 
   const staticReducedMotionStates = useMemo<readonly VillagerWanderState[]>(() => {
     if (!reducedMotion) return [];

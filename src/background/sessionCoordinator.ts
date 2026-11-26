@@ -1059,6 +1059,8 @@ export class SessionCoordinator {
           advanceCivilizationJobsSeconds: questOutcomeDelta
             ? questOutcomeDelta.completedFocusMinutes * 60
             : 0,
+          longestSessionCandidateMinutes:
+            completedIntervals > 0 ? rewardFocusMinutes : undefined,
         });
         await this.triggerCivilizationAdvancedHookInternal(commitResult.civilizationState);
 
@@ -1154,6 +1156,9 @@ export class SessionCoordinator {
         advanceCivilizationJobsSeconds: questOutcomeDelta
           ? questOutcomeDelta.completedFocusMinutes * 60
           : 0,
+        longestSessionCandidateMinutes: rewardResult.isThresholdMet
+          ? actualFocusMinutes
+          : undefined,
       });
       await this.triggerCivilizationAdvancedHookInternal(commitResult.civilizationState);
 
@@ -1262,6 +1267,7 @@ export class SessionCoordinator {
         advanceCivilizationJobsSeconds: questOutcomeDelta
           ? questOutcomeDelta.completedFocusMinutes * 60
           : 0,
+        longestSessionCandidateMinutes: session.targetMinutes,
       });
       await this.triggerCivilizationAdvancedHookInternal(commitResult.civilizationState);
 
@@ -1517,6 +1523,7 @@ export class SessionCoordinator {
               advanceCivilizationJobsSeconds: questOutcomeDelta
                 ? questOutcomeDelta.completedFocusMinutes * 60
                 : 0,
+              longestSessionCandidateMinutes: plannedFocusMinutes,
             });
             await this.triggerCivilizationAdvancedHookInternal(commitResult.civilizationState);
             console.log(`[POMODORO] Focus completion persisted: completedCount=${newCompletedCount}, totalFocusMins=${plannedFocusMinutes}`);

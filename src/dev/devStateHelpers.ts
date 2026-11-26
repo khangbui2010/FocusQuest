@@ -52,6 +52,10 @@ import { getLocalDateKey } from '../core/utils/dateUtils.ts';
 import { getLocalWeekStartKeyFromDateKey } from '../core/quests/questDates.ts';
 import { FocusProfile } from '../types/profiles.ts';
 import { UserSettings } from '../types/storageSchema.ts';
+import { AwardState } from '../types/awards.ts';
+import { STONE_AGE_AWARDS_CATALOG } from '../core/awards/awardsCatalog.ts';
+import { sanitizeAwardState } from '../core/awards/awardsState.ts';
+import { isEraUnlocked } from '../core/civilization/buildingTypes.ts';
 import {
   DEV_PRESET_IDS,
   DevExportBundle,
@@ -917,10 +921,45 @@ export function buildDevSeedDemoState(nowMs: number = Date.now()): {
   };
 }
 
+export function applyDevUnlockAllAwards(
+  current: AwardState | null | undefined,
+  nowMs: number = Date.now(),
+  era: CivilizationEra = 'STONE_AGE'
+): AwardState {
+  const safeNow = isStrictFiniteNumber(nowMs) && nowMs >= 0 ? Math.floor(nowMs) : Date.now();
+  const base = sanitizeAwardState(current);
+  const unlocked: AwardState['unlocked'] = {};
+  for (const [awardId, tiers] of Object.entries(base.unlocked)) {
+    unlocked[awardId] = { ...tiers };
+  }
+
+  for (const def of STONE_AGE_AWARDS_CATALOG) {
+    if (!isEraUnlocked(era, def.availableFrom)) continue;
+    if (!unlocked[def.id]) {
+      unlocked[def.id] = {};
+    }
+    for (const tierSpec of def.tiers) {
+      if (!isEraUnlocked(era, tierSpec.availableFrom)) continue;
+      if (!unlocked[def.id][tierSpec.tier]) {
+        unlocked[def.id][tierSpec.tier] = {
+          unlockedAt: safeNow,
+          seen: false,
+        };
+      }
+    }
+  }
+
+  return {
+    ...base,
+    unlocked,
+  };
+}
+
 export interface SanitizedImportPayload {
   readonly economy: PlayerEconomy;
   readonly civ: CivilizationState;
   readonly quests: QuestState;
+  readonly awards?: AwardState;
   readonly dailyStats: Record<string, DailyStatRecord>;
   readonly profiles?: FocusProfile[];
   readonly activeProfileId?: string;
@@ -1043,10 +1082,14 @@ export function sanitizeImportedBundle(
     };
   }
 
+  const sanitizedAwards =
+    rec.awards !== undefined ? sanitizeAwardState(rec.awards) : undefined;
+
   return {
     economy,
     civ: sanitizedCiv,
     quests: sanitizedQuests,
+    awards: sanitizedAwards,
     dailyStats: cleanStats,
     profiles: cleanProfiles,
     activeProfileId: cleanActiveProfileId,

@@ -6,6 +6,7 @@ import type { FocusProfile } from '../types/profiles.ts';
 import type { QuestPeriod, QuestState } from '../types/quests.ts';
 import type { SessionSnapshot } from '../types/session.ts';
 import type { DailyStatRecord, UserSettings } from '../types/storageSchema.ts';
+import type { AwardState } from '../types/awards.ts';
 
 export type DevTimeSpeed = 1 | 10 | 60 | 600;
 
@@ -43,6 +44,8 @@ export type DevActionName =
   | 'DEV_MEET_ERA_REQUIREMENTS'
   | 'DEV_COMPLETE_ALL_QUESTS'
   | 'DEV_ROLLOVER_QUESTS'
+  | 'DEV_UNLOCK_ALL_AWARDS'
+  | 'DEV_RESET_AWARDS'
   | 'DEV_FAST_FORWARD_DAY'
   | 'DEV_SEED_DEMO_DATA'
   | 'DEV_APPLY_PRESET'
@@ -61,6 +64,7 @@ export interface DevSnapshotData {
   readonly eraEvaluation: EraAdvanceEvaluation;
   readonly session: SessionSnapshot | null;
   readonly questState: QuestState;
+  readonly awards: AwardState;
   readonly lifetimeFocusMinutes: number;
   readonly todayFocusMinutes: number;
   readonly timeSpeed: DevTimeSpeed;
@@ -72,6 +76,7 @@ export interface DevExportBundle {
   readonly economy: PlayerEconomy;
   readonly civilization: CivilizationState;
   readonly quests: QuestState;
+  readonly awards?: AwardState;
   readonly dailyStats: Record<string, DailyStatRecord>;
   readonly profiles: FocusProfile[];
   readonly activeProfileId: string;
@@ -104,6 +109,8 @@ export interface DevPayloadByAction {
   DEV_MEET_ERA_REQUIREMENTS: undefined;
   DEV_COMPLETE_ALL_QUESTS: undefined;
   DEV_ROLLOVER_QUESTS: { period: QuestPeriod };
+  DEV_UNLOCK_ALL_AWARDS: undefined;
+  DEV_RESET_AWARDS: undefined;
   DEV_FAST_FORWARD_DAY: { days?: number };
   DEV_SEED_DEMO_DATA: undefined;
   DEV_APPLY_PRESET: { presetId: DevPresetId };

@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Trophy } from 'lucide-react';
+import { X } from 'lucide-react';
 import { Header } from './ui/components/Header.tsx';
 import { Navbar, ActiveTab } from './ui/components/Navbar.tsx';
 import { TimerView } from './ui/components/TimerView.tsx';
 import { ProfileBottomSheet } from './ui/components/ProfileBottomSheet.tsx';
 import { StatsView } from './ui/components/StatsView.tsx';
 import { QuestView } from './ui/components/quests/QuestView.tsx';
+import { AwardsView, AwardIcon } from './ui/components/awards/index.ts';
 import { RewardHelpModal } from './ui/components/RewardHelpModal.tsx';
 import { MusicPlayerSheet } from './ui/components/MusicPlayerSheet.tsx';
 import { CivilizationScreen } from './ui/components/civilization/CivilizationScreen.tsx';
@@ -17,6 +18,7 @@ import {
   getCivilizationStateClient,
   getMusicStateClient,
   getQuestStateClient,
+  getAwardsStateClient,
 } from './ui/services/extensionClient.ts';
 import { skipPomodoroBreakAction } from './ui/services/sessionActions.ts';
 import {
@@ -39,9 +41,18 @@ import { extractCivilizationCoinBonuses } from './core/civilization/civilization
 import { aggregateCoinBonus } from './core/economy/coinBonus.ts';
 import { MusicPlayerState, MusicTrack, RepeatMode } from './types/music.ts';
 import { I18nProvider, useTranslation } from './i18n/I18nContext.tsx';
-import { SupportedLocale } from './i18n/types.ts';
+import { SupportedLocale, TranslationKey } from './i18n/types.ts';
 import { resolveLocale, translate } from './i18n/translator.ts';
+import { AwardIconSpec } from './types/awards.ts';
 import { AppError, ErrorCode } from './types/errors.ts';
+
+interface AwardUnlockToastData {
+  readonly key: string;
+  readonly titleKey: string;
+  readonly level: number;
+  readonly isSingleLevel: boolean;
+  readonly icon: AwardIconSpec;
+}
 
 const DEFAULT_ECONOMY: PlayerEconomy = {
   focusCoins: 120,
@@ -99,6 +110,11 @@ interface PopupShellProps {
   questStateVersion?: number;
   onUnclaimedQuestCountChange?: (count: number) => void;
   onQuestClaimed?: (result: ClaimQuestRewardResponseData) => void | Promise<void>;
+  unseenAwardCount?: number;
+  awardsStateVersion?: number;
+  onUnseenAwardCountChange?: (count: number) => void;
+  awardToast?: AwardUnlockToastData | null;
+  onDismissAwardToast?: () => void;
   settings: UserSettings | null;
   isLoading: boolean;
   activeTab: ActiveTab;
@@ -165,6 +181,11 @@ export const PopupShell: React.FC<PopupShellProps> = ({
   questStateVersion = 0,
   onUnclaimedQuestCountChange,
   onQuestClaimed,
+  unseenAwardCount = 0,
+  awardsStateVersion = 0,
+  onUnseenAwardCountChange,
+  awardToast = null,
+  onDismissAwardToast,
   settings,
   isLoading,
   activeTab,
@@ -233,6 +254,49 @@ export const PopupShell: React.FC<PopupShellProps> = ({
         onToggleLanguage={onToggleLanguage}
       />
 
+      {awardToast && (
+        <div
+          data-testid="award-unlock-toast"
+          role="status"
+          aria-live="polite"
+          className="absolute top-12 left-3 right-3 z-40 flex items-center gap-2.5 px-3 py-2 rounded-xl border border-amber-300 dark:border-amber-700 bg-white/95 dark:bg-slate-900/95 shadow-lg transition-opacity duration-150 motion-reduce:transition-none"
+        >
+          <AwardIcon
+            icon={awardToast.icon}
+            unlocked
+            level={awardToast.level}
+            isSingleLevel={awardToast.isSingleLevel}
+            size={24}
+          />
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] font-semibold text-amber-700 dark:text-amber-300 leading-none">
+              {t('awards.toast.title')}
+            </p>
+            <p className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate mt-0.5">
+              {awardToast.isSingleLevel
+                ? t('awards.toast.bodySingle', {
+                    title: t(awardToast.titleKey as TranslationKey),
+                  })
+                : t('awards.toast.body', {
+                    title: t(awardToast.titleKey as TranslationKey),
+                    level: awardToast.level,
+                  })}
+            </p>
+          </div>
+          {onDismissAwardToast && (
+            <button
+              type="button"
+              data-testid="award-toast-dismiss"
+              aria-label={t('awards.toast.dismissAria')}
+              onClick={onDismissAwardToast}
+              className="p-1 rounded-md text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer shrink-0"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      )}
+
       <main
         className={`flex-1 min-h-0 flex flex-col ${
           effectiveTab === 'map' ? 'overflow-hidden' : 'overflow-y-auto'
@@ -286,25 +350,10 @@ export const PopupShell: React.FC<PopupShellProps> = ({
         )}
 
         {effectiveTab === 'awards' && (
-          <section
-            data-testid="awards-placeholder-view"
-            className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-3"
-          >
-            <div className="w-11 h-11 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-200/80 dark:border-amber-800/60 flex items-center justify-center text-amber-600 dark:text-amber-400">
-              <Trophy className="w-5 h-5" />
-            </div>
-            <div className="space-y-1">
-              <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100">
-                {t('awards.placeholder.title')}
-              </h2>
-              <p className="inline-block px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/50 border border-amber-200/80 dark:border-amber-800/60 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
-                {t('awards.placeholder.comingSoon')}
-              </p>
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-[260px] leading-relaxed">
-              {t('awards.placeholder.description')}
-            </p>
-          </section>
+          <AwardsView
+            refreshTrigger={awardsStateVersion}
+            onUnseenCountChange={onUnseenAwardCountChange}
+          />
         )}
 
         {effectiveTab === 'stats' && (
@@ -340,6 +389,7 @@ export const PopupShell: React.FC<PopupShellProps> = ({
           isSessionActive={isSessionActive}
           session={session}
           unclaimedQuestCount={unclaimedQuestCount}
+          unseenAwardCount={unseenAwardCount}
         />
       )}
 
@@ -399,12 +449,49 @@ export const App: React.FC<AppProps> = ({
   const [civState, setCivState] = useState<CivilizationState | null>(null);
   const [unclaimedQuestCount, setUnclaimedQuestCount] = useState<number>(0);
   const [questStateVersion, setQuestStateVersion] = useState<number>(0);
+  const [unseenAwardCount, setUnseenAwardCount] = useState<number>(0);
+  const [awardsStateVersion, setAwardsStateVersion] = useState<number>(0);
+  const [awardToast, setAwardToast] = useState<AwardUnlockToastData | null>(null);
+  const hasInitializedAwardsRef = useRef(false);
+  const knownUnlockedTierKeysRef = useRef<Set<string>>(new Set());
+  const awardToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [musicState, setMusicState] = useState<MusicPlayerState>(DEFAULT_MUSIC_STATE);
   const [musicCatalog, setMusicCatalog] = useState<readonly MusicTrack[]>([]);
   const [locationHash, setLocationHash] = useState<string>(() =>
     typeof window !== 'undefined' ? window.location.hash : ''
   );
+
+  const dismissAwardToast = useCallback(() => {
+    if (awardToastTimerRef.current) {
+      clearTimeout(awardToastTimerRef.current);
+      awardToastTimerRef.current = null;
+    }
+    setAwardToast(null);
+  }, []);
+
+  const showAwardToast = useCallback((nextToast: AwardUnlockToastData) => {
+    if (awardToastTimerRef.current) {
+      clearTimeout(awardToastTimerRef.current);
+      awardToastTimerRef.current = null;
+    }
+    setAwardToast(nextToast);
+    if (typeof window !== 'undefined') {
+      awardToastTimerRef.current = setTimeout(() => {
+        setAwardToast(null);
+        awardToastTimerRef.current = null;
+      }, 4500);
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (awardToastTimerRef.current) {
+        clearTimeout(awardToastTimerRef.current);
+        awardToastTimerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -495,19 +582,53 @@ export const App: React.FC<AppProps> = ({
         }
       });
 
+      const awardsPromise = getAwardsStateClient().then((awardsRes) => {
+        if (awardsRes.success && awardsRes.data) {
+          const data = awardsRes.data;
+          setUnseenAwardCount(data.unseenCount);
+          setAwardsStateVersion((v) => v + 1);
+
+          let latestNewUnlock: AwardUnlockToastData | null = null;
+          for (const award of data.awards) {
+            for (const tier of award.tiers) {
+              if (!tier.unlocked) continue;
+              const tierKey = `${award.id}:${tier.tier}`;
+              if (!knownUnlockedTierKeysRef.current.has(tierKey)) {
+                knownUnlockedTierKeysRef.current.add(tierKey);
+                if (hasInitializedAwardsRef.current && !tier.seen) {
+                  latestNewUnlock = {
+                    key: tierKey,
+                    titleKey: award.titleKey,
+                    level: tier.tier,
+                    isSingleLevel: award.isSingleLevel,
+                    icon: award.icon,
+                  };
+                }
+              }
+            }
+          }
+          if (!hasInitializedAwardsRef.current) {
+            hasInitializedAwardsRef.current = true;
+          } else if (latestNewUnlock) {
+            showAwardToast(latestNewUnlock);
+          }
+        }
+      });
+
       await Promise.all([
         statePromise,
         profilesPromise,
         civPromise,
         musicPromise,
         questPromise,
+        awardsPromise,
       ]);
     } catch {
       // Non-blocking fallback
     } finally {
       setHasResolvedInitialSession(true);
     }
-  }, []);
+  }, [showAwardToast]);
 
   const handleQuestClaimed = useCallback(
     async (result: ClaimQuestRewardResponseData) => {
@@ -942,6 +1063,11 @@ export const App: React.FC<AppProps> = ({
       questStateVersion={questStateVersion}
       onUnclaimedQuestCountChange={setUnclaimedQuestCount}
       onQuestClaimed={handleQuestClaimed}
+      unseenAwardCount={unseenAwardCount}
+      awardsStateVersion={awardsStateVersion}
+      onUnseenAwardCountChange={setUnseenAwardCount}
+      awardToast={awardToast}
+      onDismissAwardToast={dismissAwardToast}
       settings={settings}
       isLoading={isLoading}
       activeTab={activeTab}

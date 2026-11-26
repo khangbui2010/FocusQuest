@@ -14,6 +14,7 @@ import { CivilizationCoordinator } from './civilizationCoordinator.ts';
 import { ChromeOffscreenAdapter } from '../chrome/offscreenAdapter.ts';
 import { MusicCoordinator, deriveMusicIntent } from './musicCoordinator.ts';
 import { QuestCoordinator } from './questCoordinator.ts';
+import { AwardsCoordinator } from './awardsCoordinator.ts';
 
 import { LifecycleReason } from '../types/lifecycle.ts';
 import { OffscreenMusicEvent } from '../types/music.ts';
@@ -34,6 +35,7 @@ const civilizationCoordinator = new CivilizationCoordinator(storageManager);
 const offscreenAdapter = new ChromeOffscreenAdapter();
 const musicCoordinator = new MusicCoordinator(storageManager, offscreenAdapter);
 const questCoordinator = new QuestCoordinator(storageManager);
+const awardsCoordinator = new AwardsCoordinator(storageManager);
 
 const sessionCoordinator = new SessionCoordinator(
   storageManager,
@@ -60,7 +62,8 @@ const messageHandler = new MessageHandler(
   storageManager,
   civilizationCoordinator,
   musicCoordinator,
-  questCoordinator
+  questCoordinator,
+  awardsCoordinator
 );
 
 // 2. Synchronous Top-Level Chrome Event Listeners Registration

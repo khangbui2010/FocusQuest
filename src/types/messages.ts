@@ -8,6 +8,11 @@ import { CivilizationState } from '../core/civilization/civilizationState.ts';
 import { SupportedLocale } from '../i18n/types.ts';
 import { MusicPlayerState, MusicTrack, RepeatMode } from './music.ts';
 import { QuestPeriod, QuestResetCountdown, QuestState } from './quests.ts';
+import {
+  GetAwardsStateResponseData,
+  MarkAwardsSeenPayload,
+  MarkAwardsSeenResponseData,
+} from './awards.ts';
 import { ErrorParams } from './errors.ts';
 import { Villager } from '../core/civilization/villager.ts';
 import { ConstructionJob } from '../core/civilization/jobs.ts';
@@ -44,6 +49,8 @@ export type MessageAction =
   | 'SELECT_FOUNDER'
   | 'GET_QUEST_STATE'
   | 'CLAIM_QUEST_REWARD'
+  | 'GET_AWARDS_STATE'
+  | 'MARK_AWARDS_SEEN'
   | 'SET_LANGUAGE'
   | 'SET_CHIME_ENABLED'
   | 'SET_MUSIC_PLAYER_EXPANDED'
@@ -260,6 +267,8 @@ export type ExtensionMessage =
   | { action: 'SELECT_FOUNDER'; payload: SelectFounderPayload }
   | { action: 'GET_QUEST_STATE' }
   | { action: 'CLAIM_QUEST_REWARD'; payload: ClaimQuestRewardPayload }
+  | { action: 'GET_AWARDS_STATE' }
+  | { action: 'MARK_AWARDS_SEEN'; payload?: MarkAwardsSeenPayload }
   | { action: 'SET_LANGUAGE'; payload: SetLanguagePayload }
   | { action: 'SET_CHIME_ENABLED'; payload: SetChimeEnabledPayload }
   | { action: 'SET_MUSIC_PLAYER_EXPANDED'; payload: SetMusicPlayerExpandedPayload }
@@ -275,6 +284,8 @@ export type ExtensionMessage =
   | { action: 'MUSIC_SET_SHUFFLE'; payload: MusicSetShufflePayload }
   | { action: 'MUSIC_SET_REPEAT'; payload: MusicSetRepeatPayload }
   | { action: 'MUSIC_REFRESH_CATALOG' };
+
+export type { GetAwardsStateResponseData, MarkAwardsSeenPayload, MarkAwardsSeenResponseData };
 
 export interface MessageResponse<T = unknown> {
   success: boolean;

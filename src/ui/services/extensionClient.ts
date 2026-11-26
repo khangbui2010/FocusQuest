@@ -26,7 +26,25 @@ import {
   ClaimQuestRewardPayload,
   ClaimQuestRewardResponseData,
   GetQuestStateResponseData,
+  GetAwardsStateResponseData,
+  MarkAwardsSeenPayload,
+  MarkAwardsSeenResponseData,
 } from '../../types/messages.ts';
+import {
+  AwardCounters,
+  AwardEvaluationContext,
+  AwardState,
+} from '../../types/awards.ts';
+import {
+  areAllActiveDailyQuestsClaimed,
+  buildAwardViewModels,
+  countUnseenAwards,
+  createInitialAwardState,
+  evaluateAwards,
+  markAwardsAsSeen,
+  recordPerfectDayInCounters,
+  sanitizeAwardState,
+} from '../../core/awards/index.ts';
 import { QuestErrorCode, QuestPeriod, QuestProgress, QuestState } from '../../types/quests.ts';
 import { extractCodedError } from '../../types/errors.ts';
 import {
@@ -423,6 +441,101 @@ export function createInitialSimulatedQuestState(
 }
 
 let mockQuestState: QuestState = createInitialSimulatedQuestState();
+let mockAwardState: AwardState = createInitialAwardState();
+
+function getSimulatedDailyStatsMap(nowMs: number): Record<string, DailyStatRecord> {
+  const todayKey = getLocalDateKey(nowMs);
+  return mockCustomDailyStats
+    ? {
+        ...mockCustomDailyStats,
+        ...(mockState.todayStats && mockState.todayStats.date === todayKey
+          ? { [todayKey]: { ...mockState.todayStats } }
+          : {}),
+      }
+    : buildSimulatedDailyStats(todayKey, mockState.todayStats);
+}
+
+function buildMockAwardContext(nowMs: number): AwardEvaluationContext {
+  return {
+    economy: mockState.economy,
+    dailyStats: getSimulatedDailyStatsMap(nowMs),
+    quests: mockQuestState,
+    civilization: mockCivilizationState,
+    todayDateKey: getLocalDateKey(nowMs),
+    nowMs,
+  };
+}
+
+function countNewlyCompletedPlaceJobs(
+  prevJobs: readonly ConstructionJob[] | undefined,
+  nextJobs: readonly ConstructionJob[] | undefined
+): number {
+  const postPlaceIds = new Set(
+    (nextJobs ?? []).filter((j) => j.kind === 'place').map((j) => j.id)
+  );
+  let count = 0;
+  for (const job of prevJobs ?? []) {
+    if (job.kind === 'place' && !postPlaceIds.has(job.id)) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+function syncMockAwards(
+  nowMs: number,
+  options?: {
+    readonly longestSessionCandidateMinutes?: number;
+    readonly completedPlaceBuilds?: number;
+    readonly questsClaimedDelta?: number;
+    readonly checkPerfectDay?: boolean;
+  }
+) {
+  const sanitized = sanitizeAwardState(mockAwardState);
+  let counters: AwardCounters = sanitized.counters;
+
+  if (
+    typeof options?.longestSessionCandidateMinutes === 'number' &&
+    Number.isFinite(options.longestSessionCandidateMinutes) &&
+    options.longestSessionCandidateMinutes > 0
+  ) {
+    const candidate = Math.floor(options.longestSessionCandidateMinutes);
+    if (candidate > counters.longestSessionMinutes) {
+      counters = {
+        ...counters,
+        longestSessionMinutes: candidate,
+      };
+    }
+  }
+
+  if (typeof options?.completedPlaceBuilds === 'number' && options.completedPlaceBuilds > 0) {
+    counters = {
+      ...counters,
+      totalBuildingsBuilt: counters.totalBuildingsBuilt + Math.floor(options.completedPlaceBuilds),
+    };
+  }
+
+  if (typeof options?.questsClaimedDelta === 'number' && options.questsClaimedDelta > 0) {
+    counters = {
+      ...counters,
+      totalQuestsClaimed: counters.totalQuestsClaimed + Math.floor(options.questsClaimedDelta),
+    };
+  }
+
+  if (options?.checkPerfectDay && areAllActiveDailyQuestsClaimed(mockQuestState)) {
+    counters = recordPerfectDayInCounters(counters, mockQuestState.dailyDateKey);
+  }
+
+  const evalRes = evaluateAwards(
+    {
+      ...sanitized,
+      counters,
+    },
+    buildMockAwardContext(nowMs)
+  );
+  mockAwardState = evalRes.nextState;
+  return evalRes;
+}
 
 // Fallback in-memory mock Music Player state + dynamic online catalog cache + browser preview audio
 const PREVIEW_CATALOG_CACHE_KEY = 'fq_preview_music_catalog_cache';
@@ -846,6 +959,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
                     autoContinue: completedSession.autoContinueJobs,
                   }
                 : undefined;
+            const prevJobs = mockCivilizationState.jobs;
             mockCivilizationState = {
               ...advanceJobs(
                 mockCivilizationState,
@@ -855,6 +969,14 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
               lastUpdated: now,
             };
             mockGridMap = GridMap.fromSnapshot(mockCivilizationState.grid);
+            const completedPlaceBuilds = countNewlyCompletedPlaceJobs(
+              prevJobs,
+              mockCivilizationState.jobs
+            );
+            syncMockAwards(now, {
+              longestSessionCandidateMinutes: currentSession.targetMinutes,
+              completedPlaceBuilds,
+            });
           }
           syncSimulatedMusicWithSession();
         }
@@ -1118,6 +1240,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
                       autoContinue: completedSession.autoContinueJobs,
                     }
                   : undefined;
+              const prevJobs = mockCivilizationState.jobs;
               mockCivilizationState = {
                 ...advanceJobs(
                   mockCivilizationState,
@@ -1127,6 +1250,14 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
                 lastUpdated: now,
               };
               mockGridMap = GridMap.fromSnapshot(mockCivilizationState.grid);
+              const completedPlaceBuilds = countNewlyCompletedPlaceJobs(
+                prevJobs,
+                mockCivilizationState.jobs
+              );
+              syncMockAwards(now, {
+                longestSessionCandidateMinutes: plannedFocusMinutes,
+                completedPlaceBuilds,
+              });
             }
             syncSimulatedMusicWithSession();
             return { success: true, data: completedSession as unknown as T };
@@ -1518,6 +1649,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
                 autoContinue: updatedSession.autoContinueJobs,
               }
             : undefined;
+        const prevJobs = mockCivilizationState.jobs;
         mockCivilizationState = {
           ...advanceJobs(
             mockCivilizationState,
@@ -1527,6 +1659,18 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
           lastUpdated: now,
         };
         mockGridMap = GridMap.fromSnapshot(mockCivilizationState.grid);
+        const completedPlaceBuilds = countNewlyCompletedPlaceJobs(
+          prevJobs,
+          mockCivilizationState.jobs
+        );
+        const isValidCompletedStopwatch =
+          s.mode === 'POMODORO_STOPWATCH'
+            ? (updatedPomodoroState?.completedFocusCount ?? 0) > 0
+            : actualFocusMins >= 5;
+        syncMockAwards(now, {
+          longestSessionCandidateMinutes: isValidCompletedStopwatch ? actualFocusMins : undefined,
+          completedPlaceBuilds,
+        });
       }
 
       syncSimulatedMusicWithSession();
@@ -2008,6 +2152,9 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         jobs: nextJobs,
         lastUpdated: now,
       };
+      if (placeSpec.durationSeconds === 0) {
+        syncMockAwards(now, { completedPlaceBuilds: 1 });
+      }
 
       const resData: PlaceBuildingResponseData = {
         building: newBuilding,
@@ -2601,6 +2748,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         jobs: nextJobs,
         lastUpdated: now,
       };
+      syncMockAwards(now);
 
       const resData: RecruitVillagerResponseData = {
         villager,
@@ -2652,6 +2800,7 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         jobs: nextJobs,
         lastUpdated: now,
       };
+      syncMockAwards(now);
 
       const resData: SelectFounderResponseData = {
         founderRole: role,
@@ -3007,12 +3156,63 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
         totalXP: newTotalXP,
         level: calculatePlayerLevel(newTotalXP),
       };
+      syncMockAwards(now, {
+        questsClaimedDelta: 1,
+        checkPerfectDay: period === 'DAILY',
+      });
 
       const data: ClaimQuestRewardResponseData = {
         questState: mockQuestState,
         economy: { ...mockState.economy },
         claimedCoins: claimRes.coins,
         claimedXp: claimRes.xp,
+      };
+      return { success: true, data: data as unknown as T };
+    }
+
+    case 'GET_AWARDS_STATE': {
+      const evalRes = syncMockAwards(now);
+      const data: GetAwardsStateResponseData = {
+        awardState: evalRes.nextState,
+        awards: evalRes.viewModels,
+        unseenCount: evalRes.unseenCount,
+        era: mockCivilizationState.era,
+      };
+      return { success: true, data: data as unknown as T };
+    }
+
+    case 'MARK_AWARDS_SEEN': {
+      const payload = (message as { payload?: MarkAwardsSeenPayload }).payload;
+      if (payload !== undefined) {
+        if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+          return {
+            success: false,
+            error: 'MARK_AWARDS_SEEN payload must be an object.',
+            errorCode: 'INVALID_AWARDS_PAYLOAD',
+          };
+        }
+        if (
+          payload.awardIds !== undefined &&
+          (!Array.isArray(payload.awardIds) ||
+            payload.awardIds.some((id) => typeof id !== 'string' || id.trim().length === 0))
+        ) {
+          return {
+            success: false,
+            error: 'MARK_AWARDS_SEEN awardIds must be an array of non-empty strings.',
+            errorCode: 'INVALID_AWARDS_PAYLOAD',
+          };
+        }
+      }
+
+      const context = buildMockAwardContext(now);
+      const evalRes = evaluateAwards(sanitizeAwardState(mockAwardState), context);
+      const seenRes = markAwardsAsSeen(evalRes.nextState, payload?.awardIds);
+      mockAwardState = seenRes.nextState;
+      const awards = buildAwardViewModels(seenRes.nextState, context);
+      const data: MarkAwardsSeenResponseData = {
+        awardState: seenRes.nextState,
+        awards,
+        unseenCount: countUnseenAwards(seenRes.nextState),
       };
       return { success: true, data: data as unknown as T };
     }
@@ -3177,6 +3377,27 @@ export async function claimQuestRewardClient(
 }
 
 /**
+ * Typed client helper: fetch evaluated Awards progression, tiers, and unseen count.
+ */
+export async function getAwardsStateClient(): Promise<MessageResponse<GetAwardsStateResponseData>> {
+  return sendExtensionMessage<GetAwardsStateResponseData>({
+    action: 'GET_AWARDS_STATE',
+  });
+}
+
+/**
+ * Typed client helper: mark newly unlocked Awards (all or subset) as seen.
+ */
+export async function markAwardsSeenClient(
+  payload?: MarkAwardsSeenPayload
+): Promise<MessageResponse<MarkAwardsSeenResponseData>> {
+  return sendExtensionMessage<MarkAwardsSeenResponseData>({
+    action: 'MARK_AWARDS_SEEN',
+    ...(payload ? { payload } : {}),
+  });
+}
+
+/**
  * Test-only helper to seed the in-memory simulator CivilizationState & Economy.
  */
 export function seedMockCivilizationForTest(
@@ -3215,6 +3436,10 @@ if (
     getQuestState: () => mockQuestState,
     setQuestState: (next) => {
       mockQuestState = next;
+    },
+    getAwardState: () => mockAwardState,
+    setAwardState: (next) => {
+      mockAwardState = sanitizeAwardState(next);
     },
     getMusicState: () => mockMusicState,
     setMusicState: (next) => {

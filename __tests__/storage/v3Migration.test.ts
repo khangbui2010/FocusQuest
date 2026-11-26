@@ -112,13 +112,13 @@ test('Migration v3: upgrades v2 -> v3 preserving 100% of player data with zero h
   await storage.set(STORAGE_KEYS.CIVILIZATION, v2Civ);
   await storage.set(STORAGE_KEYS.CURRENT_SESSION, v2Session);
 
-  assert.strictEqual(CURRENT_SCHEMA_VERSION, 6);
+  assert.strictEqual(CURRENT_SCHEMA_VERSION, 7);
 
   const runner = new MigrationRunner(storage);
   const res = await runner.runMigrations();
   assert.strictEqual(res.previousVersion, 2);
-  assert.strictEqual(res.currentVersion, 6);
-  assert.strictEqual(await storage.get<number>(STORAGE_KEYS.SCHEMA_VERSION), 6);
+  assert.strictEqual(res.currentVersion, 7);
+  assert.strictEqual(await storage.get<number>(STORAGE_KEYS.SCHEMA_VERSION), 7);
 
   // All prior v2 data preserved bit-for-bit (v6 adds default jobs/founderRole)
   assert.deepStrictEqual(await storage.get<PlayerEconomy>(STORAGE_KEYS.ECONOMY), v2Economy);
@@ -154,11 +154,11 @@ test('Migration v3: upgrades v2 -> v3 preserving 100% of player data with zero h
   assert.strictEqual(quests.streak.lastCompletedDateKey, null);
 });
 
-test('Migration v3: upgrades empty storage & legacy v1 storage cleanly up to v6', async () => {
+test('Migration v3: upgrades empty storage & legacy v1 storage cleanly up to CURRENT_SCHEMA_VERSION', async () => {
   const emptyStorage = new MemoryStorageAdapter();
   const resEmpty = await new MigrationRunner(emptyStorage).runMigrations();
   assert.strictEqual(resEmpty.previousVersion, 0);
-  assert.strictEqual(resEmpty.currentVersion, 6);
+  assert.strictEqual(resEmpty.currentVersion, CURRENT_SCHEMA_VERSION);
   assert.ok(await emptyStorage.get(STORAGE_KEYS.PROFILES));
   assert.ok(await emptyStorage.get(STORAGE_KEYS.CIVILIZATION));
   assert.ok(await emptyStorage.get(STORAGE_KEYS.QUESTS));
@@ -168,7 +168,7 @@ test('Migration v3: upgrades empty storage & legacy v1 storage cleanly up to v6'
   await v1Storage.set(STORAGE_KEYS.ECONOMY, { focusCoins: 18.75, totalXP: 125, level: 2 });
   const resV1 = await new MigrationRunner(v1Storage).runMigrations();
   assert.strictEqual(resV1.previousVersion, 1);
-  assert.strictEqual(resV1.currentVersion, 6);
+  assert.strictEqual(resV1.currentVersion, CURRENT_SCHEMA_VERSION);
   assert.strictEqual((await v1Storage.get<PlayerEconomy>(STORAGE_KEYS.ECONOMY))?.focusCoins, 18.75);
   assert.ok(await v1Storage.get(STORAGE_KEYS.CIVILIZATION));
   assert.ok(await v1Storage.get(STORAGE_KEYS.QUESTS));
@@ -195,8 +195,8 @@ test('Migration v3: strictly idempotent and preserves existing quest progress & 
 
   // Re-running MigrationRunner skips cleanly
   const second = await runner.runMigrations();
-  assert.strictEqual(second.previousVersion, 6);
-  assert.strictEqual(second.currentVersion, 6);
+  assert.strictEqual(second.previousVersion, CURRENT_SCHEMA_VERSION);
+  assert.strictEqual(second.currentVersion, CURRENT_SCHEMA_VERSION);
   assert.deepStrictEqual(await storage.get<QuestState>(STORAGE_KEYS.QUESTS), state);
 
   // Even calling v3_questsSchema.up directly after forcing version 2 preserves valid quest state
