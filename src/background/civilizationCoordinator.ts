@@ -17,10 +17,13 @@ import {
   CivilizationState,
   createInitialCivilizationState,
   sanitizeCivilizationState,
+  isValidEra,
   CURRENT_CIVILIZATION_SCHEMA_VERSION,
 } from '../core/civilization/civilizationState.ts';
 import {
   BuildingInstance,
+  CIVILIZATION_ERAS,
+  CivilizationEra,
   isEraUnlocked,
 } from '../core/civilization/buildingTypes.ts';
 import { getBuildingDefinition } from '../core/civilization/buildingCatalog.ts';
@@ -30,7 +33,12 @@ import {
 } from '../core/civilization/placementValidator.ts';
 import { extractCivilizationCoinBonuses } from '../core/civilization/civilizationBonusHelper.ts';
 import { getVillagerBuffSummary } from '../core/civilization/villagerBuffs.ts';
-import { getEffectiveMaxLevel } from '../core/civilization/eraRules.ts';
+import {
+  applyEraAdvance,
+  evaluateEraAdvance,
+  getEffectiveMaxLevel,
+  getNextEra,
+} from '../core/civilization/eraRules.ts';
 import {
   calculateBuildingDemolishRefund,
   canPlaceAnotherBuildingOfCategory,
@@ -44,6 +52,7 @@ import {
   RecruitVillagerPayload,
   CancelConstructionJobPayload,
   SelectFounderPayload,
+  AdvanceEraPayload,
   PlaceBuildingResponseData,
   RemoveBuildingResponseData,
   UpgradeBuildingResponseData,
@@ -51,6 +60,8 @@ import {
   RecruitVillagerResponseData,
   CancelConstructionJobResponseData,
   SelectFounderResponseData,
+  EraAdvanceStatusResponseData,
+  AdvanceEraResponseData,
 } from '../types/messages.ts';
 import {
   VILLAGE_CAVE_DEFINITION_ID,
@@ -66,6 +77,8 @@ import {
   BUILDING_DEMOLISH_REFUND_RATE,
   CHUNK_WIDTH,
   CHUNK_HEIGHT,
+  INITIAL_CHUNK_COUNT,
+  ERA_ADVANCE_ENABLED,
 } from '../core/civilization/constants.ts';
 import { evaluateExpansion } from '../core/civilization/landExpansion.ts';
 import { calculatePlayerLevel } from '../core/economy/levelSystem.ts';
@@ -89,7 +102,14 @@ export class CivilizationCoordinator {
   private initPromise: Promise<void> | null = null;
   private cachedBonuses: readonly CoinBonus[] = [];
 
-  constructor(private storage: StorageManager) {}
+  constructor(
+    private storage: StorageManager,
+    private options?: { readonly allowEraAdvance?: boolean }
+  ) {}
+
+  private isEraAdvanceEnabled(): boolean {
+    return ERA_ADVANCE_ENABLED || this.options?.allowEraAdvance === true;
+  }
 
   private extractBonusesFromState(state: CivilizationState): readonly CoinBonus[] {
     return extractCivilizationCoinBonuses(
@@ -1086,4 +1106,188 @@ export class CivilizationCoordinator {
       civilizationState: tx.civilization,
     };
   }
+
+  /**
+   * Evaluates current Era advance readiness from authoritative storage.
+   * Returns feature switch flag, current/next Era, eligibility, coin fee, and checklist items.
+   */
+  async getEraAdvanceStatus(): Promise<EraAdvanceStatusResponseData> {
+    const [civilization, economy, dailyStats] = await Promise.all([
+      this.getCivilizationState(),
+      this.storage.getEconomy(),
+      this.storage.getDailyStats(),
+    ]);
+
+    const playerLevel = Math.min(
+      economy.level ?? calculatePlayerLevel(economy.totalXP),
+      calculatePlayerLevel(economy.totalXP)
+    );
+    const totalFocusMinutes = calculateLifetimeFocusMinutes(dailyStats);
+    const landExpansions = Math.max(0, civilization.grid.chunks.length - INITIAL_CHUNK_COUNT);
+
+    const evaluation = evaluateEraAdvance({
+      era: civilization.era,
+      buildings: civilization.buildings,
+      villagers: civilization.villagers,
+      jobs: civilization.jobs,
+      founderRole: civilization.founderRole,
+      landExpansions,
+      playerLevel,
+      totalFocusMinutes,
+      coins: economy.focusCoins,
+    });
+
+    return {
+      enabled: this.isEraAdvanceEnabled(),
+      currentEra: civilization.era,
+      nextEra: evaluation.nextEra,
+      eligible: evaluation.eligible,
+      feeCoins: evaluation.feeCoins,
+      checks: evaluation.checks,
+    };
+  }
+
+  /**
+   * Atomically advances CivilizationState from `fromEra` to `targetEra` under StorageMutex.
+   * - Respects ERA_ADVANCE_ENABLED kill-switch unless explicitly allowed in test/coordinator options.
+   * - Evaluates canonical requirements inside the transaction critical section.
+   * - Deducts exact feeCoins and mutates ONLY `era`, writing strictly fq_civilization + fq_economy.
+   */
+  async advanceEra(payload: AdvanceEraPayload): Promise<AdvanceEraResponseData> {
+    const tx = await this.storage.executeCivilizationTransaction<{
+      previousEra: CivilizationEra;
+      newEra: CivilizationEra;
+      cost: number;
+    }>(({ economy, civilization, dailyStats }) => {
+      if (!this.isEraAdvanceEnabled()) {
+        throw new AppError(
+          'ERA_ADVANCE_DISABLED',
+          'Advancing to the next Era is not yet enabled in this version.'
+        );
+      }
+
+      if (!payload || typeof payload !== 'object') {
+        throw new AppError('ERA_TARGET_INVALID', 'Invalid target Era.');
+      }
+
+      if (typeof payload.fromEra !== 'string' || !isValidEra(payload.fromEra)) {
+        throw new AppError(
+          'ERA_FROM_MISMATCH',
+          `Source Era mismatch (expected ${String(payload.fromEra)}, current: ${civilization.era}).`,
+          { fromEra: String(payload.fromEra), currentEra: civilization.era }
+        );
+      }
+
+      const expectedNext = getNextEra(payload.fromEra);
+      if (
+        typeof payload.targetEra !== 'string' ||
+        !isValidEra(payload.targetEra) ||
+        !expectedNext ||
+        payload.targetEra !== expectedNext
+      ) {
+        throw new AppError(
+          'ERA_TARGET_INVALID',
+          `Invalid target Era ("${String(payload.targetEra)}").`,
+          { targetEra: String(payload.targetEra) }
+        );
+      }
+
+      if (
+        civilization.era === payload.targetEra ||
+        CIVILIZATION_ERAS.indexOf(civilization.era) >= CIVILIZATION_ERAS.indexOf(payload.targetEra)
+      ) {
+        throw new AppError(
+          'ERA_ALREADY_ADVANCED',
+          `Settlement has already advanced to ${civilization.era}.`,
+          { currentEra: civilization.era }
+        );
+      }
+
+      if (civilization.era !== payload.fromEra) {
+        throw new AppError(
+          'ERA_FROM_MISMATCH',
+          `Source Era mismatch (expected ${payload.fromEra}, current: ${civilization.era}).`,
+          { fromEra: payload.fromEra, currentEra: civilization.era }
+        );
+      }
+
+      const playerLevel = Math.min(
+        economy.level ?? calculatePlayerLevel(economy.totalXP),
+        calculatePlayerLevel(economy.totalXP)
+      );
+      const totalFocusMinutes = calculateLifetimeFocusMinutes(dailyStats);
+      const landExpansions = Math.max(0, civilization.grid.chunks.length - INITIAL_CHUNK_COUNT);
+
+      const evaluation = evaluateEraAdvance({
+        era: civilization.era,
+        buildings: civilization.buildings,
+        villagers: civilization.villagers,
+        jobs: civilization.jobs,
+        founderRole: civilization.founderRole,
+        landExpansions,
+        playerLevel,
+        totalFocusMinutes,
+        coins: economy.focusCoins,
+      });
+
+      if (!evaluation.nextEra || evaluation.nextEra !== payload.targetEra) {
+        throw new AppError(
+          'ERA_TARGET_INVALID',
+          `Invalid target Era ("${payload.targetEra}").`,
+          { targetEra: payload.targetEra }
+        );
+      }
+
+      if (!evaluation.eligible) {
+        const unmet = evaluation.checks.filter((c) => !c.met);
+        const unmetIds = unmet.map((c) => c.id);
+        if (unmetIds.length === 1 && unmetIds[0] === 'fee_coins') {
+          throw new AppError(
+            'CIV_INSUFFICIENT_BUILDING_COINS',
+            `Insufficient coins: advancing to ${evaluation.nextEra} costs ${evaluation.feeCoins} Coins (current balance: ${economy.focusCoins}).`,
+            {
+              eraName: evaluation.nextEra,
+              buildingName: evaluation.nextEra,
+              cost: evaluation.feeCoins,
+              balance: economy.focusCoins,
+            }
+          );
+        }
+        throw new AppError(
+          'ERA_REQUIREMENTS_NOT_MET',
+          `Era advance requirements are not met yet (${unmetIds.length} remaining).`,
+          {
+            unmetCheckIds: unmetIds.join(','),
+            missingCount: unmetIds.length,
+          }
+        );
+      }
+
+      const nextCivilization = applyEraAdvance(civilization, payload.fromEra, payload.targetEra);
+      const nextBonuses = this.extractBonusesFromState(nextCivilization);
+
+      return {
+        result: {
+          previousEra: civilization.era,
+          newEra: nextCivilization.era,
+          cost: evaluation.feeCoins,
+        },
+        nextCivilization,
+        deductCoins: evaluation.feeCoins,
+        skipAwardsEvaluation: true,
+        onCommitted: () => {
+          this.cachedBonuses = nextBonuses;
+        },
+      };
+    });
+
+    return {
+      previousEra: tx.result.previousEra,
+      newEra: tx.result.newEra,
+      civilizationState: tx.civilization,
+      economy: tx.economy,
+      cost: tx.result.cost,
+    };
+  }
 }
+

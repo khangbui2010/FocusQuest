@@ -144,6 +144,11 @@ export const ALL_KNOWN_ERROR_CODES: readonly ErrorCode[] = [
   'CIV_INVALID_FOUNDER_PAYLOAD',
   'CIV_FOUNDER_ALREADY_SELECTED',
   'CIV_FOUNDER_NOT_SELECTED',
+  'ERA_ADVANCE_DISABLED',
+  'ERA_REQUIREMENTS_NOT_MET',
+  'ERA_ALREADY_ADVANCED',
+  'ERA_FROM_MISMATCH',
+  'ERA_TARGET_INVALID',
   'INVALID_LANGUAGE',
   'INVALID_CHIME_FLAG',
   'INVALID_MUSIC_PLAYER_EXPANDED_FLAG',
@@ -714,9 +719,16 @@ function translateByErrorCode(
         : `Building "${bName}" requires Era ${reqEra || str('requiredEra')} (current: ${curEra || str('currentEra')})`;
     }
     case 'CIV_INSUFFICIENT_BUILDING_COINS': {
-      const bName = resolveBuildingDisplayByRawName(locale, str('buildingName', 'Building'));
+      const eraRaw = str('eraName');
       const cost = str('cost', '?');
       const balance = str('balance', '?');
+      if (eraRaw) {
+        const eraDisplay = getLocalizedEraName(locale, eraRaw);
+        return isVi
+          ? `Không đủ Coin: nâng lên ${eraDisplay} cần ${cost} Coin (số dư: ${balance}).`
+          : `Insufficient coins: advancing to ${eraDisplay} costs ${cost} Coins (current balance: ${balance}).`;
+      }
+      const bName = resolveBuildingDisplayByRawName(locale, str('buildingName', 'Building'));
       return isVi
         ? `Không đủ Coin: "${bName}" cần ${cost} Coin (số dư: ${balance}).`
         : `Insufficient coins: building "${bName}" costs ${cost} Coins (current balance: ${balance})`;
@@ -977,6 +989,51 @@ function translateByErrorCode(
       return isVi
         ? 'Hãy chọn dân làng khởi đầu trước.'
         : 'Please select your starting villager first.';
+    case 'ERA_ADVANCE_DISABLED':
+      return isVi
+        ? 'Chức năng nâng lên Thời đại tiếp theo chưa được bật trong phiên bản này.'
+        : 'Advancing to the next Era is not yet enabled in this version.';
+    case 'ERA_REQUIREMENTS_NOT_MET': {
+      const missingCount = str('missingCount');
+      return isVi
+        ? missingCount
+          ? `Chưa đủ điều kiện lên Thời đại tiếp theo (còn ${missingCount} mục).`
+          : 'Chưa đủ điều kiện lên Thời đại tiếp theo.'
+        : missingCount
+          ? `Era advance requirements are not met yet (${missingCount} remaining).`
+          : 'Era advance requirements are not met yet.';
+    }
+    case 'ERA_ALREADY_ADVANCED': {
+      const curEra = str('currentEra') ? getLocalizedEraName(locale, str('currentEra')) : '';
+      return isVi
+        ? curEra
+          ? `Khu định cư đã chuyển sang ${curEra} trước đó.`
+          : 'Khu định cư đã chuyển sang Thời đại này trước đó.'
+        : curEra
+          ? `Settlement has already advanced to ${curEra}.`
+          : 'Settlement has already advanced to this Era.';
+    }
+    case 'ERA_FROM_MISMATCH': {
+      const curEra = str('currentEra') ? getLocalizedEraName(locale, str('currentEra')) : '';
+      const fromEra = str('fromEra') ? getLocalizedEraName(locale, str('fromEra')) : '';
+      return isVi
+        ? curEra && fromEra
+          ? `Thời đại nguồn không khớp (yêu cầu ${fromEra}, hiện tại: ${curEra}).`
+          : 'Thời đại nguồn không khớp với Thời đại hiện tại.'
+        : curEra && fromEra
+          ? `Source Era mismatch (expected ${fromEra}, current: ${curEra}).`
+          : 'Source Era does not match the current Era.';
+    }
+    case 'ERA_TARGET_INVALID': {
+      const targetEra = str('targetEra');
+      return isVi
+        ? targetEra
+          ? `Thời đại đích không hợp lệ ("${targetEra}").`
+          : 'Thời đại đích không hợp lệ.'
+        : targetEra
+          ? `Invalid target Era ("${targetEra}").`
+          : 'Invalid target Era.';
+    }
     case 'INVALID_LANGUAGE':
       return isVi ? "Ngôn ngữ không hợp lệ (chỉ hỗ trợ 'en' hoặc 'vi')." : "SET_LANGUAGE requires valid language ('en' | 'vi').";
     case 'INVALID_CHIME_FLAG':

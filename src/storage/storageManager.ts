@@ -684,45 +684,47 @@ export class StorageManager {
         hasChanges = true;
       }
 
-      try {
-        const awardNowMs = Date.now();
-        const baseAwards = sanitizeAwardState(rawAwards);
-        let counters = baseAwards.counters;
-        let countersChanged = false;
-        const buildingsBuiltDelta = outcome.awardCountersDelta?.buildingsBuilt;
-        if (
-          typeof buildingsBuiltDelta === 'number' &&
-          Number.isFinite(buildingsBuiltDelta) &&
-          buildingsBuiltDelta > 0
-        ) {
-          counters = {
-            ...counters,
-            totalBuildingsBuilt: counters.totalBuildingsBuilt + Math.floor(buildingsBuiltDelta),
-          };
-          countersChanged = true;
-        }
-        const rawQuests = await this.adapter.get<unknown>(STORAGE_KEYS.QUESTS);
-        const questsForAwards = sanitizeQuestState(rawQuests, awardNowMs);
-        const evalRes = evaluateAwards(
-          countersChanged ? { ...baseAwards, counters } : baseAwards,
-          {
-            economy: finalEconomy,
-            dailyStats,
-            quests: questsForAwards,
-            civilization: finalCivilization,
-            todayDateKey: getLocalDateKey(awardNowMs),
-            nowMs: awardNowMs,
+      if (!outcome.skipAwardsEvaluation) {
+        try {
+          const awardNowMs = Date.now();
+          const baseAwards = sanitizeAwardState(rawAwards);
+          let counters = baseAwards.counters;
+          let countersChanged = false;
+          const buildingsBuiltDelta = outcome.awardCountersDelta?.buildingsBuilt;
+          if (
+            typeof buildingsBuiltDelta === 'number' &&
+            Number.isFinite(buildingsBuiltDelta) &&
+            buildingsBuiltDelta > 0
+          ) {
+            counters = {
+              ...counters,
+              totalBuildingsBuilt: counters.totalBuildingsBuilt + Math.floor(buildingsBuiltDelta),
+            };
+            countersChanged = true;
           }
-        );
-        if (evalRes.mutated || countersChanged || rawAwards === undefined) {
-          itemsToSet[STORAGE_KEYS.AWARDS] = evalRes.nextState;
-          hasChanges = true;
+          const rawQuests = await this.adapter.get<unknown>(STORAGE_KEYS.QUESTS);
+          const questsForAwards = sanitizeQuestState(rawQuests, awardNowMs);
+          const evalRes = evaluateAwards(
+            countersChanged ? { ...baseAwards, counters } : baseAwards,
+            {
+              economy: finalEconomy,
+              dailyStats,
+              quests: questsForAwards,
+              civilization: finalCivilization,
+              todayDateKey: getLocalDateKey(awardNowMs),
+              nowMs: awardNowMs,
+            }
+          );
+          if (evalRes.mutated || countersChanged || rawAwards === undefined) {
+            itemsToSet[STORAGE_KEYS.AWARDS] = evalRes.nextState;
+            hasChanges = true;
+          }
+        } catch (awardError) {
+          console.warn(
+            '[StorageManager] Isolated awards evaluation failure in civilization transaction:',
+            awardError
+          );
         }
-      } catch (awardError) {
-        console.warn(
-          '[StorageManager] Isolated awards evaluation failure in civilization transaction:',
-          awardError
-        );
       }
 
       if (hasChanges) {
@@ -736,11 +738,12 @@ export class StorageManager {
               [STORAGE_KEYS.ECONOMY]: currentEconomy,
               [STORAGE_KEYS.CIVILIZATION]: currentCivilization,
             };
-            if (rawAwards !== undefined) {
+            if (!outcome.skipAwardsEvaluation && rawAwards !== undefined) {
               restoreItems[STORAGE_KEYS.AWARDS] = rawAwards;
             }
             await this.adapter.setMultiple(restoreItems);
             if (
+              !outcome.skipAwardsEvaluation &&
               rawAwards === undefined &&
               Object.prototype.hasOwnProperty.call(itemsToSet, STORAGE_KEYS.AWARDS)
             ) {
@@ -952,5 +955,6 @@ export interface CivilizationTransactionOutcome<T> {
   readonly awardCountersDelta?: {
     readonly buildingsBuilt?: number;
   };
+  readonly skipAwardsEvaluation?: boolean;
   readonly onCommitted?: (committedCivilization: CivilizationState, committedEconomy: PlayerEconomy) => void;
 }

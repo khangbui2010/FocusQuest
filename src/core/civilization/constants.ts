@@ -46,3 +46,7 @@ export const VILLAGER_WOODWORKER_EXPANSION_DISCOUNT_CAP = 0.4;
 export const VILLAGER_ELDER_UPGRADE_DISCOUNT_RATE = 0.06;
 export const VILLAGER_ELDER_UPGRADE_DISCOUNT_CAP = 0.3;
 export const VILLAGER_COMPLETE_TRIBE_COIN_BONUS = 0.1;
+
+// Milestone 5C-2a: Era Advance feature switch (default OFF until Bronze Age content is ready)
+export const ERA_ADVANCE_ENABLED = false;
+

@@ -3,8 +3,9 @@ import { FocusProfile } from './profiles.ts';
 import { PlayerEconomy } from './economy.ts';
 import { DailyStatRecord, UserSettings } from './storageSchema.ts';
 import { GridCoordinate } from '../core/civilization/types.ts';
-import { BuildingInstance } from '../core/civilization/buildingTypes.ts';
+import { BuildingInstance, CivilizationEra } from '../core/civilization/buildingTypes.ts';
 import { CivilizationState } from '../core/civilization/civilizationState.ts';
+import { EraAdvanceCheckItem } from '../core/civilization/eraRules.ts';
 import { SupportedLocale } from '../i18n/types.ts';
 import { MusicPlayerState, MusicTrack, RepeatMode } from './music.ts';
 import { QuestPeriod, QuestResetCountdown, QuestState } from './quests.ts';
@@ -47,6 +48,8 @@ export type MessageAction =
   | 'RECRUIT_VILLAGER'
   | 'CANCEL_CONSTRUCTION_JOB'
   | 'SELECT_FOUNDER'
+  | 'GET_ERA_ADVANCE_STATUS'
+  | 'ADVANCE_ERA'
   | 'GET_QUEST_STATE'
   | 'CLAIM_QUEST_REWARD'
   | 'GET_AWARDS_STATE'
@@ -223,6 +226,28 @@ export interface SelectFounderResponseData {
   civilizationState: CivilizationState;
 }
 
+export interface AdvanceEraPayload {
+  fromEra: CivilizationEra;
+  targetEra: CivilizationEra;
+}
+
+export interface EraAdvanceStatusResponseData {
+  enabled: boolean;
+  currentEra: CivilizationEra;
+  nextEra: CivilizationEra | null;
+  eligible: boolean;
+  feeCoins: number;
+  checks: readonly EraAdvanceCheckItem[];
+}
+
+export interface AdvanceEraResponseData {
+  previousEra: CivilizationEra;
+  newEra: CivilizationEra;
+  civilizationState: CivilizationState;
+  economy: PlayerEconomy;
+  cost: number;
+}
+
 export interface GetQuestStateResponseData {
   questState: QuestState;
   resetCountdown: QuestResetCountdown;
@@ -265,6 +290,8 @@ export type ExtensionMessage =
   | { action: 'RECRUIT_VILLAGER'; payload: RecruitVillagerPayload }
   | { action: 'CANCEL_CONSTRUCTION_JOB'; payload: CancelConstructionJobPayload }
   | { action: 'SELECT_FOUNDER'; payload: SelectFounderPayload }
+  | { action: 'GET_ERA_ADVANCE_STATUS' }
+  | { action: 'ADVANCE_ERA'; payload: AdvanceEraPayload }
   | { action: 'GET_QUEST_STATE' }
   | { action: 'CLAIM_QUEST_REWARD'; payload: ClaimQuestRewardPayload }
   | { action: 'GET_AWARDS_STATE' }

@@ -4,6 +4,7 @@ import { CivilizationState } from '../../../core/civilization/civilizationState.
 import {
   BuildingDefinition,
   BuildingInstance,
+  CivilizationEra,
 } from '../../../core/civilization/buildingTypes.ts';
 import { GridCoordinate } from '../../../core/civilization/types.ts';
 import { GridMap } from '../../../core/civilization/gridMap.ts';
@@ -17,7 +18,10 @@ import { Villager, findVillageCave } from '../../../core/civilization/villager.t
 import { aggregateCoinBonus } from '../../../core/economy/coinBonus.ts';
 import { calculatePlayerLevel } from '../../../core/economy/levelSystem.ts';
 import { PlayerEconomy } from '../../../types/economy.ts';
-import { FullSessionStateResponse } from '../../../types/messages.ts';
+import {
+  EraAdvanceStatusResponseData,
+  FullSessionStateResponse,
+} from '../../../types/messages.ts';
 import { SessionSnapshot } from '../../../types/session.ts';
 import {
   getCivilizationStateClient,
@@ -28,6 +32,8 @@ import {
   recruitVillagerClient,
   cancelConstructionJobClient,
   selectFounderClient,
+  getEraAdvanceStatusClient,
+  advanceEraClient,
   sendExtensionMessage,
   onStorageChange,
 } from '../../services/extensionClient.ts';
@@ -39,6 +45,7 @@ import { BuildingDetailsModal } from './BuildingDetailsModal.tsx';
 import { ClearingChunkModal } from './ClearingChunkModal.tsx';
 import { LandExpansionModal } from './LandExpansionModal.tsx';
 import { FounderPickerModal } from './FounderPickerModal.tsx';
+import { EraAdvanceModal } from './EraAdvanceModal.tsx';
 import {
   computeLiveSessionElapsedFocusSeconds,
   isLiveFocusTicking,
@@ -118,6 +125,12 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
   const [recruitModalError, setRecruitModalError] = useState<UiErrorPayload | null>(null);
   const [recruitSuccessRole, setRecruitSuccessRole] = useState<VillagerRole | null>(null);
   const [founderModalError, setFounderModalError] = useState<UiErrorPayload | null>(null);
+  const [eraAdvanceStatus, setEraAdvanceStatus] =
+    useState<EraAdvanceStatusResponseData | null>(null);
+  const [isEraModalOpen, setIsEraModalOpen] = useState<boolean>(false);
+  const [eraModalError, setEraModalError] = useState<UiErrorPayload | null>(null);
+  const [eraAdvanceSuccessEra, setEraAdvanceSuccessEra] = useState<CivilizationEra | null>(null);
+  const [eraAdvancePaidCoins, setEraAdvancePaidCoins] = useState<number | null>(null);
   const [activeExpansionReveal, setActiveExpansionReveal] =
     useState<ActiveExpansionReveal | null>(null);
   const [unrevealedChunkOrigin, setUnrevealedChunkOrigin] = useState<GridCoordinate | null>(null);
@@ -131,6 +144,7 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
   const isCinematicAnimatingRef = useRef<boolean>(false);
   const returnTargetRef = useRef<CameraReturnTarget>('NORMAL');
   const isConfirmInFlightRef = useRef<boolean>(false);
+  const isEraAdvanceInFlightRef = useRef<boolean>(false);
   const knownChunkOriginsRef = useRef<GridCoordinate[] | null>(null);
   const revealSequenceIdRef = useRef<number>(0);
   const impactTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -339,11 +353,24 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
     }, EXPANSION_ANIMATION_DURATION_MS);
   }, [civState, clearRevealTimers, t, updateFlowState]);
 
+  const refreshEraAdvanceStatus = useCallback(async () => {
+    try {
+      const eraRes = await getEraAdvanceStatusClient();
+      if (!isMountedRef.current) return;
+      if (eraRes.success && eraRes.data) {
+        setEraAdvanceStatus(eraRes.data);
+      }
+    } catch {
+      // Non-blocking status refresh
+    }
+  }, []);
+
   const loadCivilizationData = useCallback(async () => {
     try {
-      const [civRes, sessionRes] = await Promise.all([
+      const [civRes, sessionRes, eraRes] = await Promise.all([
         getCivilizationStateClient(),
         sendExtensionMessage<FullSessionStateResponse>({ action: 'GET_SESSION_STATE' }),
+        getEraAdvanceStatusClient().catch(() => null),
       ]);
       if (!isMountedRef.current) return;
 
@@ -368,6 +395,10 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
           sessionRes.data.todayStats?.totalFocusMinutes ??
           0;
         setFetchedLifetimeMinutes(lifetime);
+      }
+
+      if (eraRes && eraRes.success && eraRes.data) {
+        setEraAdvanceStatus(eraRes.data);
       }
     } catch (err) {
       if (!isMountedRef.current) return;
@@ -434,7 +465,11 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      if (inspectedClearingJobId) {
+      if (isEraModalOpen) {
+        if (!isSubmitting && !isEraAdvanceInFlightRef.current) {
+          setIsEraModalOpen(false);
+        }
+      } else if (inspectedClearingJobId) {
         setInspectedClearingJobId(null);
       } else if (inspectedBuilding) {
         setInspectedBuilding(null);
@@ -456,6 +491,8 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
+    isEraModalOpen,
+    isSubmitting,
     inspectedClearingJobId,
     inspectedBuilding,
     selectedExpansionOrigin,
@@ -595,7 +632,7 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
         setCivState(res.data.civilizationState);
         setEconomy(res.data.economy);
         setPlacementDef(null);
-        await onStateMutated?.();
+        await Promise.all([refreshEraAdvanceStatus(), onStateMutated?.()]);
       } else {
         setErrorMsg({
           message: res.error || 'Could not place building at that location.',
@@ -628,7 +665,7 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
         setInspectedBuilding(null);
         setUpgradeModalError(null);
         setUpgradeSuccessLevel(null);
-        await onStateMutated?.();
+        await Promise.all([refreshEraAdvanceStatus(), onStateMutated?.()]);
       } else {
         setErrorMsg({
           message: res.error || 'Could not remove building.',
@@ -660,7 +697,7 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
         setEconomy(res.data.economy);
         setInspectedBuilding(res.data.building);
         setUpgradeSuccessLevel(res.data.newLevel);
-        await onStateMutated?.();
+        await Promise.all([refreshEraAdvanceStatus(), onStateMutated?.()]);
       } else {
         setUpgradeModalError({
           message: res.error || 'Could not upgrade building.',
@@ -697,7 +734,7 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
         ) {
           setInspectedBuilding(null);
         }
-        await onStateMutated?.();
+        await Promise.all([refreshEraAdvanceStatus(), onStateMutated?.()]);
       } else {
         setErrorMsg({
           message: res.error || 'Could not cancel construction job.',
@@ -731,7 +768,7 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
         setEconomy(res.data.economy);
         setRecruitSuccessRole(res.data.villager.role);
         enqueueVillagerCaveEntry(res.data.villager, res.data.civilizationState);
-        await onStateMutated?.();
+        await Promise.all([refreshEraAdvanceStatus(), onStateMutated?.()]);
       } else {
         setRecruitModalError({
           message: res.error || 'Could not recruit villager.',
@@ -761,7 +798,7 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
       if (!isMountedRef.current) return;
       if (res.success && res.data) {
         setCivState(res.data.civilizationState);
-        await onStateMutated?.();
+        await Promise.all([refreshEraAdvanceStatus(), onStateMutated?.()]);
       } else {
         setFounderModalError({
           message: res.error || 'SELECT_FOUNDER requires a valid villager role.',
@@ -775,6 +812,60 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
         toUiErrorPayload(err, 'CIV_INVALID_FOUNDER_PAYLOAD', 'Failed to select starting villager.')
       );
     } finally {
+      if (isMountedRef.current) {
+        setIsSubmitting(false);
+      }
+    }
+  };
+
+  const handleOpenEraModal = () => {
+    if (isManualCameraLocked(flowStateRef.current) || isSubmitting) return;
+    setErrorMsg(null);
+    setEraModalError(null);
+    setEraAdvanceSuccessEra(null);
+    setEraAdvancePaidCoins(null);
+    setIsCatalogOpen(false);
+    setInspectedBuilding(null);
+    setInspectedClearingJobId(null);
+    setIsEraModalOpen(true);
+    void refreshEraAdvanceStatus();
+  };
+
+  const handleAdvanceEra = async (fromEra: CivilizationEra, targetEra: CivilizationEra) => {
+    if (
+      isSubmitting ||
+      isEraAdvanceInFlightRef.current ||
+      isExpansionFlowActive(flowStateRef.current)
+    ) {
+      return;
+    }
+    isEraAdvanceInFlightRef.current = true;
+    setIsSubmitting(true);
+    setEraModalError(null);
+    try {
+      const res = await advanceEraClient({ fromEra, targetEra });
+      if (!isMountedRef.current) return;
+      if (res.success && res.data) {
+        setCivState(res.data.civilizationState);
+        setEconomy(res.data.economy);
+        setEraAdvanceSuccessEra(res.data.newEra);
+        setEraAdvancePaidCoins(res.data.cost);
+        await Promise.all([refreshEraAdvanceStatus(), onStateMutated?.()]);
+      } else {
+        setEraModalError({
+          message: res.error || 'Advancing to the next Era is not yet enabled in this version.',
+          code: res.errorCode ?? 'ERA_ADVANCE_DISABLED',
+          params: res.errorParams,
+        });
+        await refreshEraAdvanceStatus();
+      }
+    } catch (err) {
+      if (!isMountedRef.current) return;
+      setEraModalError(
+        toUiErrorPayload(err, 'ERA_ADVANCE_DISABLED', 'Could not advance Era.')
+      );
+    } finally {
+      isEraAdvanceInFlightRef.current = false;
       if (isMountedRef.current) {
         setIsSubmitting(false);
       }
@@ -865,7 +956,7 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
           setSelectedExpansionOrigin(null);
           updateFlowState('CAMERA_RETURNING');
         }
-        await onStateMutated?.();
+        await Promise.all([refreshEraAdvanceStatus(), onStateMutated?.()]);
       } else {
         setErrorMsg({
           message: res.error || 'Could not expand territory.',
@@ -913,6 +1004,9 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
         isExpansionLocked={isExpansionLocked}
         canCancelExpansion={canCancelExpansion}
         onCancelExpansion={handleCancelExpansionMode}
+        onOpenEraModal={handleOpenEraModal}
+        eraAdvanceEligible={Boolean(eraAdvanceStatus?.eligible)}
+        eraAdvanceEnabled={Boolean(eraAdvanceStatus?.enabled)}
       />
 
       {errorMsg && (
@@ -1054,6 +1148,24 @@ export const CivilizationScreen: React.FC<CivilizationScreenProps> = ({
         onSelectFounder={handleSelectFounder}
         isSubmitting={isSubmitting}
         error={founderModalError}
+      />
+
+      <EraAdvanceModal
+        isOpen={isEraModalOpen}
+        currentEra={civState?.era ?? 'STONE_AGE'}
+        status={eraAdvanceStatus}
+        onClose={() => {
+          if (isSubmitting || isEraAdvanceInFlightRef.current) return;
+          setIsEraModalOpen(false);
+          setEraModalError(null);
+          setEraAdvanceSuccessEra(null);
+          setEraAdvancePaidCoins(null);
+        }}
+        onAdvanceEra={handleAdvanceEra}
+        isSubmitting={isSubmitting}
+        error={eraModalError}
+        successEra={eraAdvanceSuccessEra}
+        paidFeeCoins={eraAdvancePaidCoins}
       />
     </div>
   );

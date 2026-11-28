@@ -10,6 +10,7 @@ import {
   RecruitVillagerPayload,
   CancelConstructionJobPayload,
   SelectFounderPayload,
+  AdvanceEraPayload,
   PlaceBuildingResponseData,
   RemoveBuildingResponseData,
   UpgradeBuildingResponseData,
@@ -17,6 +18,8 @@ import {
   RecruitVillagerResponseData,
   CancelConstructionJobResponseData,
   SelectFounderResponseData,
+  EraAdvanceStatusResponseData,
+  AdvanceEraResponseData,
   MusicStateResponseData,
   MusicPlayPayload,
   MusicSeekPayload,
@@ -71,17 +74,24 @@ import { MultiplierRules } from '../../core/reward/multiplierRules.ts';
 import {
   CivilizationState,
   createInitialCivilizationState,
+  isValidEra,
 } from '../../core/civilization/civilizationState.ts';
 import { GridMap } from '../../core/civilization/gridMap.ts';
 import {
   BUILDING_DEMOLISH_REFUND_RATE,
   CHUNK_WIDTH,
   CHUNK_HEIGHT,
+  INITIAL_CHUNK_COUNT,
+  ERA_ADVANCE_ENABLED,
 } from '../../core/civilization/constants.ts';
 import { isValidCoordinate } from '../../core/civilization/placementValidator.ts';
 import { evaluateExpansion } from '../../core/civilization/landExpansion.ts';
 import { getBuildingDefinition } from '../../core/civilization/buildingCatalog.ts';
-import { BuildingInstance, isEraUnlocked } from '../../core/civilization/buildingTypes.ts';
+import {
+  BuildingInstance,
+  CIVILIZATION_ERAS,
+  isEraUnlocked,
+} from '../../core/civilization/buildingTypes.ts';
 import {
   calculateBuildingDemolishRefund,
   canPlaceAnotherBuildingOfCategory,
@@ -113,13 +123,22 @@ import { calculatePlayerLevel } from '../../core/economy/levelSystem.ts';
 import { DEFAULT_REWARD_CONFIG, RewardEngine } from '../../core/reward/rewardEngine.ts';
 import { extractCivilizationCoinBonuses } from '../../core/civilization/civilizationBonusHelper.ts';
 import { getVillagerBuffSummary } from '../../core/civilization/villagerBuffs.ts';
-import { getEffectiveMaxLevel } from '../../core/civilization/eraRules.ts';
+import {
+  applyEraAdvance,
+  evaluateEraAdvance,
+  getEffectiveMaxLevel,
+  getNextEra,
+} from '../../core/civilization/eraRules.ts';
 import { getCoinBonusMultiplier } from '../../core/economy/coinBonus.ts';
 import { TimeCalculator } from '../../core/timer/timeCalculator.ts';
 import { isSupportedLocale } from '../../i18n/translator.ts';
 import { DomainNormalizer } from '../../core/profiles/domainNormalizer.ts';
 import { getLocalDateKey } from '../../core/utils/dateUtils.ts';
-import { addDaysToDateKey, isValidDateKey } from '../../core/stats/statsAggregator.ts';
+import {
+  addDaysToDateKey,
+  calculateLifetimeFocusMinutes,
+  isValidDateKey,
+} from '../../core/stats/statsAggregator.ts';
 import { ALL_QUEST_DEFINITIONS, getQuestDefinition } from '../../core/quests/questCatalog.ts';
 import { getResetCountdown } from '../../core/quests/questDates.ts';
 import {
@@ -464,6 +483,35 @@ function buildMockAwardContext(nowMs: number): AwardEvaluationContext {
     todayDateKey: getLocalDateKey(nowMs),
     nowMs,
   };
+}
+
+let mockEraAdvanceEnabledForTest = false;
+
+export function setMockEraAdvanceEnabledForTest(enabled: boolean): void {
+  mockEraAdvanceEnabledForTest = enabled;
+}
+
+function getMockEraAdvanceEvaluation(nowMs: number) {
+  const dailyStats = getSimulatedDailyStatsMap(nowMs);
+  const playerLevel = Math.min(
+    mockState.economy.level ?? calculatePlayerLevel(mockState.economy.totalXP),
+    calculatePlayerLevel(mockState.economy.totalXP)
+  );
+  const totalFocusMinutes = mockCustomDailyStats
+    ? calculateLifetimeFocusMinutes(dailyStats)
+    : mockState.lifetimeFocusMinutes ?? calculateLifetimeFocusMinutes(dailyStats);
+  const landExpansions = Math.max(0, mockCivilizationState.grid.chunks.length - INITIAL_CHUNK_COUNT);
+  return evaluateEraAdvance({
+    era: mockCivilizationState.era,
+    buildings: mockCivilizationState.buildings,
+    villagers: mockCivilizationState.villagers,
+    jobs: mockCivilizationState.jobs,
+    founderRole: mockCivilizationState.founderRole,
+    landExpansions,
+    playerLevel,
+    totalFocusMinutes,
+    coins: mockState.economy.focusCoins,
+  });
 }
 
 function countNewlyCompletedPlaceJobs(
@@ -2818,6 +2866,149 @@ function simulateMessageResponse<T>(message: ExtensionMessage): MessageResponse<
       };
     }
 
+    case 'GET_ERA_ADVANCE_STATUS': {
+      const evaluation = getMockEraAdvanceEvaluation(now);
+      const data: EraAdvanceStatusResponseData = {
+        enabled: ERA_ADVANCE_ENABLED || mockEraAdvanceEnabledForTest,
+        currentEra: mockCivilizationState.era,
+        nextEra: evaluation.nextEra,
+        eligible: evaluation.eligible,
+        feeCoins: evaluation.feeCoins,
+        checks: evaluation.checks,
+      };
+      return {
+        success: true,
+        data: data as unknown as T,
+      };
+    }
+
+    case 'ADVANCE_ERA': {
+      if (!(ERA_ADVANCE_ENABLED || mockEraAdvanceEnabledForTest)) {
+        return {
+          success: false,
+          error: 'Advancing to the next Era is not yet enabled in this version.',
+          errorCode: 'ERA_ADVANCE_DISABLED',
+        };
+      }
+
+      const payload = (message as { payload?: AdvanceEraPayload }).payload;
+      if (!payload || typeof payload !== 'object') {
+        return {
+          success: false,
+          error: 'Invalid target Era.',
+          errorCode: 'ERA_TARGET_INVALID',
+        };
+      }
+
+      if (typeof payload.fromEra !== 'string' || !isValidEra(payload.fromEra)) {
+        return {
+          success: false,
+          error: `Source Era mismatch (expected ${String(payload.fromEra)}, current: ${mockCivilizationState.era}).`,
+          errorCode: 'ERA_FROM_MISMATCH',
+          errorParams: { fromEra: String(payload.fromEra), currentEra: mockCivilizationState.era },
+        };
+      }
+
+      const expectedNext = getNextEra(payload.fromEra);
+      if (
+        typeof payload.targetEra !== 'string' ||
+        !isValidEra(payload.targetEra) ||
+        !expectedNext ||
+        payload.targetEra !== expectedNext
+      ) {
+        return {
+          success: false,
+          error: `Invalid target Era ("${String(payload.targetEra)}").`,
+          errorCode: 'ERA_TARGET_INVALID',
+          errorParams: { targetEra: String(payload.targetEra) },
+        };
+      }
+
+      if (
+        mockCivilizationState.era === payload.targetEra ||
+        CIVILIZATION_ERAS.indexOf(mockCivilizationState.era) >=
+          CIVILIZATION_ERAS.indexOf(payload.targetEra)
+      ) {
+        return {
+          success: false,
+          error: `Settlement has already advanced to ${mockCivilizationState.era}.`,
+          errorCode: 'ERA_ALREADY_ADVANCED',
+          errorParams: { currentEra: mockCivilizationState.era },
+        };
+      }
+
+      if (mockCivilizationState.era !== payload.fromEra) {
+        return {
+          success: false,
+          error: `Source Era mismatch (expected ${payload.fromEra}, current: ${mockCivilizationState.era}).`,
+          errorCode: 'ERA_FROM_MISMATCH',
+          errorParams: { fromEra: payload.fromEra, currentEra: mockCivilizationState.era },
+        };
+      }
+
+      const evaluation = getMockEraAdvanceEvaluation(now);
+      if (!evaluation.nextEra || evaluation.nextEra !== payload.targetEra) {
+        return {
+          success: false,
+          error: `Invalid target Era ("${payload.targetEra}").`,
+          errorCode: 'ERA_TARGET_INVALID',
+          errorParams: { targetEra: payload.targetEra },
+        };
+      }
+
+      if (!evaluation.eligible) {
+        const unmet = evaluation.checks.filter((c) => !c.met);
+        const unmetIds = unmet.map((c) => c.id);
+        if (unmetIds.length === 1 && unmetIds[0] === 'fee_coins') {
+          return {
+            success: false,
+            error: `Insufficient coins: advancing to ${evaluation.nextEra} costs ${evaluation.feeCoins} Coins (current balance: ${mockState.economy.focusCoins}).`,
+            errorCode: 'CIV_INSUFFICIENT_BUILDING_COINS',
+            errorParams: {
+              eraName: evaluation.nextEra,
+              buildingName: evaluation.nextEra,
+              cost: evaluation.feeCoins,
+              balance: mockState.economy.focusCoins,
+            },
+          };
+        }
+        return {
+          success: false,
+          error: `Era advance requirements are not met yet (${unmetIds.length} remaining).`,
+          errorCode: 'ERA_REQUIREMENTS_NOT_MET',
+          errorParams: {
+            unmetCheckIds: unmetIds.join(','),
+            missingCount: unmetIds.length,
+          },
+        };
+      }
+
+      const previousEra = mockCivilizationState.era;
+      const nextCivilization = applyEraAdvance(
+        mockCivilizationState,
+        payload.fromEra,
+        payload.targetEra
+      );
+      mockState.economy = {
+        ...mockState.economy,
+        focusCoins: mockState.economy.focusCoins - evaluation.feeCoins,
+      };
+      mockCivilizationState = nextCivilization;
+
+      const resData: AdvanceEraResponseData = {
+        previousEra,
+        newEra: nextCivilization.era,
+        civilizationState: mockCivilizationState,
+        economy: { ...mockState.economy },
+        cost: evaluation.feeCoins,
+      };
+
+      return {
+        success: true,
+        data: resData as unknown as T,
+      };
+    }
+
     case 'SET_LANGUAGE': {
       const payload = (message as { payload?: { language?: unknown } }).payload;
       if (!payload || !isSupportedLocale(payload.language)) {
@@ -3336,6 +3527,29 @@ export async function cancelConstructionJobClient(
 ): Promise<MessageResponse<CancelConstructionJobResponseData>> {
   return sendExtensionMessage<CancelConstructionJobResponseData>({
     action: 'CANCEL_CONSTRUCTION_JOB',
+    payload,
+  });
+}
+
+/**
+ * Typed client helper: query Era Advance status & requirements checklist.
+ */
+export async function getEraAdvanceStatusClient(): Promise<
+  MessageResponse<EraAdvanceStatusResponseData>
+> {
+  return sendExtensionMessage<EraAdvanceStatusResponseData>({
+    action: 'GET_ERA_ADVANCE_STATUS',
+  });
+}
+
+/**
+ * Typed client helper: advance CivilizationEra atomically.
+ */
+export async function advanceEraClient(
+  payload: AdvanceEraPayload
+): Promise<MessageResponse<AdvanceEraResponseData>> {
+  return sendExtensionMessage<AdvanceEraResponseData>({
+    action: 'ADVANCE_ERA',
     payload,
   });
 }

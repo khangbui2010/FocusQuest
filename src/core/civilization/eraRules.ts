@@ -23,6 +23,8 @@ import {
   VillagerRole,
 } from '../../ui/components/civilization/spriteRegistry.ts';
 import { ConstructionJob, isBuildingUnderConstruction } from './jobs.ts';
+import type { CivilizationState } from './civilizationState.ts';
+import { AppError } from '../../types/errors.ts';
 
 function isValidEraLocal(era: unknown): era is CivilizationEra {
   return typeof era === 'string' && CIVILIZATION_ERAS.includes(era as CivilizationEra);
@@ -321,3 +323,80 @@ export function evaluateEraAdvance(input: EvaluateEraAdvanceInput | null | undef
     checks,
   };
 }
+
+/**
+ * Returns the immediate sequential next Era after `era`, or null if invalid or final Era.
+ */
+export function getNextEra(era: CivilizationEra | unknown): CivilizationEra | null {
+  if (!isValidEraLocal(era)) {
+    return null;
+  }
+  const idx = CIVILIZATION_ERAS.indexOf(era);
+  if (idx < 0 || idx + 1 >= CIVILIZATION_ERAS.length) {
+    return null;
+  }
+  return CIVILIZATION_ERAS[idx + 1];
+}
+
+function getEraIndex(era: CivilizationEra | unknown): number {
+  if (!isValidEraLocal(era)) {
+    return -1;
+  }
+  return CIVILIZATION_ERAS.indexOf(era);
+}
+
+/**
+ * Pure, deterministic Era transition helper for CivilizationState.
+ * Validates sequential fromEra -> targetEra transition and current state.era,
+ * returning a shallow-copied CivilizationState with ONLY `era` updated.
+ * Never mutates inputs, never touches buildings/grid/villagers/jobs/founderRole/lastUpdated,
+ * and never calls Date.now() or Math.random().
+ */
+export function applyEraAdvance(
+  state: CivilizationState,
+  fromEra: CivilizationEra,
+  targetEra: CivilizationEra
+): CivilizationState {
+  if (!isValidEraLocal(fromEra)) {
+    throw new AppError('ERA_FROM_MISMATCH', `Invalid source Era ("${String(fromEra)}").`, {
+      fromEra: String(fromEra),
+      currentEra: state && typeof state === 'object' ? String(state.era) : '',
+    });
+  }
+
+  const expectedNext = getNextEra(fromEra);
+  if (!isValidEraLocal(targetEra) || !expectedNext || targetEra !== expectedNext) {
+    throw new AppError('ERA_TARGET_INVALID', `Invalid target Era ("${String(targetEra)}").`, {
+      targetEra: String(targetEra),
+    });
+  }
+
+  if (!state || typeof state !== 'object' || !isValidEraLocal(state.era)) {
+    throw new AppError('ERA_FROM_MISMATCH', 'Invalid current civilization Era.', {
+      fromEra,
+      currentEra: state && typeof state === 'object' ? String((state as { era?: unknown }).era) : '',
+    });
+  }
+
+  if (state.era === targetEra || getEraIndex(state.era) >= getEraIndex(targetEra)) {
+    throw new AppError(
+      'ERA_ALREADY_ADVANCED',
+      `Settlement has already advanced to ${state.era}.`,
+      { currentEra: state.era }
+    );
+  }
+
+  if (state.era !== fromEra) {
+    throw new AppError(
+      'ERA_FROM_MISMATCH',
+      `Source Era mismatch (expected ${fromEra}, current: ${state.era}).`,
+      { fromEra, currentEra: state.era }
+    );
+  }
+
+  return {
+    ...state,
+    era: targetEra,
+  };
+}
+

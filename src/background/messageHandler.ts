@@ -534,6 +534,37 @@ export class MessageHandler {
           return { success: true, data: result };
         }
 
+        case 'GET_ERA_ADVANCE_STATUS': {
+          const status = await this.civilizationCoordinator.getEraAdvanceStatus();
+          return { success: true, data: status };
+        }
+
+        case 'ADVANCE_ERA': {
+          if (!msg.payload || typeof msg.payload !== 'object') {
+            return {
+              success: false,
+              error: 'Invalid target Era.',
+              errorCode: 'ERA_TARGET_INVALID',
+            };
+          }
+          if (typeof msg.payload.fromEra !== 'string' || !msg.payload.fromEra.trim()) {
+            return {
+              success: false,
+              error: 'Source Era does not match the current Era.',
+              errorCode: 'ERA_FROM_MISMATCH',
+            };
+          }
+          if (typeof msg.payload.targetEra !== 'string' || !msg.payload.targetEra.trim()) {
+            return {
+              success: false,
+              error: 'Invalid target Era.',
+              errorCode: 'ERA_TARGET_INVALID',
+            };
+          }
+          const result = await this.civilizationCoordinator.advanceEra(msg.payload);
+          return { success: true, data: result };
+        }
+
         // --- Quest Actions ---
         case 'GET_QUEST_STATE': {
           const questData = await this.questCoordinator.getQuestState();
